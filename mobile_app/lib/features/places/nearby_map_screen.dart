@@ -2119,11 +2119,11 @@ class _WeatherGridPoint {
 
   factory _WeatherGridPoint.fromJson(Map<String, dynamic> json) {
     return _WeatherGridPoint(
-      lat: (json['lat'] as num).toDouble(),
-      lng: (json['lng'] as num).toDouble(),
-      code: json['code'] as int,
-      temp: (json['temp'] as num?)?.toDouble(),
-      precip: (json['precip'] as num?)?.toDouble(),
+      lat: (json['lat'] is num ? (json['lat'] as num).toDouble() : double.tryParse(json['lat']?.toString() ?? '')) ?? 0.0,
+      lng: (json['lng'] is num ? (json['lng'] as num).toDouble() : double.tryParse(json['lng']?.toString() ?? '')) ?? 0.0,
+      code: json['code'] is int ? json['code'] as int : int.tryParse(json['code']?.toString() ?? '') ?? 0,
+      temp: (json['temp'] is num ? (json['temp'] as num).toDouble() : double.tryParse(json['temp']?.toString() ?? '')),
+      precip: (json['precip'] is num ? (json['precip'] as num).toDouble() : double.tryParse(json['precip']?.toString() ?? '')),
     );
   }
 }

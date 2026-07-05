@@ -120,11 +120,11 @@ class _UserPublicProfileScreenState extends State<UserPublicProfileScreen> {
     final levelName = p['level_name'] as String? ?? 'Explorer';
     final nextLevelName = p['next_level_name'] as String? ?? '';
     final nextLevelXp = p['next_level_xp'] as int? ?? 50;
-    final levelProgress = (p['level_progress'] as num?)?.toDouble() ?? 0.0;
-    final rank = p['rank'] as int? ?? 0;
-    final totalReports = p['total_reports'] as int? ?? 0;
-    final approvedReports = p['approved_reports'] as int? ?? 0;
-    final approvalRate = p['approval_rate'] as num? ?? 0;
+    final levelProgress = (p['level_progress'] is num ? (p['level_progress'] as num).toDouble() : double.tryParse(p['level_progress']?.toString() ?? '')) ?? 0.0;
+    final rank = p['rank'] is int ? p['rank'] as int : int.tryParse(p['rank']?.toString() ?? '') ?? 0;
+    final totalReports = p['total_reports'] is int ? p['total_reports'] as int : int.tryParse(p['total_reports']?.toString() ?? '') ?? 0;
+    final approvedReports = p['approved_reports'] is int ? p['approved_reports'] as int : int.tryParse(p['approved_reports']?.toString() ?? '') ?? 0;
+    final approvalRate = p['approval_rate'] is num ? p['approval_rate'] as num : num.tryParse(p['approval_rate']?.toString() ?? '') ?? 0;
     final badges = p['badges'] as List? ?? [];
     final recentReports = p['recent_reports'] as List? ?? [];
     final isOwnProfile = context.read<AuthProvider>().user?.id == widget.userId;
