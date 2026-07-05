@@ -114,6 +114,9 @@ class LocationService {
       }, onError: (err) {
         sub?.cancel();
         if (!completer.isCompleted) completer.complete(best);
+      }, onDone: () {
+        sub?.cancel();
+        if (!completer.isCompleted) completer.complete(best);
       });
 
       final result = await completer.future;
@@ -165,6 +168,9 @@ class LocationService {
     }, onError: (err) {
       sub?.cancel();
       if (!completer.isCompleted) completer.complete(bestPosition);
+    }, onDone: () {
+      sub?.cancel();
+      if (!completer.isCompleted) completer.complete(bestPosition);
     });
 
     final result = await completer.future;
@@ -181,7 +187,7 @@ class LocationService {
         return _currentAddress;
       }
     } catch (e) {
-      // Silently fail
+      print('⚠️ Geocoding failed: $e');
     }
     return null;
   }

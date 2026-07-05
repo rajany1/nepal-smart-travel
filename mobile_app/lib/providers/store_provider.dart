@@ -25,7 +25,7 @@ class SponsorInfo {
 
   factory SponsorInfo.fromJson(Map<String, dynamic> json) {
     return SponsorInfo(
-      id: json['id'],
+      id: json['id'] ?? 0,
       name: json['name'] ?? '',
       logo: json['logo'],
       description: json['description'],
@@ -76,7 +76,7 @@ class ShopItem {
   factory ShopItem.fromJson(Map<String, dynamic> json) {
     final sponsorJson = json['sponsor'];
     return ShopItem(
-      id: json['id'],
+      id: json['id'] ?? 0,
       name: json['name'] ?? '',
       description: json['description'],
       icon: json['icon'] ?? 'fa-gift',
@@ -174,8 +174,8 @@ class Purchase {
     final shopItemJson = json['shop_item'] ?? json['shopItem'];
     final shopCodeJson = json['shop_code'] ?? json['shopCode'];
     return Purchase(
-      id: json['id'],
-      userId: json['user_id'],
+      id: json['id'] ?? 0,
+      userId: json['user_id'] ?? 0,
       shopItemId: json['shop_item_id'],
       xpSpent: json['xp_spent'] ?? 0,
       status: json['status'] ?? 'pending',
@@ -229,7 +229,9 @@ class StoreProvider extends ChangeNotifier {
       final List<dynamic> data = response.data['data'] ?? [];
       _purchases = data.map((j) => Purchase.fromJson(j)).toList();
       notifyListeners();
-    } catch (_) {}
+    } catch (e) {
+      print('❌ Failed to load purchases: $e');
+    }
   }
 
   Future<Map<String, dynamic>?> purchaseItem(int itemId) async {

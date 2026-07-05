@@ -8,6 +8,7 @@ use App\Models\PlaceReview;
 use App\Models\PlaceCategories;
 use App\Helpers\GeoHelper;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Str;
 
 class PlaceController extends Controller
 {
@@ -41,7 +42,7 @@ class PlaceController extends Controller
         $maxLng = $request->max_lng;
         $limit = $request->limit ?? 100;
 
-        $query = Place::with('category')->active()
+        $query = Place::with(['category', 'images'])->active()
             ->whereBetween('latitude', [$minLat, $maxLat])
             ->whereBetween('longitude', [$minLng, $maxLng]);
 
@@ -98,7 +99,7 @@ class PlaceController extends Controller
         $radius = $request->radius_km ?? 5.0;
         $limit = $request->limit ?? 50;
 
-        $query = Place::query()->with('category')->active();
+        $query = Place::query()->with(['category', 'images'])->active();
 
         if ($request->filled('category_id')) {
             $query->where('category_id', $request->category_id);
@@ -195,7 +196,7 @@ class PlaceController extends Controller
         $osmPlaces = array_values($osmPlaces);
 
         // 2. Fetch Admin places with Haversine distance
-        $adminQuery = Place::with('category')->active()
+        $adminQuery = Place::with(['category', 'images'])->active()
             ->selectRaw(
                 "*, (6371 * acos(cos(radians(?)) * cos(radians(latitude)) * cos(radians(longitude) - radians(?)) + sin(radians(?)) * sin(radians(latitude)))) AS distance",
                 [$lat, $lng, $lat]
@@ -616,7 +617,7 @@ class PlaceController extends Controller
                 'place_id' => (string)$place->id,
                 'user_id' => (string)$user->id,
                 'user_name' => $user->name ?? $user->email,
-                'user_avatar' => $user->avatar_url,
+                'user_avatar' => $user->avatar,
                 'title' => $review->title,
                 'description' => $review->description,
                 'rating' => $review->rating,
@@ -625,6 +626,37 @@ class PlaceController extends Controller
                 'average_rating' => round((float)$place->average_rating, 1),
                 'total_reviews' => $place->total_reviews,
             ],
+        ]);
+    }
+
+    public function reviews($id)
+    {
+        if (str_starts_with($id, 'osm_')) {
+            $osmId = substr($id, 4);
+            $place = Place::where('osm_id', $osmId)->first();
+            if (!$place) {
+                return response()->json(['success' => true, 'data' => []]);
+            }
+            $id = (string) $place->id;
+        }
+
+        $reviews = PlaceReview::with('user')
+            ->where('place_id', $id)
+            ->latest()
+            ->get()
+            ->map(fn($review) => [
+                'id' => (string) $review->id,
+                'title' => $review->title,
+                'description' => $review->description,
+                'rating' => (int) $review->rating,
+                'user_name' => $review->user?->name ?? 'Anonymous',
+                'user_avatar' => $review->user?->avatar,
+                'created_at' => $review->created_at->toIso8601String(),
+            ]);
+
+        return response()->json([
+            'success' => true,
+            'data' => $reviews,
         ]);
     }
 

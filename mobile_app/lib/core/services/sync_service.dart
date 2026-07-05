@@ -56,7 +56,11 @@ class SyncService {
     try {
       final pendingItems = await _offlineDb.getPendingSyncItems(limit: 20);
       for (final item in pendingItems) {
-        await _processSyncItem(item);
+        try {
+          await _processSyncItem(item);
+        } catch (e) {
+          print('⚠️ Sync item failed (continuing): $e');
+        }
       }
     } catch (e) {
       print('Sync error: $e');

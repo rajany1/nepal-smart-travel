@@ -65,9 +65,14 @@ class AlertController extends Controller
 
     public function nearby(Request $request)
     {
-        $lat = (float) $request->input('lat');
-        $lng = (float) $request->input('lng');
-        $radiusKm = (float) ($request->input('radius_km', 20));
+        $validated = $request->validate([
+            'lat' => 'required|numeric|between:-90,90',
+            'lng' => 'required|numeric|between:-180,180',
+            'radius_km' => 'nullable|numeric|min:0.1|max:500',
+        ]);
+        $lat = (float) $validated['lat'];
+        $lng = (float) $validated['lng'];
+        $radiusKm = (float) ($validated['radius_km'] ?? 20);
 
         $latDelta = $radiusKm / 111.0;
         $lngDelta = $radiusKm / (111.0 * cos(deg2rad($lat)));
@@ -121,6 +126,32 @@ class AlertController extends Controller
         return response()->json([
             'success' => true,
             'data' => $items,
+        ]);
+    }
+
+    public function roadConditions(Request $request)
+    {
+        $query = \App\Models\RoadCondition::query();
+
+        if ($request->filled('district')) {
+            $query->where('district', $request->district);
+        }
+        if ($request->filled('severity')) {
+            $query->where('severity', $request->severity);
+        }
+        if ($request->filled('lat') && $request->filled('lng')) {
+            $lat = (float) $request->lat;
+            $lng = (float) $request->lng;
+            $radiusKm = (float) ($request->input('radius_km', 20));
+            $latDelta = $radiusKm / 111.0;
+            $lngDelta = $radiusKm / (111.0 * cos(deg2rad($lat)));
+            $query->whereBetween('latitude', [$lat - $latDelta, $lat + $latDelta])
+                  ->whereBetween('longitude', [$lng - $lngDelta, $lng + $lngDelta]);
+        }
+
+        return response()->json([
+            'success' => true,
+            'data' => $query->latest()->limit(50)->get(),
         ]);
     }
 

@@ -56,9 +56,8 @@ class SessionManager {
   Future<String?> getAccessToken() async {
     final token = await _storage.read(key: _tokenKey);
     
-    // Check if token has expired
+    // Check if token has expired — return null so interceptor can attempt refresh
     if (token != null && await _isSessionExpired()) {
-      await clearSession();
       return null;
     }
     

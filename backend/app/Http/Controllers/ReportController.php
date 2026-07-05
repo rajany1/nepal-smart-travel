@@ -523,35 +523,32 @@ class ReportController extends Controller
         $report = Report::findOrFail($id);
         $user = $request->user();
 
-        // Use updateOrCreate to prevent race conditions (TOCTOU)
-        $reaction = ReportReaction::updateOrCreate(
-            [
-                'report_id' => $report->id,
-                'user_id' => $user->id,
-            ],
-            [
-                'reaction_type' => $request->reaction_type,
-            ]
-        );
+        // Check existing reaction before modifying
+        $existing = ReportReaction::where('report_id', $report->id)
+            ->where('user_id', $user->id)
+            ->first();
 
-        $wasRecentlyCreated = $reaction->wasRecentlyCreated;
-        $typeChanged = !$wasRecentlyCreated && $reaction->reaction_type === $request->reaction_type;
-
-        if (!$wasRecentlyCreated && $reaction->reaction_type === $request->reaction_type) {
+        if ($existing && $existing->reaction_type === $request->reaction_type) {
             // Same reaction - toggle off
-            $reaction->delete();
+            $existing->delete();
             $this->updateReactionCounts($report);
             $report->refresh();
             $message = 'Reaction removed';
             $userReaction = null;
-        } elseif (!$wasRecentlyCreated) {
-            // Different reaction - already updated by updateOrCreate
+        } elseif ($existing) {
+            // Different reaction - update
+            $existing->update(['reaction_type' => $request->reaction_type]);
             $this->updateReactionCounts($report);
             $report->refresh();
             $message = 'Reaction changed to ' . $request->reaction_type;
             $userReaction = $request->reaction_type;
         } else {
-            // New reaction created
+            // New reaction
+            ReportReaction::create([
+                'report_id' => $report->id,
+                'user_id' => $user->id,
+                'reaction_type' => $request->reaction_type,
+            ]);
             $this->updateReactionCounts($report);
             $report->refresh();
             $message = 'Reaction added';
@@ -775,6 +772,58 @@ class ReportController extends Controller
     /**
      * Haversine distance between two lat/lng points in meters
      */
+    public function assistantChat(Request $request)
+    {
+        $request->validate([
+            'message' => 'required|string|max:2000',
+            'context.lat' => 'nullable|numeric',
+            'context.lng' => 'nullable|numeric',
+        ]);
+
+        $message = $request->input('message');
+        $lat = $request->input('context.lat');
+        $lng = $request->input('context.lng');
+
+        // Return a helpful response with nearby info context
+        $response = "I understand you're asking about: \"$message\". ";
+
+        if ($lat && $lng) {
+            $nearbyPlaces = Place::select('name', 'category_id', 'latitude', 'longitude')
+                ->selectRaw(
+                    "(6371 * acos(cos(radians(?)) * cos(radians(latitude)) * cos(radians(longitude) - radians(?)) + sin(radians(?)) * sin(radians(latitude)))) AS distance",
+                    [$lat, $lng, $lat]
+                )
+                ->having('distance', '<=', 5)
+                ->orderBy('distance')
+                ->limit(5)
+                ->get();
+
+            if ($nearbyPlaces->isNotEmpty()) {
+                $names = $nearbyPlaces->pluck('name')->implode(', ');
+                $response .= "Nearby places include: $names. ";
+            }
+        }
+
+        // Log the chat for future AI training
+        if ($request->user()) {
+            \App\Models\AssistantChat::create([
+                'user_id' => $request->user()->id,
+                'message' => $message,
+                'response' => $response,
+            ]);
+        }
+
+        return response()->json([
+            'success' => true,
+            'data' => [
+                'response' => $response,
+                'context' => [
+                    'nearby_places' => $nearbyPlaces ?? [],
+                ],
+            ],
+        ]);
+    }
+
     private function haversineDistanceMeters(float $lat1, float $lng1, float $lat2, float $lng2): float
     {
         return GeoHelper::haversineMeters($lat1, $lng1, $lat2, $lng2);

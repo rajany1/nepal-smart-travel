@@ -64,20 +64,42 @@ class LeaderboardController extends Controller
                 case 'reports':
                     $reportsCount = $currentUser->reports()->count();
                     $userRank = DB::table('users')
-                        ->whereExists(function ($q) {
-                            $q->select(DB::raw(1))
-                              ->from('reports')
-                              ->whereColumn('reports.user_id', 'users.id');
-                        })
-                        ->where('id', '!=', $currentUser->id)
+                        ->join('reports', 'users.id', '=', 'reports.user_id')
+                        ->select('users.id', DB::raw('COUNT(reports.id) as report_count'))
+                        ->groupBy('users.id')
+                        ->having('report_count', '>', $reportsCount)
+                        ->get()
                         ->count() + 1;
                     break;
                 case 'alerts':
+                    $alertsCount = $currentUser->alerts()->count();
+                    $userRank = DB::table('users')
+                        ->join('alerts', 'users.id', '=', 'alerts.user_id')
+                        ->select('users.id', DB::raw('COUNT(alerts.id) as alert_count'))
+                        ->groupBy('users.id')
+                        ->having('alert_count', '>', $alertsCount)
+                        ->get()
+                        ->count() + 1;
+                    break;
                 case 'reviews':
-                    $userRank = 0;
+                    $reviewsCount = $currentUser->reviews()->count();
+                    $userRank = DB::table('users')
+                        ->join('place_reviews', 'users.id', '=', 'place_reviews.user_id')
+                        ->select('users.id', DB::raw('COUNT(place_reviews.id) as review_count'))
+                        ->groupBy('users.id')
+                        ->having('review_count', '>', $reviewsCount)
+                        ->get()
+                        ->count() + 1;
                     break;
             }
         }
+
+        // Preload badge counts for all users in one query
+        $userIds = $users->pluck('id');
+        $badgeCounts = UserAchievement::whereIn('user_id', $userIds)
+            ->groupBy('user_id')
+            ->selectRaw('user_id, COUNT(*) as count')
+            ->pluck('count', 'user_id');
 
         return response()->json([
             'success' => true,
@@ -91,10 +113,10 @@ class LeaderboardController extends Controller
                 'current_level' => (int) ($user->current_level ?? 1),
                 'level_name' => app(AchievementService::class)->getLevelName($user->current_level ?? 1),
                 'approved_reports' => (int) ($user->approved_reports ?? 0),
-                'total_reports' => (int) ($user->reports_count ?? $user->reports()->count()),
-                'total_alerts' => (int) ($user->alerts_count ?? $user->alerts()->count()),
-                'total_reviews' => (int) ($user->reviews_count ?? $user->reviews()->count()),
-                'badge_count' => UserAchievement::where('user_id', $user->id)->count(),
+                'total_reports' => (int) ($user->reports_count ?? 0),
+                'total_alerts' => (int) ($user->alerts_count ?? 0),
+                'total_reviews' => (int) ($user->reviews_count ?? 0),
+                'badge_count' => (int) ($badgeCounts[$user->id] ?? 0),
                 'verification_tick' => $user->verification_tick ?? 'none',
             ]),
             'meta' => [

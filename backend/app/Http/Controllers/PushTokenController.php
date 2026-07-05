@@ -14,6 +14,15 @@ class PushTokenController extends Controller
             'device_type' => 'nullable|string|max:50',
         ]);
 
+        // Check if this token belongs to another user
+        $existing = PushToken::where('player_id', $validated['player_id'])->first();
+        if ($existing && $existing->user_id !== $request->user()->id) {
+            return response()->json([
+                'success' => false,
+                'message' => 'This push token is already registered to another user.',
+            ], 409);
+        }
+
         $token = PushToken::updateOrCreate(
             ['player_id' => $validated['player_id']],
             [

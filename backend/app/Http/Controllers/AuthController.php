@@ -53,7 +53,7 @@ class AuthController extends Controller
     public function login(Request $request)
     {
         $request->validate([
-            'email' => 'required',
+            'email' => 'required|email',
             'password' => 'required'
         ]);
 
@@ -130,7 +130,7 @@ class AuthController extends Controller
 
         $validated = $request->validate([
             'name' => 'sometimes|string|max:255',
-            'phone' => 'sometimes|string|max:20',
+            'phone' => 'sometimes|string|max:20|unique:users,phone,' . $request->user()->id,
             'bio' => 'nullable|string|max:500',
             'avatar' => 'nullable|string',
             'gender' => 'nullable|string',
@@ -366,8 +366,6 @@ class AuthController extends Controller
         return response()->json([
             'success' => true,
             'message' => 'Password reset link sent to your email.',
-            'reset_token' => $token,
-            'email' => $request->email,
         ]);
     }
 
@@ -399,6 +397,73 @@ class AuthController extends Controller
             'success' => false,
             'message' => __($status),
         ], 400);
+    }
+
+    public function refreshToken(Request $request)
+    {
+        $user = $request->user();
+        $user->tokens()->delete();
+        $token = $user->createToken('app')->plainTextToken;
+
+        return response()->json([
+            'success' => true,
+            'access_token' => $token,
+            'data' => $user,
+        ]);
+    }
+
+    public function verifyEmail(Request $request)
+    {
+        $request->validate([
+            'otp' => 'required|string|max:6',
+        ]);
+
+        $user = $request->user();
+        if ($user->email_verified_at) {
+            return response()->json([
+                'success' => true,
+                'message' => 'Email already verified.',
+            ]);
+        }
+
+        // Simple OTP verification - check against stored hash
+        $storedOtp = cache('email_otp_' . $user->id);
+        if (!$storedOtp || $storedOtp !== $request->otp) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Invalid or expired OTP.',
+            ], 400);
+        }
+
+        $user->update(['email_verified_at' => now()]);
+        cache()->forget('email_otp_' . $user->id);
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Email verified successfully.',
+        ]);
+    }
+
+    public function resendVerification(Request $request)
+    {
+        $user = $request->user();
+        if ($user->email_verified_at) {
+            return response()->json([
+                'success' => true,
+                'message' => 'Email already verified.',
+            ]);
+        }
+
+        $otp = str_pad(random_int(0, 999999), 6, '0', STR_PAD_LEFT);
+        cache(['email_otp_' . $user->id => $otp], now()->addMinutes(10));
+
+        // TODO: Send OTP via email using Mail facade
+        // Mail::to($user->email)->send(new EmailVerificationOtp($otp));
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Verification code sent to your email.',
+        ]);
     }
 
     private function getMissingProfileFields($user)

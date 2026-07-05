@@ -533,22 +533,31 @@ class AuthInterceptor extends Interceptor {
   @override
   Future<void> onError(DioException err, ErrorInterceptorHandler handler) async {
     if (err.response?.statusCode == 401) {
-      final refreshToken = await session.getRefreshToken();
-      if (refreshToken != null) {
+      // Prevent retry loops on the refresh endpoint itself
+      if (err.requestOptions.path.contains('/auth/refresh')) {
+        await session.clearSession();
+        handler.next(err);
+        return;
+      }
+
+      final storedRefreshToken = await session.getRefreshToken();
+      if (storedRefreshToken != null) {
         try {
           print('🔄 Attempting to refresh token...');
           final response = await dio.post('/auth/refresh',
-            options: Options(headers: {'Authorization': 'Bearer $refreshToken'}),
+            options: Options(headers: {'Authorization': 'Bearer $storedRefreshToken'}),
           );
           final newToken = response.data['access_token'];
-          await session.setAccessToken(newToken);
-          print('✅ Token refreshed successfully');
-          
-          final retryOptions = err.requestOptions;
-          retryOptions.headers['Authorization'] = 'Bearer $newToken';
-          final retryResponse = await dio.fetch(retryOptions);
-          handler.resolve(retryResponse);
-          return;
+          if (newToken != null) {
+            await session.setAccessToken(newToken);
+            print('✅ Token refreshed successfully');
+
+            final retryOptions = err.requestOptions;
+            retryOptions.headers['Authorization'] = 'Bearer $newToken';
+            final retryResponse = await dio.fetch(retryOptions);
+            handler.resolve(retryResponse);
+            return;
+          }
         } catch (e) {
           print('❌ Token refresh failed: $e');
         }

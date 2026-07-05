@@ -34,7 +34,7 @@ class UserProfileController extends Controller
         $badges = $achievementService->getUserAchievements($user);
 
         $recentReports = Report::where('user_id', $user->id)
-            ->with('category')
+            ->with(['category', 'media'])
             ->where('status', 'approved')
             ->orderBy('created_at', 'desc')
             ->take(5)

@@ -97,7 +97,7 @@ class AlertProvider extends ChangeNotifier {
     notifyListeners();
 
     try {
-      final response = await _api.getNearbyAlerts(lat: _userLat!, lng: _userLng!);
+      final response = await _api.getAlerts(severity: severity, type: type, lat: _userLat!, lng: _userLng!);
       final data = response.data['data'] as List? ?? [];
       _items = data.map((j) => NearbyItem.fromJson(j)).toList();
       if (_items.isNotEmpty) {

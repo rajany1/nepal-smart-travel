@@ -112,14 +112,16 @@ class AuthProvider extends ChangeNotifier {
       
       // Persist user data
       await _session.setUser(_user!);
+    } on DioException catch (e) {
+      if (e.response?.statusCode == 401) {
+        await _session.clearSession();
+        _user = null;
+        _isAuthenticated = false;
+      } else {
+        print('⚠️ Transient error in auth check (keeping session): $e');
+      }
     } catch (e) {
-      print('❌ Auth check failed: $e');
-      await _session.clearSession();
-      _user = null;
-      _isAuthenticated = false;
-      _isLoading = false;
-      notifyListeners();
-      return;
+      print('⚠️ Transient error in auth check (keeping session): $e');
     }
 
     _isLoading = false;
@@ -254,6 +256,12 @@ class AuthProvider extends ChangeNotifier {
       );
 
       final account = await googleSignIn.authenticate();
+      if (account == null) {
+        _errorMessage = 'Google sign-in was cancelled';
+        _isLoading = false;
+        notifyListeners();
+        return false;
+      }
       final authentication = account.authentication;
       final idToken = authentication.idToken;
 
@@ -417,6 +425,7 @@ class AuthProvider extends ChangeNotifier {
     } catch (e) {
       print('❌ Profile refresh failed: $e');
       _errorMessage = _parseError(e);
+      notifyListeners();
     }
   }
 

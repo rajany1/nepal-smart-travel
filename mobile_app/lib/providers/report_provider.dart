@@ -331,10 +331,10 @@ class ReportProvider extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Start auto-refresh timer (polls every 15s)
+  /// Start auto-refresh timer (polls every 60s)
   void startAutoRefresh() {
     _pollTimer?.cancel();
-    _pollTimer = Timer.periodic(const Duration(seconds: 15), (_) async {
+    _pollTimer = Timer.periodic(const Duration(seconds: 60), (_) async {
       if (_isFetching) return; // skip if a fetch is already in flight
       await fetchReports(lat: _lastLat, lng: _lastLng, radiusKm: 20.0);
       await fetchMyReports();

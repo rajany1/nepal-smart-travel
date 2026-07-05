@@ -26,6 +26,10 @@ Route::prefix('v1')->group(function () {
     Route::post('/auth/reset-password', [AuthController::class, 'resetPassword'])->middleware('throttle:3,60');
     Route::post('/auth/social-login', [AuthController::class, 'socialLogin']);
 
+    Route::middleware('auth:sanctum')->group(function () {
+        Route::post('/auth/refresh', [AuthController::class, 'refreshToken']);
+    });
+
     // Public routes
     Route::get('/alerts', [AlertController::class, 'index']);
     Route::get('/alerts/nearby', [AlertController::class, 'nearby']);
@@ -35,6 +39,7 @@ Route::prefix('v1')->group(function () {
     Route::get('/places/nearby-combined', [PlaceController::class, 'nearbyCombined']);
     Route::get('/places/featured', [PlaceController::class, 'featured']);
     Route::get('/places/{id}', [PlaceController::class, 'show']);
+    Route::get('/places/{id}/reviews', [PlaceController::class, 'reviews']);
     
     Route::get('/profile/field-options', [ProfileController::class, 'fieldOptions']);
     Route::get('/profile/field-definitions', [ProfileController::class, 'fieldDefinitions']);
@@ -69,12 +74,16 @@ Route::prefix('v1')->group(function () {
 
     // ✅ Sponsors - public read
     Route::get('/sponsors', [ConsumerController::class, 'sponsors']);
+    Route::get('/road-conditions', [AlertController::class, 'roadConditions']);
+    Route::post('/assistant/chat', [ReportController::class, 'assistantChat']);
 
     Route::middleware(['auth:sanctum', 'status'])->group(function () {
         Route::get('/users/me', [AuthController::class, 'me']);
         Route::put('/users/me', [AuthController::class, 'update']);
         Route::post('/auth/logout', [AuthController::class, 'logout']);
 
+        Route::post('/auth/verify-email', [AuthController::class, 'verifyEmail']);
+        Route::post('/auth/resend-verification', [AuthController::class, 'resendVerification']);
         Route::post('/auth/complete-profile', [AuthController::class, 'completeProfile']);
         Route::get('/auth/check-profile-status', [AuthController::class, 'checkProfileStatus']);
 
