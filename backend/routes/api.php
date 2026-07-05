@@ -77,6 +77,9 @@ Route::prefix('v1')->group(function () {
     Route::get('/road-conditions', [AlertController::class, 'roadConditions']);
     Route::post('/assistant/chat', [ReportController::class, 'assistantChat']);
 
+    // ✅ Store items - public read (purchase & my-purchases require auth)
+    Route::get('/store/items', [StoreController::class, 'items']);
+
     Route::middleware(['auth:sanctum', 'status'])->group(function () {
         Route::get('/users/me', [AuthController::class, 'me']);
         Route::put('/users/me', [AuthController::class, 'update']);
@@ -126,8 +129,7 @@ Route::prefix('v1')->group(function () {
         Route::post('/push-tokens', [PushTokenController::class, 'store']);
         Route::put('/push-tokens/unsubscribe', [PushTokenController::class, 'unsubscribe']);
 
-        // Store
-        Route::get('/store/items', [StoreController::class, 'items']);
+        // Store (purchase & my-purchases require auth; items is public above)
         Route::post('/store/items/{shopItem}/purchase', [StoreController::class, 'purchase']);
         Route::get('/store/my-purchases', [StoreController::class, 'myPurchases']);
 

@@ -53,6 +53,7 @@ class StoreController extends Controller
             'terms' => $i->terms,
             'expiry_days' => $i->expiry_days,
             'usage_limit_per_user' => $i->usage_limit_per_user,
+            'redemption_instructions' => $i->redemption_instructions,
         ])->values();
         return view('admin.store_items', compact('items', 'sponsors', 'itemsJson'));
     }
