@@ -123,8 +123,8 @@ class OfflineDbService {
     final id = placeJson['id']?.toString() ?? '';
     if (id.isEmpty) return;
 
-    final lat = (placeJson['latitude'] ?? 0).toDouble();
-    final lng = (placeJson['longitude'] ?? 0).toDouble();
+    final lat = double.tryParse((placeJson['latitude'] ?? 0).toString()) ?? 0.0;
+    final lng = double.tryParse((placeJson['longitude'] ?? 0).toString()) ?? 0.0;
     final geohash = _encodeGeohash(lat, lng, 6);
     final now = DateTime.now().millisecondsSinceEpoch;
 
@@ -155,8 +155,8 @@ class OfflineDbService {
       final id = place['id']?.toString() ?? '';
       if (id.isEmpty) continue;
 
-      final lat = (place['latitude'] ?? 0).toDouble();
-      final lng = (place['longitude'] ?? 0).toDouble();
+      final lat = double.tryParse((place['latitude'] ?? 0).toString()) ?? 0.0;
+      final lng = double.tryParse((place['longitude'] ?? 0).toString()) ?? 0.0;
       final geohash = _encodeGeohash(lat, lng, 6);
 
       batch.insert(

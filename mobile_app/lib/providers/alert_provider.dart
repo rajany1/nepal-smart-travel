@@ -37,8 +37,8 @@ class NearbyItem {
       source: json['source'] ?? 'alert',
       alertType: json['alert_type'] ?? '',
       severity: json['severity'] ?? 'info',
-      latitude: json['latitude']?.toDouble(),
-      longitude: json['longitude']?.toDouble(),
+      latitude: double.tryParse(json['latitude']?.toString() ?? ''),
+      longitude: double.tryParse(json['longitude']?.toString() ?? ''),
       affectedDistrict: json['affected_district'],
       createdAt: json['created_at'] != null
           ? DateTime.parse(json['created_at'])

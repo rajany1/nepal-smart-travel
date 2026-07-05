@@ -82,8 +82,8 @@ class _SponsorsScreenState extends State<SponsorsScreen> {
         itemCount: _sponsors.length,
         itemBuilder: (_, i) {
           final s = _sponsors[i] as Map<String, dynamic>;
-          final lat = s['latitude']?.toDouble();
-          final lng = s['longitude']?.toDouble();
+          final lat = s['latitude'] is num ? (s['latitude'] as num).toDouble() : double.tryParse(s['latitude']?.toString() ?? '');
+          final lng = s['longitude'] is num ? (s['longitude'] as num).toDouble() : double.tryParse(s['longitude']?.toString() ?? '');
           final hasLocation = lat != null && lng != null;
           return Card(
             margin: const EdgeInsets.only(bottom: 12),
@@ -141,8 +141,8 @@ class _SponsorsScreenState extends State<SponsorsScreen> {
     double? centerLat, centerLng;
 
     for (final s in _sponsors) {
-      final lat = (s as Map<String, dynamic>)['latitude']?.toDouble();
-      final lng = s['longitude']?.toDouble();
+      final lat = (s as Map<String, dynamic>)['latitude'] is num ? ((s as Map<String, dynamic>)['latitude'] as num).toDouble() : double.tryParse((s as Map<String, dynamic>)['latitude']?.toString() ?? '');
+      final lng = s['longitude'] is num ? (s['longitude'] as num).toDouble() : double.tryParse(s['longitude']?.toString() ?? '');
       if (lat != null && lng != null) {
         centerLat = lat;
         centerLng = lng;
@@ -204,8 +204,8 @@ class _SponsorsScreenState extends State<SponsorsScreen> {
   }
 
   void _showSponsorPopup(Map<String, dynamic> s) {
-    final lat = s['latitude']?.toDouble();
-    final lng = s['longitude']?.toDouble();
+    final lat = s['latitude'] is num ? (s['latitude'] as num).toDouble() : double.tryParse(s['latitude']?.toString() ?? '');
+    final lng = s['longitude'] is num ? (s['longitude'] as num).toDouble() : double.tryParse(s['longitude']?.toString() ?? '');
     showModalBottomSheet(
       context: context,
       shape: const RoundedRectangleBorder(
