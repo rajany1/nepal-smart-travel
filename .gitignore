@@ -1,120 +1,81 @@
-# Environment Files
-.env
-.env.local
-.env.*.local
-.env.backup
-
-# IDE & Editor
-.vscode/
-.idea/
+# OS
+.DS_Store
+Thumbs.db
 *.swp
 *.swo
 *~
-.DS_Store
-*.sublime-project
-*.sublime-workspace
 
-# OS Files
-Thumbs.db
-.DS_Store
-._*
+# IDE
+.idea/
+.vscode/
+*.iml
+*.iws
 
-# Node & NPM (if using Node.js)
-node_modules/
-npm-debug.log
-yarn-error.log
-dist/
+# Agent workspace
+.openclaw/
+.opencode/
+
+# Dart / Flutter
+.dart_tool/
+.packages
+.pub/
 build/
+*.js_.dart
+*.js.deps
+*.js.map
+.flutter-plugins
+.flutter-plugins-dependencies
+.metadata
+*.iml
+local.properties
+*.lock
+!pubspec.lock
+!composer.lock
 
-# Python
-__pycache__/
-*.py[cod]
-*$py.class
-*.egg-info/
-dist/
-build/
-venv/
-ENV/
+# Android
+android/.gradle/
+android/app/.cxx/
+android/local.properties
 
-# PHP / Laravel Backend
-backend/vendor/
-backend/node_modules/
+# iOS
+ios/Pods/
+ios/.symlinks/
+ios/Flutter/Flutter.framework
+ios/Flutter/Flutter.podspec
+ios/*.xcworkspace/xcuserdata/
+ios/ServiceDefinitions.json
+
+# Backend / Laravel
 backend/.env
-backend/.env.*.local
-backend/storage/logs/*
-backend/storage/framework/cache/data/*
-backend/bootstrap/cache/
-backend/public/hot
+backend/.env.backup
 backend/.phpunit.result.cache
+backend/node_modules/
+backend/vendor/
+backend/public/hot
+backend/public/build/
+backend/storage/*.key
+backend/storage/framework/cache/data/
+backend/storage/framework/sessions/*
+backend/storage/framework/views/*
+backend/storage/logs/*
+!backend/storage/framework/cache/data/.gitkeep
+!backend/storage/framework/sessions/.gitkeep
+!backend/storage/framework/views/.gitkeep
+!backend/storage/logs/.gitkeep
 
-# Flutter / Mobile App
-mobile-app/build/
-mobile-app/.dart_tool/
-mobile-app/.flutter-plugins
-mobile-app/.flutter-plugins-dependencies
-mobile-app/.packages
-mobile-app/pubspec.lock
-mobile-app/ios/Flutter/Flutter.podspec
-mobile-app/ios/Flutter/Generated.xcconfig
-mobile-app/android/.gradle/
-mobile-app/android/local.properties
+# backend/bootstrap/cache
+backend/bootstrap/cache/*.php
+!backend/bootstrap/cache/.gitkeep
 
-# Admin Panel
-admin-panel/node_modules/
-admin-panel/.next/
-admin-panel/out/
-admin-panel/build/
-admin-panel/.env.local
-admin-panel/.env.*.local
-
-# Database
-database/*.sql
-database/backups/
-*.db
-*.sqlite
-*.sqlite3
-
-# Logs
-logs/
-*.log
+# Node / NPM
+node_modules/
 npm-debug.log*
 yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
 
-# Temporary Files
-*.tmp
-*.temp
-temp/
-tmp/
-
-# OS Specific
-.vscode/settings.json
-.idea/workspace.xml
-.idea/tasks.xml
-
-# Sensitive Information
-*.pem
-*.key
-*.crt
-*.cert
-credentials.json
-secrets.json
-config/local.php
-
-# Compiled/Bundled Assets
-dist/
-build/
-.cache/
-
-# Runtime Data
-pids/
-*.seed
-*.pid.lock
-
-# Coverage
-coverage/
-.nyc_output/
-
-# Misc
-.env.*.local
-config.local.json
-local.config.js
+# Env files
+.env
+.env.local
+.env.production
+.env.development

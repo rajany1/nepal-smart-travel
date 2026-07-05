@@ -1,0 +1,39 @@
+{
+  "project_info": {
+    "project_number": "74033055478",
+    "project_id": "smart-travel-app-499714-cbd3f",
+    "storage_bucket": "smart-travel-app-499714-cbd3f.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:74033055478:android:6dd6b871508abfd99cced7",
+        "android_client_info": {
+          "package_name": "com.example.nepal_smart_travel"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "672688394813-gbt8fga6luke0hjjvj0hlj5bauebrupm.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCBWuNDHMJTqI3NB4IHdGg-2V2XdGGFJvs"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "672688394813-sk0p5l42e05845gsvjghe8f9cuj8ke69.apps.googleusercontent.com",
+              "client_type": 2
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
