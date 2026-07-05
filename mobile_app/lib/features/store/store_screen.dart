@@ -24,7 +24,6 @@ class _StoreScreenState extends State<StoreScreen> {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      context.read<AuthProvider>().refreshProfile();
       context.read<StoreProvider>().loadItems();
       context.read<StoreProvider>().loadPurchases();
     });
@@ -60,6 +59,30 @@ class _StoreScreenState extends State<StoreScreen> {
       builder: (context, store, _) {
         if (store.isLoading) {
           return const Center(child: CircularProgressIndicator());
+        }
+
+        if (store.errorMessage != null && store.items.isEmpty) {
+          return Center(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(Icons.cloud_off, size: 64, color: Colors.grey[300]),
+                const SizedBox(height: 16),
+                Text(store.errorMessage!, style: TextStyle(color: Colors.grey[500], fontSize: 15)),
+                const SizedBox(height: 16),
+                ElevatedButton.icon(
+                  onPressed: () => store.loadItems(),
+                  icon: const Icon(Icons.refresh, size: 18),
+                  label: const Text('Retry'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppTheme.primaryColor,
+                    foregroundColor: Colors.white,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  ),
+                ),
+              ],
+            ),
+          );
         }
 
         var items = store.items.where((item) {
@@ -99,7 +122,6 @@ class _StoreScreenState extends State<StoreScreen> {
 
         return RefreshIndicator(
           onRefresh: () async {
-            await context.read<AuthProvider>().refreshProfile();
             await store.loadItems();
           },
           child: CustomScrollView(

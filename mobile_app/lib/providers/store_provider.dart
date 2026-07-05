@@ -213,8 +213,8 @@ class StoreProvider extends ChangeNotifier {
 
     try {
       final response = await _api.getStoreItems();
-      final List<dynamic> data = response.data['data'] ?? [];
-      _items = data.map((j) => ShopItem.fromJson(j)).toList();
+      final data = response.data['data'] as List? ?? [];
+      _items = data.map((j) => ShopItem.fromJson(j as Map<String, dynamic>)).toList();
     } catch (e) {
       _errorMessage = 'Failed to load store items';
     }
@@ -226,8 +226,8 @@ class StoreProvider extends ChangeNotifier {
   Future<void> loadPurchases() async {
     try {
       final response = await _api.getMyPurchases();
-      final List<dynamic> data = response.data['data'] ?? [];
-      _purchases = data.map((j) => Purchase.fromJson(j)).toList();
+      final data = response.data['data'] as List? ?? [];
+      _purchases = data.map((j) => Purchase.fromJson(j as Map<String, dynamic>)).toList();
       notifyListeners();
     } catch (e) {
       print('❌ Failed to load purchases: $e');

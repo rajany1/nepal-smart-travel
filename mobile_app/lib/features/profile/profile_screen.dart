@@ -4,7 +4,6 @@ import '../../config/themes/app_theme.dart';
 import '../../providers/auth_provider.dart';
 import '../../providers/profile_provider.dart';
 import '../../providers/report_provider.dart';
-import '../../providers/store_provider.dart';
 import '../../core/models/user.dart';
 import '../../core/models/report.dart';
 import '../../core/widgets/shimmer_loading.dart';
@@ -544,7 +543,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
         onPressed: () {
           Navigator.push(
             context,
-            MaterialPageRoute(builder: (_) => const _StoreScreenWrapper()),
+            MaterialPageRoute(builder: (_) => const StoreScreen()),
           );
         },
         icon: const Icon(Icons.store, size: 18),
@@ -1279,17 +1278,5 @@ class _ProfileReportDetailsSheet extends StatelessWidget {
     if (diff.inHours < 24) return '${diff.inHours}h ago';
     if (diff.inDays < 7) return '${diff.inDays}d ago';
     return '${dateTime.day}/${dateTime.month}/${dateTime.year}';
-  }
-}
-
-class _StoreScreenWrapper extends StatelessWidget {
-  const _StoreScreenWrapper();
-
-  @override
-  Widget build(BuildContext context) {
-    return ChangeNotifierProvider(
-      create: (_) => StoreProvider(),
-      child: const StoreScreen(),
-    );
   }
 }
