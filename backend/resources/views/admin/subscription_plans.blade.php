@@ -20,8 +20,8 @@
                         <td class="px-6 py-4">
                             <p class="font-semibold">{{ $plan->name }}</p>
                             @if($plan->description)<p class="text-xs text-slate-400">{{ $plan->description }}</p>@endif
-                            @php $planFeatures = is_array($plan->features) ? $plan->features : (json_decode($plan->features, true) ?? []); @endphp
-                            @if(!empty($planFeatures))
+                            @php $rawFeat = $plan->features; $planFeatures = is_array($rawFeat) ? $rawFeat : (is_string($rawFeat) ? (json_decode($rawFeat, true) ?? []) : []); if (!is_array($planFeatures)) $planFeatures = []; @endphp
+                            @if(count($planFeatures))
                             <div class="flex gap-1 mt-1">@foreach(array_slice($planFeatures, 0, 3) as $f)<span class="text-xs bg-slate-100 px-1.5 py-0.5 rounded">{{ $f }}</span>@endforeach @if(count($planFeatures) > 3)<span class="text-xs text-slate-400">+{{ count($planFeatures)-3 }} more</span>@endif</div>
                             @endif
                         </td>

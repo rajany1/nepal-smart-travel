@@ -37,7 +37,8 @@ class SubscriptionController extends Controller
             ->where('ends_at', '>', now())
             ->first();
 
-        $features = $sub?->plan?->features ?? [];
+        $features = $sub?->plan?->features;
+        if (!is_array($features)) $features = is_string($features) ? (json_decode($features, true) ?? []) : [];
         return response()->json([
             'is_premium' => $sub !== null,
             'features' => $features,

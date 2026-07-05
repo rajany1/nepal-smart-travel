@@ -44,6 +44,10 @@ class SubscriptionController extends Controller
             $slug = $baseSlug . '-' . $counter++;
         }
         $data['slug'] = $slug;
+        if (isset($data['features']) && is_string($data['features'])) {
+            $decoded = json_decode($data['features'], true);
+            $data['features'] = is_array($decoded) ? $decoded : [];
+        }
         SubscriptionPlan::create($data);
         return redirect()->route('admin.subscription.plans')->with('success', 'Plan created.');
     }
@@ -67,6 +71,10 @@ class SubscriptionController extends Controller
             $slug = $baseSlug . '-' . $counter++;
         }
         $data['slug'] = $slug;
+        if (isset($data['features']) && is_string($data['features'])) {
+            $decoded = json_decode($data['features'], true);
+            $data['features'] = is_array($decoded) ? $decoded : [];
+        }
         $subscriptionPlan->update($data);
         return redirect()->route('admin.subscription.plans')->with('success', 'Plan updated.');
     }
