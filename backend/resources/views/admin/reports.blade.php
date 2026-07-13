@@ -22,7 +22,7 @@
     <div class="px-6 py-4 border-b border-gray-100 flex flex-wrap items-center justify-between gap-4">
         <h3 class="font-semibold text-gray-800">All Reports</h3>
         <div class="flex gap-2">
-            <a href="{{ route('admin.reports', ['status' => 'all']) }}" class="px-3 py-1.5 text-sm rounded-lg {{ $status === 'all' ? 'bg-indigo-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200' }}">All</a>
+            <a href="{{ route('admin.reports', ['status' => 'all']) }}" class="px-3 py-1.5 text-sm rounded-lg {{ $status === 'all' ? 'bg-primary-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200' }}">All</a>
             <a href="{{ route('admin.reports', ['status' => 'pending']) }}" class="px-3 py-1.5 text-sm rounded-lg {{ $status === 'pending' ? 'bg-amber-500 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200' }}">Pending</a>
             <a href="{{ route('admin.reports', ['status' => 'approved']) }}" class="px-3 py-1.5 text-sm rounded-lg {{ $status === 'approved' ? 'bg-green-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200' }}">Approved</a>
             <a href="{{ route('admin.reports', ['status' => 'rejected']) }}" class="px-3 py-1.5 text-sm rounded-lg {{ $status === 'rejected' ? 'bg-red-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200' }}">Rejected</a>
@@ -106,7 +106,7 @@
                                     <i class="fas fa-trash"></i>
                                 </button>
                             </form>
-                            <a href="{{ route('admin.reports.view', $report->id) }}" class="px-3 py-1.5 text-xs font-medium bg-indigo-100 text-indigo-700 rounded-lg hover:bg-indigo-200 transition">
+                            <a href="{{ route('admin.reports.view', $report->id) }}" class="px-3 py-1.5 text-xs font-medium bg-primary-100 text-primary-700 rounded-lg hover:bg-primary-200 transition">
                                 <i class="fas fa-eye mr-1"></i>View
                             </a>
                         </div>

@@ -177,8 +177,8 @@
                 <form method="POST" action="{{ route('admin.places.categories') }}" class="mb-4">
                     @csrf
                     <div class="flex gap-2">
-                        <input type="text" name="name" placeholder="New category name" required class="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500">
-                        <button type="submit" class="px-3 py-2 bg-indigo-600 text-white text-sm rounded-lg hover:bg-indigo-700"><i class="fas fa-plus"></i></button>
+                        <input type="text" name="name" placeholder="New category name" required class="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-primary-500">
+                        <button type="submit" class="px-3 py-2 bg-primary-600 text-white text-sm rounded-lg hover:bg-primary-700"><i class="fas fa-plus"></i></button>
                     </div>
                 </form>
                 <div class="space-y-2">

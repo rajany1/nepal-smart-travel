@@ -6,6 +6,8 @@ use App\Http\Controllers\Controller;
 use App\Models\TravelPartner;
 use App\Models\Sponsor;
 use App\Models\Booking;
+use App\Models\ShopCode;
+use App\Services\ShopService;
 use Illuminate\Http\Request;
 
 class ConsumerController extends Controller
@@ -38,6 +40,10 @@ class ConsumerController extends Controller
 
     // ==================== BOOKINGS (User-facing) ====================
 
+    public function __construct(
+        private ShopService $shopService,
+    ) {}
+
     function createBooking(Request $request)
     {
         $user = $request->user();
@@ -49,6 +55,7 @@ class ConsumerController extends Controller
             'amount' => 'nullable|numeric|min:0',
             'notes' => 'nullable|string',
             'booked_at' => 'nullable|date',
+            'shop_code_id' => 'nullable|exists:shop_codes,id',
         ]);
 
         $partner = TravelPartner::findOrFail($data['travel_partner_id']);
@@ -61,15 +68,62 @@ class ConsumerController extends Controller
         $data['reward_pool_share'] = $commission * 0.5;
 
         $booking = Booking::create($data);
-        return response()->json(['success' => true, 'data' => $booking->load('travelPartner')], 201);
+
+        if (!empty($data['shop_code_id'])) {
+            $code = ShopCode::findOrFail($data['shop_code_id']);
+            try {
+                $this->shopService->applyToBooking($user, $code, $booking);
+            } catch (\RuntimeException $e) {
+                $booking->delete();
+                return response()->json(['message' => $e->getMessage()], 422);
+            }
+        }
+
+        return response()->json(['success' => true, 'data' => $booking->load('travelPartner', 'shopCode')], 201);
     }
 
     function myBookings(Request $request)
     {
-        $bookings = Booking::with('travelPartner')
+        $bookings = Booking::with('travelPartner', 'shopCode')
             ->where('user_id', $request->user()->id)
             ->orderByDesc('created_at')
             ->paginate(20);
         return response()->json(['success' => true, 'data' => $bookings]);
+    }
+
+    function cancelBooking(Request $request, Booking $booking)
+    {
+        $user = $request->user();
+        if ($booking->user_id !== $user->id) {
+            abort(403, 'Not your booking.');
+        }
+        if (!$booking->isPending()) {
+            return response()->json(['message' => 'Only pending bookings can be cancelled.'], 422);
+        }
+
+        $booking->update(['status' => 'cancelled']);
+
+        if ($booking->shopCode) {
+            $this->shopService->releaseFromBooking($booking->shopCode);
+        }
+
+        return response()->json(['success' => true, 'message' => 'Booking cancelled.']);
+    }
+
+    function removeCoupon(Request $request, Booking $booking)
+    {
+        $user = $request->user();
+        if ($booking->user_id !== $user->id) {
+            abort(403, 'Not your booking.');
+        }
+        if (!$booking->isPending()) {
+            return response()->json(['message' => 'Only pending bookings can have their coupon removed.'], 422);
+        }
+        if (!$booking->shopCode) {
+            return response()->json(['message' => 'No coupon applied to this booking.'], 422);
+        }
+
+        $this->shopService->releaseFromBooking($booking->shopCode);
+        return response()->json(['success' => true, 'message' => 'Coupon removed.']);
     }
 }

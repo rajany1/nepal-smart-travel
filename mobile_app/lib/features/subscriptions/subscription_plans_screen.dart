@@ -25,18 +25,30 @@ class _SubscriptionPlansScreenState extends State<SubscriptionPlansScreen> {
   Future<void> _load() async {
     setState(() { _loading = true; _error = null; });
     try {
-      final results = await Future.wait([
-        _api.getSubscriptionPlans(),
-        _api.getMySubscription(),
-      ]);
-      _plans = (results[0].data['data'] as List<dynamic>? ?? []);
-      final mySub = results[1].data['data'] as Map<String, dynamic>?;
-      if (mySub != null) {
-        _currentPlanId = mySub['subscription_plan_id'] as int?;
+      final plansRes = await _api.getSubscriptionPlans();
+      final plansRaw = plansRes.data['data'];
+      if (plansRaw is List) {
+        _plans = plansRaw;
+      } else if (plansRaw is String) {
+        _error = plansRaw;
+        return;
       }
     } catch (e) {
       _error = e.toString();
+      return;
     }
+
+    if (!mounted) return;
+    try {
+      final mySubRes = await _api.getMySubscription();
+      final mySubRaw = mySubRes.data['data'];
+      if (mySubRaw is Map) {
+        _currentPlanId = mySubRaw['subscription_plan_id'] as int?;
+      }
+    } catch (_) {
+      _currentPlanId = null;
+    }
+
     if (mounted) setState(() { _loading = false; });
   }
 
@@ -52,8 +64,11 @@ class _SubscriptionPlansScreenState extends State<SubscriptionPlansScreen> {
               itemCount: _plans.length,
               itemBuilder: (_, i) {
                 final p = _plans[i] as Map<String, dynamic>;
-                final rawFeatures = p['features'];
-                final features = rawFeatures is List ? rawFeatures : (rawFeatures is String ? (jsonDecode(rawFeatures) as List? ?? []) : []);
+                final features = switch (p['features']) {
+                  List l => l,
+                  String s => (jsonDecode(s) as List?) ?? [],
+                  _ => <dynamic>[],
+                };
                 final isCurrentPlan = _currentPlanId != null && p['id'] == _currentPlanId;
                 return Card(
                   margin: const EdgeInsets.only(bottom: 12),
@@ -108,7 +123,11 @@ class _SubscriptionPlansScreenState extends State<SubscriptionPlansScreen> {
                         SizedBox(
                           width: double.infinity,
                           child: ElevatedButton(
-                            onPressed: isCurrentPlan ? null : () {},
+                            onPressed: isCurrentPlan
+                                ? null
+                                : () => ScaffoldMessenger.of(context).showSnackBar(
+                                      const SnackBar(content: Text('Payment integration coming soon')),
+                                    ),
                             style: ElevatedButton.styleFrom(
                               backgroundColor: isCurrentPlan ? Colors.green.shade50 : Colors.blue,
                               foregroundColor: isCurrentPlan ? Colors.green.shade700 : Colors.white,

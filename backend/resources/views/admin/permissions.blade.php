@@ -8,7 +8,7 @@
             <h3 class="text-2xl font-bold text-slate-900">Permission Management</h3>
             <p class="text-sm text-slate-500 mt-1">Define granular permissions that can be assigned to roles.</p>
         </div>
-        <button onclick="document.getElementById('createPermModal').classList.remove('hidden')" class="bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-2.5 rounded-xl text-sm font-semibold shadow transition flex items-center gap-2">
+        <button onclick="document.getElementById('createPermModal').classList.remove('hidden')" class="bg-primary-600 hover:bg-primary-700 text-white px-5 py-2.5 rounded-xl text-sm font-semibold shadow transition flex items-center gap-2">
             <i class="fas fa-plus"></i> New Permission
         </button>
     </div>
@@ -26,7 +26,7 @@
                     <p class="text-xs text-slate-500">
                         <code class="bg-slate-100 px-1.5 py-0.5 rounded">{{ $perm->name }}</code>
                         @if($perm->description) &middot; {{ $perm->description }} @endif
-                        @if($perm->is_system) <span class="ml-1 text-indigo-500 font-semibold">System</span> @endif
+                        @if($perm->is_system) <span class="ml-1 text-primary-500 font-semibold">System</span> @endif
                         @if($perm->menu_label)
                             &middot; <span class="text-green-600"><i class="fas fa-{{ $perm->menu_icon }}"></i> {{ $perm->menu_label }}</span>
                         @endif
@@ -37,7 +37,7 @@
                 </div>
                 @if(!$perm->is_system)
                 <div class="flex gap-2">
-                    <button onclick="openEditPerm({{ $perm->id }})" class="text-sm text-indigo-600 hover:text-indigo-800 font-medium"><i class="fas fa-edit text-xs"></i> Edit</button>
+                    <button onclick="openEditPerm({{ $perm->id }})" class="text-sm text-primary-600 hover:text-primary-800 font-medium"><i class="fas fa-edit text-xs"></i> Edit</button>
                     <form method="POST" action="{{ route('admin.permissions.destroy', $perm) }}" onsubmit="return confirm('Delete permission {{ $perm->display_name }}?')">
                         @csrf @method('DELETE')
                         <button type="submit" class="text-sm text-red-600 hover:text-red-800 font-medium"><i class="fas fa-trash text-xs"></i> Delete</button>
@@ -104,7 +104,7 @@
             </div>
             <div class="flex gap-3 justify-end mt-6">
                 <button type="button" onclick="document.getElementById('createPermModal').classList.add('hidden')" class="px-4 py-2 text-sm text-slate-600 hover:text-slate-800">Cancel</button>
-                <button type="submit" class="bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-2 rounded-xl text-sm font-semibold">Create Permission</button>
+                <button type="submit" class="bg-primary-600 hover:bg-primary-700 text-white px-5 py-2 rounded-xl text-sm font-semibold">Create Permission</button>
             </div>
         </form>
     </div>
@@ -157,7 +157,7 @@
             </div>
             <div class="flex gap-3 justify-end mt-6">
                 <button type="button" onclick="document.getElementById('editPermModal').classList.add('hidden')" class="px-4 py-2 text-sm text-slate-600 hover:text-slate-800">Cancel</button>
-                <button type="submit" class="bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-2 rounded-xl text-sm font-semibold">Update Permission</button>
+                <button type="submit" class="bg-primary-600 hover:bg-primary-700 text-white px-5 py-2 rounded-xl text-sm font-semibold">Update Permission</button>
             </div>
         </form>
     </div>

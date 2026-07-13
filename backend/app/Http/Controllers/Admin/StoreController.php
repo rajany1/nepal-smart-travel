@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\ShopItem;
 use App\Models\Sponsor;
 use App\Models\UserPurchase;
+use App\Services\ModeratorService;
 use App\Services\ShopService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -13,6 +14,7 @@ use Illuminate\Support\Facades\Auth;
 class StoreController extends Controller
 {
     public function __construct(
+        private ModeratorService $moderatorService,
         private ShopService $shopService,
     ) {}
 
@@ -44,6 +46,8 @@ class StoreController extends Controller
             'description' => $i->description,
             'sponsor_id' => $i->sponsor_id,
             'reward_type' => $i->reward_type,
+            'discount_type' => $i->discount_type,
+            'discount_value' => $i->discount_value,
             'price_xp' => $i->price_xp,
             'min_level' => $i->min_level,
             'stock_type' => $i->stock_type,
@@ -68,6 +72,8 @@ class StoreController extends Controller
             'icon' => 'required|string|max:50',
             'sponsor_id' => 'nullable|exists:sponsors,id',
             'reward_type' => 'required|in:discount,free_item,voucher,special_offer',
+            'discount_type' => 'nullable|in:percentage,fixed|required_if:reward_type,discount',
+            'discount_value' => 'nullable|numeric|min:0|max:999999.99|required_if:reward_type,discount',
             'price_xp' => 'required|integer|min:1',
             'min_level' => 'required|integer|min:1',
             'stock_type' => 'required|in:unlimited,limited,code_pool',
@@ -80,8 +86,9 @@ class StoreController extends Controller
             'sort_order' => 'required|integer|min:0',
         ]);
 
-        ShopItem::create($data);
+        $item = ShopItem::create($data);
 
+        $this->moderatorService->log(Auth::user(), 'store-item.created', 'shop_item', $item->id, 'Created shop item: ' . $item->name);
         return redirect()->route('admin.store.items')
             ->with('success', 'Shop item created successfully.');
     }
@@ -96,6 +103,8 @@ class StoreController extends Controller
             'icon' => 'required|string|max:50',
             'sponsor_id' => 'nullable|exists:sponsors,id',
             'reward_type' => 'required|in:discount,free_item,voucher,special_offer',
+            'discount_type' => 'nullable|in:percentage,fixed',
+            'discount_value' => 'nullable|numeric|min:0|max:999999.99',
             'price_xp' => 'required|integer|min:1',
             'min_level' => 'required|integer|min:1',
             'stock_type' => 'required|in:unlimited,limited,code_pool',
@@ -110,6 +119,7 @@ class StoreController extends Controller
 
         $shopItem->update($data);
 
+        $this->moderatorService->log(Auth::user(), 'store-item.updated', 'shop_item', $shopItem->id, 'Updated shop item: ' . $shopItem->name);
         return redirect()->route('admin.store.items')
             ->with('success', 'Shop item updated successfully.');
     }
@@ -125,6 +135,7 @@ class StoreController extends Controller
         $codes = explode("\n", $request->input('codes'));
         $count = $this->shopService->uploadCodes($shopItem, $codes);
 
+        $this->moderatorService->log(Auth::user(), 'store-item.codes-uploaded', 'shop_item', $shopItem->id, "Uploaded {$count} codes for: {$shopItem->name}");
         return redirect()->route('admin.store.items')
             ->with('success', "{$count} codes uploaded successfully.");
     }
@@ -146,6 +157,7 @@ class StoreController extends Controller
 
         try {
             $this->shopService->fulfill($userPurchase, $admin, $request->input('note'));
+            $this->moderatorService->log($admin, 'store-order.fulfilled', 'user_purchase', $userPurchase->id, 'Fulfilled purchase #' . $userPurchase->id . ' — item: ' . ($userPurchase->shopItem?->name ?? 'N/A'));
             return redirect()->route('admin.store.orders')
                 ->with('success', 'Purchase fulfilled successfully.');
         } catch (\RuntimeException $e) {
@@ -163,6 +175,7 @@ class StoreController extends Controller
 
         try {
             $this->shopService->cancel($userPurchase, $admin, $request->input('reason'));
+            $this->moderatorService->log($admin, 'store-order.cancelled', 'user_purchase', $userPurchase->id, 'Cancelled purchase #' . $userPurchase->id . ' — reason: ' . $request->input('reason'));
             return redirect()->route('admin.store.orders')
                 ->with('success', 'Purchase cancelled and XP refunded.');
         } catch (\RuntimeException $e) {
@@ -180,6 +193,7 @@ class StoreController extends Controller
 
         try {
             $this->shopService->refund($userPurchase, $admin, $request->input('reason'));
+            $this->moderatorService->log($admin, 'store-order.refunded', 'user_purchase', $userPurchase->id, 'Refunded purchase #' . $userPurchase->id . ' — reason: ' . $request->input('reason'));
             return redirect()->route('admin.store.orders')
                 ->with('success', 'Purchase refunded and XP returned, code recycled.');
         } catch (\RuntimeException $e) {

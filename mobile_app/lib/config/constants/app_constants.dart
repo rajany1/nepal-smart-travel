@@ -10,7 +10,7 @@ class AppConstants {
 
   // API
   static const String devEmulator = 'http://10.0.2.2:8000/api/v1';
-  static const String devPhone = 'http://192.168.10.65:8000/api/v1';
+  static const String devPhone = 'http://192.168.10.66:8000/api/v1';
   static String get prod => const String.fromEnvironment(
     'API_BASE_URL',
     defaultValue: 'https://api.nepalsmarttravel.com/api/v1',
@@ -41,7 +41,7 @@ class AppConstants {
   // Google OAuth — set via --dart-define=GOOGLE_CLIENT_ID=... or env
   static String get googleServerClientId => const String.fromEnvironment(
     'GOOGLE_CLIENT_ID',
-    defaultValue: '',
+    defaultValue: '672688394813-sk0p5l42e05845gsvjghe8f9cuj8ke69.apps.googleusercontent.com',
   );
 
   // OneSignal Push Notifications — set via --dart-define=ONESIGNAL_APP_ID=... or env

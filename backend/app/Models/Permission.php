@@ -9,7 +9,7 @@ class Permission extends Model
 {
     protected $fillable = [
         'name', 'display_name', 'description', 'group', 'is_system',
-        'menu_label', 'menu_icon', 'menu_order', 'route_name',
+        'menu_label', 'menu_icon', 'menu_order', 'route_name', 'menu_group',
     ];
 
     protected function casts(): array

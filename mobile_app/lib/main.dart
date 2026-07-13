@@ -14,6 +14,7 @@ import 'providers/leaderboard_provider.dart';
 import 'providers/map_view_provider.dart';
 import 'providers/store_provider.dart';
 import 'providers/ad_provider.dart';
+import 'providers/booking_provider.dart';
 
 import 'features/auth/login_screen.dart';
 import 'features/auth/register_screen.dart';
@@ -79,6 +80,7 @@ class NepalSmartTravelApp extends StatelessWidget {
         ChangeNotifierProvider(create: (_) => MapViewProvider()),
         ChangeNotifierProvider(create: (_) => StoreProvider()),
         ChangeNotifierProvider(create: (_) => AdProvider()),
+        ChangeNotifierProvider(create: (_) => BookingProvider()),
       ],
       child: MaterialApp(
         debugShowCheckedModeBanner: false,

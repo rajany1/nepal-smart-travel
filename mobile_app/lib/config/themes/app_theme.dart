@@ -5,39 +5,39 @@ class AppTheme {
   AppTheme._();
 
   // === Standardized Text Sizes ===
-  // Use these everywhere instead of hardcoded fontSize values
-  static const double textXs = 10;    // micro labels, status badges
-  static const double textSm = 12;    // captions, timestamps, secondary info
-  static const double textBase = 14;  // body text, buttons, descriptions
-  static const double textLg = 16;    // card titles, section headers
-  static const double textXl = 18;    // screen headings
-  static const double text2xl = 20;   // large headings
-  static const double text3xl = 24;   // page titles
+  static const double textXs = 10;
+  static const double textSm = 12;
+  static const double textBase = 14;
+  static const double textLg = 16;
+  static const double textXl = 18;
+  static const double text2xl = 20;
+  static const double text3xl = 24;
 
-  // Colors
-  static const Color primaryColor = Color(0xFF1B5E20);
-  static const Color primaryLight = Color(0xFF4CAF50);
-  static const Color primaryDark = Color(0xFF0D3310);
-  static const Color secondaryColor = Color(0xFFFF8F00);
+  // Himalayan Horizon Colors
+  static const Color primaryColor = Color(0xFF00695C);
+  static const Color primaryLight = Color(0xFF00897B);
+  static const Color primaryDark = Color(0xFF004D40);
+  static const Color secondaryColor = Color(0xFFF39C12);
+  static const Color secondaryLight = Color(0xFFF6A415);
+  static const Color secondaryDark = Color(0xFFD68910);
   static const Color accentColor = Color(0xFF00BFA5);
-  static const Color errorColor = Color(0xFFD32F2F);
-  static const Color warningColor = Color(0xFFFFA000);
-  static const Color successColor = Color(0xFF388E3C);
-  static const Color infoColor = Color(0xFF1976D2);
+  static const Color errorColor = Color(0xFFE74C3C);
+  static const Color warningColor = Color(0xFFF39C12);
+  static const Color successColor = Color(0xFF27AE60);
+  static const Color infoColor = Color(0xFF2980B9);
 
   // Neutral Colors
-  static const Color backgroundColor = Color(0xFFF5F5F5);
+  static const Color backgroundColor = Color(0xFFFDFBF7);
   static const Color surfaceColor = Colors.white;
   static const Color darkSurfaceColor = Color(0xFF121212);
-  static const Color textPrimary = Color(0xFF212121);
-  static const Color textSecondary = Color(0xFF757575);
-  static const Color dividerColor = Color(0xFFE0E0E0);
+  static const Color textPrimary = Color(0xFF2D3436);
+  static const Color textSecondary = Color(0xFF636E72);
+  static const Color dividerColor = Color(0xFFE8E8E8);
 
-  // Brand Colors - Nepal Theme
-  static const Color nepalRed = Color(0xFFDC143C);
-  static const Color nepalBlue = Color(0xFF003893);
-  static const Color himalayaWhite = Color(0xFFF5F5F5);
-  static const Color forestGreen = Color(0xFF1B5E20);
+  // Brand Colors - Himalayan Horizon
+  static const Color saffron = Color(0xFFF39C12);
+  static const Color teal = Color(0xFF00695C);
+  static const Color himalayaWhite = Color(0xFFFDFBF7);
 
   // Verification Tick Colors
   static const Color grayTick = Color(0xFF9E9E9E);

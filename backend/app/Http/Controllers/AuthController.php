@@ -254,7 +254,6 @@ class AuthController extends Controller
 
     private function verifyGoogleToken(string $idToken): ?array
     {
-        // Verify the token using Google's tokeninfo endpoint
         $response = Http::get('https://oauth2.googleapis.com/tokeninfo', [
             'id_token' => $idToken,
         ]);
@@ -265,17 +264,14 @@ class AuthController extends Controller
 
         $payload = $response->json();
 
-        // Validate the audience (must match our Web Client ID)
         $clientId = config('services.google.client_id');
+        $androidClientId = config('services.google.android_client_id');
         $aud = $payload['aud'] ?? null;
         $azp = $payload['azp'] ?? null;
 
-        // aud should match our server (web) client ID
-        // azp may be the Android client ID, which is also acceptable
-        $validAudiences = [$clientId];
-        $androidClientId = $azp;
+        $validAudiences = array_filter([$clientId, $androidClientId, $azp]);
 
-        if (!in_array($aud, $validAudiences) && $aud !== $azp) {
+        if (!in_array($aud, $validAudiences)) {
             return null;
         }
 

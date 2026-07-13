@@ -8,7 +8,7 @@
             <h3 class="text-2xl font-bold text-slate-900">XP Reward Store</h3>
             <p class="text-sm text-slate-500 mt-1">Partner-sponsored rewards — users redeem XP for discounts, free items, and offers.</p>
         </div>
-        <button onclick="document.getElementById('createModal').classList.remove('hidden')" class="bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-2.5 rounded-xl text-sm font-semibold shadow transition flex items-center gap-2">
+        <button onclick="document.getElementById('createModal').classList.remove('hidden')" class="bg-primary-600 hover:bg-primary-700 text-white px-5 py-2.5 rounded-xl text-sm font-semibold shadow transition flex items-center gap-2">
             <i class="fas fa-plus"></i> New Item
         </button>
     </div>
@@ -32,7 +32,7 @@
                     <tr class="hover:bg-slate-50 transition">
                         <td class="px-6 py-4">
                             <div class="flex items-center gap-3">
-                                <i class="fas fa-{{ $item->icon }} text-indigo-600 text-xl w-6 text-center"></i>
+                                <i class="fas fa-{{ $item->icon }} text-primary-600 text-xl w-6 text-center"></i>
                                 <div>
                                     <p class="font-semibold text-slate-900">{{ $item->name }}</p>
                                     @if($item->description)
@@ -50,7 +50,7 @@
                                 @if($item->sponsor->logo)
                                 <img src="{{ $item->sponsor->logo_url }}" alt="" class="w-7 h-7 rounded object-cover bg-slate-100">
                                 @else
-                                <div class="w-7 h-7 rounded bg-indigo-100 grid place-items-center text-indigo-600 text-xs">
+                                <div class="w-7 h-7 rounded bg-primary-100 grid place-items-center text-primary-600 text-xs">
                                     <i class="fas fa-building"></i>
                                 </div>
                                 @endif
@@ -94,7 +94,7 @@
                                     <i class="fas fa-upload"></i> Codes
                                 </button>
                                 @endif
-                                <button onclick="openEdit({{ $item->id }})" class="px-3 py-1.5 text-xs font-medium bg-indigo-50 text-indigo-600 rounded-lg hover:bg-indigo-100 transition">
+                                <button onclick="openEdit({{ $item->id }})" class="px-3 py-1.5 text-xs font-medium bg-primary-50 text-primary-600 rounded-lg hover:bg-primary-100 transition">
                                     <i class="fas fa-edit"></i> Edit
                                 </button>
                             </div>
@@ -102,7 +102,7 @@
                     </tr>
                     @empty
                     <tr>
-                        <td colspan="7" class="px-6 py-12 text-center text-slate-400">
+                        <td colspan="6" class="px-6 py-12 text-center text-slate-400">
                             <i class="fas fa-store text-3xl mb-3"></i>
                             <p class="text-sm">No shop items yet.</p>
                             <p class="text-xs">Create your first sponsor reward!</p>
@@ -147,7 +147,7 @@
                 <label class="block text-xs font-semibold text-slate-600 mb-1">Description</label>
                 <textarea name="description" rows="2" class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm"></textarea>
             </div>
-            <div class="grid grid-cols-2 gap-4">
+            <div class="grid grid-cols-3 gap-4">
                 <div>
                     <label class="block text-xs font-semibold text-slate-600 mb-1">Sponsor</label>
                     <select name="sponsor_id" class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm">
@@ -160,6 +160,20 @@
                 <div>
                     <label class="block text-xs font-semibold text-slate-600 mb-1">Price (XP)</label>
                     <input type="number" name="price_xp" min="1" required class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm">
+                </div>
+                <div>
+                    <label class="block text-xs font-semibold text-slate-600 mb-1">Discount Type</label>
+                    <select name="discount_type" class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm">
+                        <option value="">— None —</option>
+                        <option value="percentage">Percentage (%)</option>
+                        <option value="fixed">Fixed (NPR)</option>
+                    </select>
+                </div>
+            </div>
+            <div class="grid grid-cols-1 gap-4">
+                <div>
+                    <label class="block text-xs font-semibold text-slate-600 mb-1">Discount Value</label>
+                    <input type="number" name="discount_value" min="0" step="0.01" class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm" placeholder="e.g. 20 for 20% or 500 for Rs. 500 off">
                 </div>
             </div>
             <div class="grid grid-cols-3 gap-4">
@@ -208,7 +222,7 @@
             </div>
             <div class="flex justify-end gap-3 pt-2">
                 <button type="button" onclick="document.getElementById('createModal').classList.add('hidden')" class="px-4 py-2 text-sm text-slate-600 hover:bg-slate-100 rounded-lg">Cancel</button>
-                <button type="submit" class="px-4 py-2 text-sm font-semibold bg-indigo-600 text-white rounded-lg hover:bg-indigo-700">Create Item</button>
+                <button type="submit" class="px-4 py-2 text-sm font-semibold bg-primary-600 text-white rounded-lg hover:bg-primary-700">Create Item</button>
             </div>
         </form>
     </div>
@@ -247,7 +261,7 @@
                 <label class="block text-xs font-semibold text-slate-600 mb-1">Description</label>
                 <textarea name="description" id="editDescription" rows="2" class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm"></textarea>
             </div>
-            <div class="grid grid-cols-2 gap-4">
+            <div class="grid grid-cols-3 gap-4">
                 <div>
                     <label class="block text-xs font-semibold text-slate-600 mb-1">Sponsor</label>
                     <select name="sponsor_id" id="editSponsor" class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm">
@@ -260,6 +274,20 @@
                 <div>
                     <label class="block text-xs font-semibold text-slate-600 mb-1">Price (XP)</label>
                     <input type="number" name="price_xp" id="editPrice" min="1" required class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm">
+                </div>
+                <div>
+                    <label class="block text-xs font-semibold text-slate-600 mb-1">Discount Type</label>
+                    <select name="discount_type" id="editDiscountType" class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm">
+                        <option value="">— None —</option>
+                        <option value="percentage">Percentage (%)</option>
+                        <option value="fixed">Fixed (NPR)</option>
+                    </select>
+                </div>
+            </div>
+            <div class="grid grid-cols-1 gap-4">
+                <div>
+                    <label class="block text-xs font-semibold text-slate-600 mb-1">Discount Value</label>
+                    <input type="number" name="discount_value" id="editDiscountValue" min="0" step="0.01" class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm" placeholder="e.g. 20 for 20% or 500 for Rs. 500 off">
                 </div>
             </div>
             <div class="grid grid-cols-3 gap-4">
@@ -308,7 +336,7 @@
             </div>
             <div class="flex justify-end gap-3 pt-2">
                 <button type="button" onclick="document.getElementById('editModal').classList.add('hidden')" class="px-4 py-2 text-sm text-slate-600 hover:bg-slate-100 rounded-lg">Cancel</button>
-                <button type="submit" class="px-4 py-2 text-sm font-semibold bg-indigo-600 text-white rounded-lg hover:bg-indigo-700">Update Item</button>
+                <button type="submit" class="px-4 py-2 text-sm font-semibold bg-primary-600 text-white rounded-lg hover:bg-primary-700">Update Item</button>
             </div>
         </form>
     </div>
@@ -357,6 +385,8 @@ function openEdit(id) {
     document.getElementById('editDescription').value = i.description || '';
     document.getElementById('editSponsor').value = i.sponsor_id || '';
     document.getElementById('editRewardType').value = i.reward_type;
+    document.getElementById('editDiscountType').value = i.discount_type || '';
+    document.getElementById('editDiscountValue').value = i.discount_value || '';
     document.getElementById('editPrice').value = i.price_xp;
     document.getElementById('editMinLevel').value = i.min_level;
     document.getElementById('editStockType').value = i.stock_type;

@@ -5,7 +5,7 @@
 <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
     <div class="lg:col-span-2 bg-white rounded-xl shadow-sm border border-gray-100">
         <div class="px-6 py-3 border-b border-gray-100 flex items-center gap-1">
-            <a href="{{ route('admin.places') }}" class="px-3 py-1.5 text-sm font-medium rounded-lg {{ request()->routeIs('admin.places') && !request()->routeIs('admin.places.osm') ? 'bg-indigo-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200' }}">
+            <a href="{{ route('admin.places') }}" class="px-3 py-1.5 text-sm font-medium rounded-lg {{ request()->routeIs('admin.places') && !request()->routeIs('admin.places.osm') ? 'bg-primary-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200' }}">
                 <i class="fas fa-database mr-1"></i> Database
             </a>
             <a href="{{ route('admin.places.osm') }}" class="px-3 py-1.5 text-sm font-medium rounded-lg {{ request()->routeIs('admin.places.osm') ? 'bg-emerald-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200' }}">
@@ -24,17 +24,17 @@
                     <input type="hidden" name="direction" value="{{ $direction }}">
                     <div class="relative">
                         <i class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-xs"></i>
-                        <input type="text" name="search" value="{{ $search ?? '' }}" placeholder="Search name, address, district..." class="pl-8 pr-3 py-1.5 text-sm border border-gray-300 rounded-lg w-64 focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 outline-none">
+                        <input type="text" name="search" value="{{ $search ?? '' }}" placeholder="Search name, address, district..." class="pl-8 pr-3 py-1.5 text-sm border border-gray-300 rounded-lg w-64 focus:ring-2 focus:ring-primary-200 focus:border-primary-400 outline-none">
                     </div>
-                    <button type="submit" class="px-3 py-1.5 text-sm bg-indigo-600 text-white rounded-lg hover:bg-indigo-700">Search</button>
+                    <button type="submit" class="px-3 py-1.5 text-sm bg-primary-600 text-white rounded-lg hover:bg-primary-700">Search</button>
                     @if($search)
                     <a href="{{ route('admin.places', ['category_id' => $categoryId]) }}" class="px-3 py-1.5 text-sm bg-gray-100 text-gray-600 rounded-lg hover:bg-gray-200">Clear</a>
                     @endif
                 </form>
                 <div class="w-px h-6 bg-gray-200 mx-1"></div>
-                <a href="{{ route('admin.places', array_merge(request()->query(), ['category_id' => 'all'])) }}" class="px-3 py-1.5 text-sm rounded-lg {{ $categoryId === 'all' ? 'bg-indigo-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200' }}">All</a>
+                <a href="{{ route('admin.places', array_merge(request()->query(), ['category_id' => 'all'])) }}" class="px-3 py-1.5 text-sm rounded-lg {{ $categoryId === 'all' ? 'bg-primary-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200' }}">All</a>
                 @foreach($categories as $cat)
-                <a href="{{ route('admin.places', array_merge(request()->query(), ['category_id' => $cat->id])) }}" class="px-3 py-1.5 text-sm rounded-lg {{ $categoryId == $cat->id ? 'bg-indigo-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200' }}">{{ $cat->name }}</a>
+                <a href="{{ route('admin.places', array_merge(request()->query(), ['category_id' => $cat->id])) }}" class="px-3 py-1.5 text-sm rounded-lg {{ $categoryId == $cat->id ? 'bg-primary-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200' }}">{{ $cat->name }}</a>
                 @endforeach
                 <button onclick="openCategoryModal()" class="px-3 py-1.5 text-sm bg-gray-100 text-gray-600 rounded-lg hover:bg-gray-200" title="Manage Categories">
                     <i class="fas fa-cog"></i>
@@ -51,7 +51,7 @@
                 $sortIcon = function($column) use ($sort, $direction) {
                     if ($sort !== $column) return '<i class="fas fa-sort text-gray-300 ml-1 text-[10px]"></i>';
                     $icon = $direction === 'asc' ? 'fa-sort-up' : 'fa-sort-down';
-                    return '<i class="fas ' . $icon . ' text-indigo-600 ml-1 text-[10px]"></i>';
+                    return '<i class="fas ' . $icon . ' text-primary-600 ml-1 text-[10px]"></i>';
                 };
             @endphp
             <form id="bulkForm" method="POST" action="">
@@ -63,23 +63,23 @@
                             <input type="checkbox" id="selectAll" onchange="toggleAll(this)" class="rounded border-gray-300">
                         </th>
                         <th class="text-left px-6 py-3 text-xs font-medium text-gray-500 uppercase">
-                            <a href="{{ $sortUrl('id') }}" class="flex items-center gap-1 hover:text-indigo-600">ID {!! $sortIcon('id') !!}</a>
+                            <a href="{{ $sortUrl('id') }}" class="flex items-center gap-1 hover:text-primary-600">ID {!! $sortIcon('id') !!}</a>
                         </th>
                         <th class="text-left px-6 py-3 text-xs font-medium text-gray-500 uppercase">
-                            <a href="{{ $sortUrl('name') }}" class="flex items-center gap-1 hover:text-indigo-600">Name {!! $sortIcon('name') !!}</a>
+                            <a href="{{ $sortUrl('name') }}" class="flex items-center gap-1 hover:text-primary-600">Name {!! $sortIcon('name') !!}</a>
                         </th>
                         <th class="text-left px-6 py-3 text-xs font-medium text-gray-500 uppercase">Category</th>
                         <th class="text-left px-6 py-3 text-xs font-medium text-gray-500 uppercase">
-                            <a href="{{ $sortUrl('district') }}" class="flex items-center gap-1 hover:text-indigo-600">District {!! $sortIcon('district') !!}</a>
+                            <a href="{{ $sortUrl('district') }}" class="flex items-center gap-1 hover:text-primary-600">District {!! $sortIcon('district') !!}</a>
                         </th>
                         <th class="text-left px-6 py-3 text-xs font-medium text-gray-500 uppercase">
-                            <a href="{{ $sortUrl('average_rating') }}" class="flex items-center gap-1 hover:text-indigo-600">Rating {!! $sortIcon('average_rating') !!}</a>
+                            <a href="{{ $sortUrl('average_rating') }}" class="flex items-center gap-1 hover:text-primary-600">Rating {!! $sortIcon('average_rating') !!}</a>
                         </th>
                         <th class="text-left px-6 py-3 text-xs font-medium text-gray-500 uppercase">
-                            <a href="{{ $sortUrl('total_reviews') }}" class="flex items-center gap-1 hover:text-indigo-600">Reviews {!! $sortIcon('total_reviews') !!}</a>
+                            <a href="{{ $sortUrl('total_reviews') }}" class="flex items-center gap-1 hover:text-primary-600">Reviews {!! $sortIcon('total_reviews') !!}</a>
                         </th>
                         <th class="text-left px-6 py-3 text-xs font-medium text-gray-500 uppercase">
-                            <a href="{{ $sortUrl('is_featured') }}" class="flex items-center gap-1 hover:text-indigo-600">Featured {!! $sortIcon('is_featured') !!}</a>
+                            <a href="{{ $sortUrl('is_featured') }}" class="flex items-center gap-1 hover:text-primary-600">Featured {!! $sortIcon('is_featured') !!}</a>
                         </th>
                         <th class="text-right px-6 py-3 text-xs font-medium text-gray-500 uppercase">Actions</th>
                     </tr>
@@ -116,7 +116,7 @@
                             @endif
                         </td>
                         <td class="px-6 py-4 text-right flex gap-2 justify-end">
-                            <button type="button" onclick="openEditModal({{ $place->id }})" class="px-3 py-1.5 text-xs font-medium bg-indigo-50 text-indigo-600 rounded-lg hover:bg-indigo-100 transition">
+                            <button type="button" onclick="openEditModal({{ $place->id }})" class="px-3 py-1.5 text-xs font-medium bg-primary-50 text-primary-600 rounded-lg hover:bg-primary-100 transition">
                                 <i class="fas fa-edit"></i>
                             </button>
                             <form method="POST" action="{{ route('admin.places.feature', $place->id) }}" class="inline">
@@ -146,10 +146,10 @@
             </form>
         </div>
         <!-- Bulk Action Bar -->
-        <div id="bulkBar" class="hidden px-6 py-3 bg-indigo-50 border-t border-indigo-100 flex items-center justify-between">
-            <span class="text-sm text-indigo-700"><span id="selectedCount">0</span> selected</span>
+        <div id="bulkBar" class="hidden px-6 py-3 bg-primary-50 border-t border-primary-100 flex items-center justify-between">
+            <span class="text-sm text-primary-700"><span id="selectedCount">0</span> selected</span>
             <div class="flex gap-2">
-                <button onclick="openBulkEditModal()" class="px-3 py-1.5 text-xs font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition"><i class="fas fa-edit mr-1"></i>Bulk Edit</button>
+                <button onclick="openBulkEditModal()" class="px-3 py-1.5 text-xs font-medium bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition"><i class="fas fa-edit mr-1"></i>Bulk Edit</button>
                 <button onclick="bulkDelete()" class="px-3 py-1.5 text-xs font-medium bg-red-600 text-white rounded-lg hover:bg-red-700 transition"><i class="fas fa-trash mr-1"></i>Delete Selected</button>
             </div>
         </div>
@@ -171,7 +171,7 @@
                     <div class="space-y-3">
                         <div>
                             <label class="block text-sm font-medium text-gray-700 mb-1">Name</label>
-                            <input type="text" name="name" required class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500">
+                            <input type="text" name="name" required class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-primary-500">
                         </div>
                         <div>
                             <label class="block text-sm font-medium text-gray-700 mb-1">Description</label>
@@ -203,7 +203,7 @@
                                 <input type="number" step="0.000001" name="longitude" required class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm">
                             </div>
                         </div>
-                        <button type="submit" class="w-full bg-indigo-600 text-white py-2 px-4 rounded-lg text-sm font-medium hover:bg-indigo-700 transition">
+                        <button type="submit" class="w-full bg-primary-600 text-white py-2 px-4 rounded-lg text-sm font-medium hover:bg-primary-700 transition">
                             <i class="fas fa-plus mr-1"></i> Add Place
                         </button>
                     </div>
@@ -263,8 +263,8 @@
                 <form method="POST" action="{{ route('admin.places.categories') }}" class="mb-4">
                     @csrf
                     <div class="flex gap-2">
-                        <input type="text" name="name" placeholder="New category name" required class="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500">
-                        <button type="submit" class="px-3 py-2 bg-indigo-600 text-white text-sm rounded-lg hover:bg-indigo-700"><i class="fas fa-plus"></i></button>
+                        <input type="text" name="name" placeholder="New category name" required class="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-primary-500">
+                        <button type="submit" class="px-3 py-2 bg-primary-600 text-white text-sm rounded-lg hover:bg-primary-700"><i class="fas fa-plus"></i></button>
                     </div>
                 </form>
                 <div class="space-y-2">
@@ -299,7 +299,7 @@
                 <div class="grid grid-cols-2 gap-4">
                     <div class="col-span-2">
                         <label class="block text-sm font-medium text-gray-700 mb-1">Name</label>
-                        <input type="text" name="name" id="edit_name" required class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500">
+                        <input type="text" name="name" id="edit_name" required class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-primary-500">
                     </div>
                     <div class="col-span-2">
                         <label class="block text-sm font-medium text-gray-700 mb-1">Description</label>
@@ -344,18 +344,18 @@
                     <div class="col-span-2">
                         <div class="flex gap-4">
                             <label class="flex items-center gap-2">
-                                <input type="checkbox" name="is_verified" id="edit_is_verified" value="1" class="rounded border-gray-300 text-indigo-600">
+                                <input type="checkbox" name="is_verified" id="edit_is_verified" value="1" class="rounded border-gray-300 text-primary-600">
                                 <span class="text-sm text-gray-700">Verified</span>
                             </label>
                             <label class="flex items-center gap-2">
-                                <input type="checkbox" name="is_active" id="edit_is_active" value="1" class="rounded border-gray-300 text-indigo-600">
+                                <input type="checkbox" name="is_active" id="edit_is_active" value="1" class="rounded border-gray-300 text-primary-600">
                                 <span class="text-sm text-gray-700">Active</span>
                             </label>
                         </div>
                     </div>
                     <div class="col-span-2">
                         <label class="block text-sm font-medium text-gray-700 mb-1">Add Images</label>
-                        <input type="file" name="images[]" multiple accept="image/*" class="w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100">
+                        <input type="file" name="images[]" multiple accept="image/*" class="w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-primary-50 file:text-primary-700 hover:file:bg-primary-100">
                     </div>
                     <div class="col-span-2" id="existingImages">
                         <!-- Existing images loaded via JS -->
@@ -363,7 +363,7 @@
                 </div>
                 <div class="mt-6 flex justify-end gap-3">
                     <button type="button" onclick="closeEditModal()" class="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200">Cancel</button>
-                    <button type="submit" class="px-4 py-2 text-sm font-medium text-white bg-indigo-600 rounded-lg hover:bg-indigo-700">Save Changes</button>
+                    <button type="submit" class="px-4 py-2 text-sm font-medium text-white bg-primary-600 rounded-lg hover:bg-primary-700">Save Changes</button>
                 </div>
             </form>
         </div>
@@ -485,14 +485,14 @@ function closeBulkEditModal() {
 }
 
 // Auto-open edit modal from place detail page
-document.addEventListener('DOMContentLoaded', function() {
+(function() {
     const params = new URLSearchParams(window.location.search);
     const editId = params.get('edit_id');
     if (editId) {
         openEditModal(parseInt(editId));
         history.replaceState(null, '', window.location.pathname + window.location.search.replace(/edit_id=\d+&?/, '').replace(/[?&]$/, ''));
     }
-});
+})();
 
 // Close on Escape key
 document.addEventListener('keydown', function(e) {
@@ -525,22 +525,22 @@ document.addEventListener('keydown', function(e) {
                     </div>
                     <div class="flex gap-4">
                         <label class="flex items-center gap-2">
-                            <input type="checkbox" name="is_verified" value="1" class="rounded border-gray-300 text-indigo-600">
+                            <input type="checkbox" name="is_verified" value="1" class="rounded border-gray-300 text-primary-600">
                             <span class="text-sm text-gray-700">Mark Verified</span>
                         </label>
                         <label class="flex items-center gap-2">
-                            <input type="checkbox" name="is_active" value="1" class="rounded border-gray-300 text-indigo-600">
+                            <input type="checkbox" name="is_active" value="1" class="rounded border-gray-300 text-primary-600">
                             <span class="text-sm text-gray-700">Set Active</span>
                         </label>
                         <label class="flex items-center gap-2">
-                            <input type="checkbox" name="is_featured" value="1" class="rounded border-gray-300 text-indigo-600">
+                            <input type="checkbox" name="is_featured" value="1" class="rounded border-gray-300 text-primary-600">
                             <span class="text-sm text-gray-700">Set Featured</span>
                         </label>
                     </div>
                 </div>
                 <div class="mt-6 flex justify-end gap-3">
                     <button type="button" onclick="closeBulkEditModal()" class="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200">Cancel</button>
-                    <button type="submit" class="px-4 py-2 text-sm font-medium text-white bg-indigo-600 rounded-lg hover:bg-indigo-700">Apply to All Selected</button>
+                    <button type="submit" class="px-4 py-2 text-sm font-medium text-white bg-primary-600 rounded-lg hover:bg-primary-700">Apply to All Selected</button>
                 </div>
             </form>
         </div>
@@ -557,9 +557,9 @@ document.addEventListener('keydown', function(e) {
         <div class="px-6 py-4">
             <form method="POST" action="{{ route('admin.places.categories') }}" class="flex items-center gap-2 mb-6">
                 @csrf
-                <input type="text" name="name" placeholder="New category name" required class="flex-1 px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 outline-none">
-                <input type="text" name="icon" placeholder="Icon name (optional)" class="w-36 px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 outline-none">
-                <button type="submit" class="px-4 py-2 text-sm font-medium text-white bg-indigo-600 rounded-lg hover:bg-indigo-700">Add</button>
+                <input type="text" name="name" placeholder="New category name" required class="flex-1 px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-200 focus:border-primary-400 outline-none">
+                <input type="text" name="icon" placeholder="Icon name (optional)" class="w-36 px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-200 focus:border-primary-400 outline-none">
+                <button type="submit" class="px-4 py-2 text-sm font-medium text-white bg-primary-600 rounded-lg hover:bg-primary-700">Add</button>
             </form>
             <div class="space-y-2">
                 @foreach($categories as $cat)
@@ -568,9 +568,9 @@ document.addEventListener('keydown', function(e) {
                         @csrf
                         @method('PUT')
                         <input type="hidden" name="id" value="{{ $cat->id }}">
-                        <input type="text" name="name" value="{{ $cat->name }}" required class="flex-1 px-2 py-1 text-sm border border-transparent hover:border-gray-300 rounded focus:border-indigo-400 focus:ring-1 focus:ring-indigo-200 outline-none bg-transparent focus:bg-white">
-                        <input type="text" name="icon" value="{{ $cat->icon }}" placeholder="icon" class="w-20 px-2 py-1 text-xs border border-transparent hover:border-gray-300 rounded focus:border-indigo-400 focus:ring-1 focus:ring-indigo-200 outline-none bg-transparent focus:bg-white">
-                        <button type="submit" class="text-xs text-indigo-600 hover:text-indigo-800 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <input type="text" name="name" value="{{ $cat->name }}" required class="flex-1 px-2 py-1 text-sm border border-transparent hover:border-gray-300 rounded focus:border-primary-400 focus:ring-1 focus:ring-primary-200 outline-none bg-transparent focus:bg-white">
+                        <input type="text" name="icon" value="{{ $cat->icon }}" placeholder="icon" class="w-20 px-2 py-1 text-xs border border-transparent hover:border-gray-300 rounded focus:border-primary-400 focus:ring-1 focus:ring-primary-200 outline-none bg-transparent focus:bg-white">
+                        <button type="submit" class="text-xs text-primary-600 hover:text-primary-800 opacity-0 group-hover:opacity-100 transition-opacity">
                             <i class="fas fa-check"></i>
                         </button>
                     </form>

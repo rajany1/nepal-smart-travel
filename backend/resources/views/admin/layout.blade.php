@@ -5,10 +5,33 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>@yield('title', 'Dashboard') - {{ config('app.name') }}</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        primary: {
+                            '50': '#E0F2F1', '100': '#B2DFDB', '200': '#80CBC4',
+                            '300': '#4DB6AC', '400': '#26A69A', '500': '#009688',
+                            '600': '#00897B', '700': '#00796B', '800': '#00695C',
+                            '900': '#004D40',
+                        },
+                        accent: {
+                            '50': '#FFF3E0', '100': '#FFE0B2', '200': '#FFCC80',
+                            '300': '#FFB74D', '400': '#FFA726', '500': '#F39C12',
+                            '600': '#D68910', '700': '#B9770E', '800': '#9A6A0C',
+                            '900': '#7B550A',
+                        },
+                    },
+                },
+            },
+        };
+    </script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/@hotwired/turbo@7/dist/turbo.min.js"></script>
     <style>
         body {
-            background: #eef2ff;
+            background: #FDFBF7;
         }
         .scrollbar-thin::-webkit-scrollbar {
             width: 8px;
@@ -36,98 +59,57 @@
     @endphp
     <div class="flex min-h-screen">
         <!-- Sidebar -->
-        <aside class="hidden xl:flex flex-col w-72 bg-slate-900 text-slate-100 shadow-xl">
-            <div class="px-6 py-5 border-b border-slate-800">
+        <aside class="hidden xl:flex flex-col w-72 bg-primary-900 text-teal-100 shadow-xl">
+            <div class="px-6 py-5 border-b border-primary-800">
                 <div class="flex items-center gap-3">
-                    <div class="w-12 h-12 rounded-2xl bg-indigo-600 grid place-items-center text-white text-xl shadow-lg">
+                    <div class="w-12 h-12 rounded-2xl bg-accent-500 grid place-items-center text-white text-xl shadow-lg">
                         <i class="fas fa-shield-alt"></i>
                     </div>
                     <div>
                         <h1 class="text-xl font-semibold">Nepal Admin</h1>
-                        <p class="text-xs text-slate-400">Smart Travel Dashboard</p>
+                        <p class="text-xs text-teal-300">Smart Travel Dashboard</p>
                     </div>
                 </div>
             </div>
+            @php
+                $menuGroups = [
+                    'main' => ['label' => null, 'admin_only' => false],
+                    'monetization' => ['label' => 'Monetization', 'admin_only' => false],
+                    'store' => ['label' => 'Sponsors & Store', 'admin_only' => false],
+                    'access' => ['label' => 'Access Control', 'admin_only' => true],
+                ];
+            @endphp
             <nav class="flex-1 overflow-y-auto p-4 space-y-2 scrollbar-thin">
-                @foreach($menuPerms as $mp)
-                    @can($mp->name)
-                    <a href="{{ route($mp->route_name) }}" class="group flex items-center gap-3 rounded-3xl px-4 py-3 transition {{ request()->routeIs($mp->route_name . '*') ? 'bg-indigo-700 text-white shadow-lg' : 'text-slate-300 hover:bg-slate-800 hover:text-white' }}">
-                        <i class="fas fa-{{ $mp->menu_icon }} w-5 text-center"></i>
-                        <span class="font-medium">{{ $mp->menu_label }}</span>
-                        @if($mp->name === 'approve_reports' && $pendingCount > 0)
-                            <span class="ml-auto rounded-full bg-red-500 px-2.5 py-0.5 text-[11px] font-semibold text-white">{{ $pendingCount }}</span>
+                @foreach($menuGroups as $group => $cfg)
+                    @php $groupPerms = $menuPerms->where('menu_group', $group); @endphp
+                    @if($groupPerms->isNotEmpty() && (!$cfg['admin_only'] || !$isModerator))
+                        @if($cfg['label'])
+                        <div class="pt-3 border-t border-primary-800">
+                            <p class="px-4 text-xs font-semibold text-teal-400 uppercase tracking-wider mb-2">{{ $cfg['label'] }}</p>
+                        </div>
                         @endif
-                    </a>
-                    @endcan
+                        @foreach($groupPerms as $mp)
+                            @can($mp->name)
+                            <a href="{{ route($mp->route_name) }}" class="group flex items-center gap-3 rounded-3xl px-4 py-3 transition {{ request()->routeIs($mp->route_name . '*') ? 'bg-accent-500 text-white shadow-lg' : 'text-teal-200 hover:bg-primary-800 hover:text-white' }}">
+                                <i class="fas fa-{{ $mp->menu_icon }} w-5 text-center"></i>
+                                <span class="font-medium">{{ $mp->menu_label }}</span>
+                                @if($mp->name === 'approve_reports' && $pendingCount > 0)
+                                    <span class="ml-auto rounded-full bg-red-500 px-2.5 py-0.5 text-[11px] font-semibold text-white">{{ $pendingCount }}</span>
+                                @endif
+                            </a>
+                            @endcan
+                        @endforeach
+                    @endif
                 @endforeach
-
-                <div class="pt-3 border-t border-slate-800">
-                    <p class="px-4 text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">Monetization</p>
-                    <a href="{{ route('admin.travel-partners') }}" class="group flex items-center gap-3 rounded-3xl px-4 py-3 transition {{ request()->routeIs('admin.travel-partners*') ? 'bg-indigo-700 text-white shadow-lg' : 'text-slate-300 hover:bg-slate-800 hover:text-white' }}">
-                        <i class="fas fa-handshake w-5 text-center"></i>
-                        <span class="font-medium">Travel Partners</span>
-                    </a>
-                    <a href="{{ route('admin.bookings') }}" class="group flex items-center gap-3 rounded-3xl px-4 py-3 transition {{ request()->routeIs('admin.bookings*') ? 'bg-indigo-700 text-white shadow-lg' : 'text-slate-300 hover:bg-slate-800 hover:text-white' }}">
-                        <i class="fas fa-calendar-check w-5 text-center"></i>
-                        <span class="font-medium">Bookings & Commissions</span>
-                    </a>
-                    <a href="{{ route('admin.subscription.plans') }}" class="group flex items-center gap-3 rounded-3xl px-4 py-3 transition {{ request()->routeIs('admin.subscription.plans*') ? 'bg-indigo-700 text-white shadow-lg' : 'text-slate-300 hover:bg-slate-800 hover:text-white' }}">
-                        <i class="fas fa-crown w-5 text-center"></i>
-                        <span class="font-medium">Subscription Plans</span>
-                    </a>
-                    <a href="{{ route('admin.subscription.users') }}" class="group flex items-center gap-3 rounded-3xl px-4 py-3 transition {{ request()->routeIs('admin.subscription.users*') ? 'bg-indigo-700 text-white shadow-lg' : 'text-slate-300 hover:bg-slate-800 hover:text-white' }}">
-                        <i class="fas fa-users-cog w-5 text-center"></i>
-                        <span class="font-medium">Subscribers</span>
-                    </a>
-                    <a href="{{ route('admin.ad-campaigns') }}" class="group flex items-center gap-3 rounded-3xl px-4 py-3 transition {{ request()->routeIs('admin.ad-campaigns*') ? 'bg-indigo-700 text-white shadow-lg' : 'text-slate-300 hover:bg-slate-800 hover:text-white' }}">
-                        <i class="fas fa-ad w-5 text-center"></i>
-                        <span class="font-medium">Ad Campaigns</span>
-                    </a>
-                </div>
-
-                <div class="pt-3 border-t border-slate-800">
-                    <p class="px-4 text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">Sponsors & Store</p>
-                    <a href="{{ route('admin.sponsors') }}" class="group flex items-center gap-3 rounded-3xl px-4 py-3 transition {{ request()->routeIs('admin.sponsors*') ? 'bg-indigo-700 text-white shadow-lg' : 'text-slate-300 hover:bg-slate-800 hover:text-white' }}">
-                        <i class="fas fa-handshake w-5 text-center"></i>
-                        <span class="font-medium">Sponsors</span>
-                    </a>
-                    <a href="{{ route('admin.store.items') }}" class="group flex items-center gap-3 rounded-3xl px-4 py-3 transition {{ request()->routeIs('admin.store.items*') ? 'bg-indigo-700 text-white shadow-lg' : 'text-slate-300 hover:bg-slate-800 hover:text-white' }}">
-                        <i class="fas fa-store w-5 text-center"></i>
-                        <span class="font-medium">Reward Items</span>
-                    </a>
-                    <a href="{{ route('admin.store.orders') }}" class="group flex items-center gap-3 rounded-3xl px-4 py-3 transition {{ request()->routeIs('admin.store.orders*') ? 'bg-indigo-700 text-white shadow-lg' : 'text-slate-300 hover:bg-slate-800 hover:text-white' }}">
-                        <i class="fas fa-shopping-cart w-5 text-center"></i>
-                        <span class="font-medium">Orders</span>
-                    </a>
-                </div>
-
-                @if(!$isModerator)
-                <a href="{{ route('admin.audit-logs') }}" class="group flex items-center gap-3 rounded-3xl px-4 py-3 transition {{ request()->routeIs('admin.audit-logs') ? 'bg-indigo-700 text-white shadow-lg' : 'text-slate-300 hover:bg-slate-800 hover:text-white' }}">
-                    <i class="fas fa-history w-5 text-center"></i>
-                    <span class="font-medium">Activity Log</span>
-                </a>
-
-                <div class="pt-3 border-t border-slate-800">
-                    <p class="px-4 text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">Access Control</p>
-                    <a href="{{ route('admin.roles') }}" class="group flex items-center gap-3 rounded-3xl px-4 py-3 transition {{ request()->routeIs('admin.roles*') ? 'bg-indigo-700 text-white shadow-lg' : 'text-slate-300 hover:bg-slate-800 hover:text-white' }}">
-                        <i class="fas fa-user-tag w-5 text-center"></i>
-                        <span class="font-medium">Roles</span>
-                    </a>
-                    <a href="{{ route('admin.permissions') }}" class="group flex items-center gap-3 rounded-3xl px-4 py-3 transition {{ request()->routeIs('admin.permissions*') ? 'bg-indigo-700 text-white shadow-lg' : 'text-slate-300 hover:bg-slate-800 hover:text-white' }}">
-                        <i class="fas fa-key w-5 text-center"></i>
-                        <span class="font-medium">Permissions</span>
-                    </a>
-                </div>
-                @endif
             </nav>
-            <div class="border-t border-slate-800 px-6 py-4">
-                <a href="/" class="flex items-center gap-3 rounded-3xl px-4 py-3 text-slate-300 hover:bg-slate-800 hover:text-white transition">
+            <div class="border-t border-primary-800 px-6 py-4">
+                <a href="/" class="flex items-center gap-3 rounded-3xl px-4 py-3 text-teal-200 hover:bg-primary-800 hover:text-white transition">
                     <i class="fas fa-arrow-left w-5 text-center"></i>
                     Back to site
                 </a>
                 <form method="POST" action="{{ route('logout') }}" class="mt-3">
                     @csrf
-                    <button type="submit" class="flex items-center gap-3 w-full rounded-3xl px-4 py-3 bg-slate-800 text-slate-300 hover:bg-slate-700 transition">
+                    <button type="submit" class="flex items-center gap-3 w-full rounded-3xl px-4 py-3 bg-primary-800 text-teal-200 hover:bg-primary-700 transition">
                         <i class="fas fa-sign-out-alt w-5 text-center"></i>
                         Logout
                     </button>
@@ -136,42 +118,30 @@
         </aside>
 
         <!-- Mobile header -->
-        <div class="md:hidden fixed top-0 left-0 right-0 z-50 bg-indigo-800 text-white p-3 flex items-center justify-between">
+        <div class="md:hidden fixed top-0 left-0 right-0 z-50 bg-primary-800 text-white p-3 flex items-center justify-between">
             <h1 class="font-bold text-sm">Admin Panel</h1>
             <button onclick="document.getElementById('mobileMenu').classList.toggle('hidden')" class="text-white">
                 <i class="fas fa-bars text-xl"></i>
             </button>
         </div>
-        <div id="mobileMenu" class="md:hidden fixed top-12 left-0 right-0 z-50 bg-indigo-800 text-white hidden">
+        <div id="mobileMenu" class="md:hidden fixed top-12 left-0 right-0 z-50 bg-primary-800 text-white hidden">
             <nav class="p-3 space-y-1">
-                @foreach($menuPerms as $mp)
-                    @can($mp->name)
-                    <a href="{{ route($mp->route_name) }}" class="block px-3 py-2 rounded {{ request()->routeIs($mp->route_name . '*') ? 'bg-indigo-700' : '' }}"><i class="fas fa-{{ $mp->menu_icon }} w-5"></i> {{ $mp->menu_label }}</a>
-                    @endcan
+                @foreach($menuGroups as $group => $cfg)
+                    @php $groupPerms = $menuPerms->where('menu_group', $group); @endphp
+                    @if($groupPerms->isNotEmpty() && (!$cfg['admin_only'] || !$isModerator))
+                        @if($cfg['label'])
+                        <div class="border-t border-primary-700 my-2 pt-2">
+                            <p class="px-3 text-xs font-semibold text-accent-300 uppercase tracking-wider mb-1">{{ $cfg['label'] }}</p>
+                        </div>
+                        @endif
+                        @foreach($groupPerms as $mp)
+                            @can($mp->name)
+                            <a href="{{ route($mp->route_name) }}" class="block px-3 py-2 rounded {{ request()->routeIs($mp->route_name . '*') ? 'bg-primary-700' : '' }}"><i class="fas fa-{{ $mp->menu_icon }} w-5"></i> {{ $mp->menu_label }}</a>
+                            @endcan
+                        @endforeach
+                    @endif
                 @endforeach
-                <div class="border-t border-indigo-700 my-2 pt-2">
-                    <p class="px-3 text-xs font-semibold text-indigo-300 uppercase tracking-wider mb-1">Monetization</p>
-                    <a href="{{ route('admin.travel-partners') }}" class="block px-3 py-2 rounded {{ request()->routeIs('admin.travel-partners*') ? 'bg-indigo-700' : '' }}"><i class="fas fa-handshake w-5"></i> Travel Partners</a>
-                    <a href="{{ route('admin.bookings') }}" class="block px-3 py-2 rounded {{ request()->routeIs('admin.bookings*') ? 'bg-indigo-700' : '' }}"><i class="fas fa-calendar-check w-5"></i> Bookings</a>
-                    <a href="{{ route('admin.subscription.plans') }}" class="block px-3 py-2 rounded {{ request()->routeIs('admin.subscription.plans*') ? 'bg-indigo-700' : '' }}"><i class="fas fa-crown w-5"></i> Plans</a>
-                    <a href="{{ route('admin.subscription.users') }}" class="block px-3 py-2 rounded {{ request()->routeIs('admin.subscription.users*') ? 'bg-indigo-700' : '' }}"><i class="fas fa-users-cog w-5"></i> Subscribers</a>
-                    <a href="{{ route('admin.ad-campaigns') }}" class="block px-3 py-2 rounded {{ request()->routeIs('admin.ad-campaigns*') ? 'bg-indigo-700' : '' }}"><i class="fas fa-ad w-5"></i> Ad Campaigns</a>
-                </div>
-                <div class="border-t border-indigo-700 my-2 pt-2">
-                    <p class="px-3 text-xs font-semibold text-indigo-300 uppercase tracking-wider mb-1">Sponsors & Store</p>
-                    <a href="{{ route('admin.sponsors') }}" class="block px-3 py-2 rounded {{ request()->routeIs('admin.sponsors*') ? 'bg-indigo-700' : '' }}"><i class="fas fa-handshake w-5"></i> Sponsors</a>
-                    <a href="{{ route('admin.store.items') }}" class="block px-3 py-2 rounded {{ request()->routeIs('admin.store.items*') ? 'bg-indigo-700' : '' }}"><i class="fas fa-store w-5"></i> Reward Items</a>
-                    <a href="{{ route('admin.store.orders') }}" class="block px-3 py-2 rounded {{ request()->routeIs('admin.store.orders*') ? 'bg-indigo-700' : '' }}"><i class="fas fa-shopping-cart w-5"></i> Orders</a>
-                </div>
-                @if(!$isModerator)
-                <a href="{{ route('admin.audit-logs') }}" class="block px-3 py-2 rounded {{ request()->routeIs('admin.audit-logs') ? 'bg-indigo-700' : '' }}"><i class="fas fa-history w-5"></i> Activity Log</a>
-                <div class="border-t border-indigo-700 my-2 pt-2">
-                    <p class="px-3 text-xs font-semibold text-indigo-300 uppercase tracking-wider mb-1">Access Control</p>
-                    <a href="{{ route('admin.roles') }}" class="block px-3 py-2 rounded {{ request()->routeIs('admin.roles*') ? 'bg-indigo-700' : '' }}"><i class="fas fa-user-tag w-5"></i> Roles</a>
-                    <a href="{{ route('admin.permissions') }}" class="block px-3 py-2 rounded {{ request()->routeIs('admin.permissions*') ? 'bg-indigo-700' : '' }}"><i class="fas fa-key w-5"></i> Permissions</a>
-                </div>
-                @endif
-                <hr class="border-indigo-700 my-2">
+                <hr class="border-primary-700 my-2">
                 <a href="/" class="block px-3 py-2"><i class="fas fa-arrow-left w-5"></i> Back to Site</a>
                 <form method="POST" action="{{ route('logout') }}">
                     @csrf
@@ -203,10 +173,10 @@
                             <i class="fas fa-bell"></i>
                         </button>
                         <div class="flex items-center gap-3 rounded-3xl border border-slate-200 bg-white px-4 py-2 shadow-sm">
-                            <span class="h-10 w-10 rounded-full bg-indigo-600 grid place-items-center text-white">{{ strtoupper(substr($user->name, 0, 1)) }}</span>
+                            <span class="h-10 w-10 rounded-full bg-accent-500 grid place-items-center text-white">{{ strtoupper(substr($user->name, 0, 1)) }}</span>
                             <div class="text-left">
                                 <p class="text-sm font-semibold text-slate-900">{{ $user->name }}</p>
-                                <p class="text-xs {{ $isAdmin ? 'text-indigo-600' : 'text-amber-600' }} font-semibold">{{ $roleLabel }}</p>
+                                <p class="text-xs {{ $isAdmin ? 'text-accent-500' : 'text-amber-600' }} font-semibold">{{ $roleLabel }}</p>
                             </div>
                         </div>
                     </div>

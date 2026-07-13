@@ -374,33 +374,6 @@ class ApiClient {
       },
     });
   }
-
-  // Admin endpoints
-  Future<Response> getModerationQueue({
-    String? status,
-    String? priority,
-    int limit = 20,
-    int offset = 0,
-  }) async {
-    final queryParams = {
-      'limit': limit,
-      'offset': offset,
-    } as Map<String, dynamic>;
-    if (status != null) queryParams['status'] = status;
-    if (priority != null) queryParams['priority'] = priority;
-    return _dio.get('/admin/moderation/queue', queryParameters: queryParams);
-  }
-
-  Future<Response> approveContent(String queueId) async {
-    return _dio.post('/admin/moderation/$queueId/approve');
-  }
-
-  Future<Response> rejectContent(String queueId, String reason) async {
-    return _dio.post('/admin/moderation/$queueId/reject', data: {
-      'reason': reason,
-    });
-  }
-
   // ✅ Profile Completion endpoints
 
   // Partners
@@ -419,6 +392,11 @@ class ApiClient {
   // User Bookings
   Future<Response> createBooking(Map<String, dynamic> data) => _dio.post('/bookings', data: data);
   Future<Response> getMyBookings() => _dio.get('/bookings/my');
+  Future<Response> removeBookingCoupon(int bookingId) => _dio.delete('/bookings/$bookingId/coupon');
+  Future<Response> cancelBooking(int bookingId) => _dio.post('/bookings/$bookingId/cancel');
+
+  // Store - Available Codes for booking auto-apply
+  Future<Response> getAvailableCodes() => _dio.get('/store/my-available-codes');
   /// Complete the user profile with required information
   Future<Response> completeProfile({
     required String bio,

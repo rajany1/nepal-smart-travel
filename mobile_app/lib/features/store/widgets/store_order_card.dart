@@ -98,13 +98,13 @@ class StoreOrderCard extends StatelessWidget {
                 ),
               ],
             ),
-            if (purchase.code != null) ...[
+            if (purchase.code != null && purchase.status == 'completed') ...[
               const SizedBox(height: 10),
               Container(
                 width: double.infinity,
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
-                  color: Colors.grey[50],
+                  color: purchase.codeStatus == 'consumed' ? Colors.grey[100] : Colors.grey[50],
                   borderRadius: BorderRadius.circular(10),
                   border: Border.all(color: Colors.grey[200]!),
                 ),
@@ -114,29 +114,60 @@ class StoreOrderCard extends StatelessWidget {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Text('Redeem Code', style: TextStyle(color: Colors.grey[500], fontSize: 10)),
+                          Row(
+                            children: [
+                              Text('Redeem Code', style: TextStyle(color: Colors.grey[500], fontSize: 10)),
+                              if (purchase.codeStatus == 'applied')
+                                Container(
+                                  margin: const EdgeInsets.only(left: 6),
+                                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+                                  decoration: BoxDecoration(
+                                    color: Colors.blue.withValues(alpha: 0.1),
+                                    borderRadius: BorderRadius.circular(8),
+                                  ),
+                                  child: Text('Applied to Booking',
+                                      style: TextStyle(color: Colors.blue[700], fontSize: 8, fontWeight: FontWeight.w600)),
+                                ),
+                              if (purchase.codeStatus == 'consumed')
+                                Container(
+                                  margin: const EdgeInsets.only(left: 6),
+                                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+                                  decoration: BoxDecoration(
+                                    color: Colors.green.withValues(alpha: 0.1),
+                                    borderRadius: BorderRadius.circular(8),
+                                  ),
+                                  child: Text('Consumed',
+                                      style: TextStyle(color: Colors.green[700], fontSize: 8, fontWeight: FontWeight.w600)),
+                                ),
+                            ],
+                          ),
                           const SizedBox(height: 4),
                           Text(purchase.code!,
-                              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16, letterSpacing: 1.5)),
+                              style: TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 16,
+                                  letterSpacing: 1.5,
+                                  color: purchase.codeStatus == 'consumed' ? Colors.grey[400] : Colors.black)),
                         ],
                       ),
                     ),
-                    GestureDetector(
-                      onTap: () {
-                        Clipboard.setData(ClipboardData(text: purchase.code!));
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(content: Text('Code copied!'), duration: Duration(seconds: 1)),
-                        );
-                      },
-                      child: Container(
-                        padding: const EdgeInsets.all(8),
-                        decoration: BoxDecoration(
-                          color: AppTheme.primaryColor.withValues(alpha: 0.1),
-                          borderRadius: BorderRadius.circular(8),
+                    if (purchase.codeStatus == 'assigned')
+                      GestureDetector(
+                        onTap: () {
+                          Clipboard.setData(ClipboardData(text: purchase.code!));
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(content: Text('Code copied!'), duration: Duration(seconds: 1)),
+                          );
+                        },
+                        child: Container(
+                          padding: const EdgeInsets.all(8),
+                          decoration: BoxDecoration(
+                            color: AppTheme.primaryColor.withValues(alpha: 0.1),
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: Icon(Icons.copy, size: 18, color: AppTheme.primaryColor),
                         ),
-                        child: Icon(Icons.copy, size: 18, color: AppTheme.primaryColor),
                       ),
-                    ),
                   ],
                 ),
               ),
@@ -153,7 +184,14 @@ class StoreOrderCard extends StatelessWidget {
                   else
                     Icon(Icons.business, size: 14, color: Colors.grey[400]),
                   const SizedBox(width: 4),
-                  Text(sponsor.name, style: TextStyle(color: Colors.grey[500], fontSize: 11)),
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(sponsor.name, style: TextStyle(color: Colors.grey[500], fontSize: 11)),
+                      if (sponsor.address != null)
+                        Text(sponsor.address!, style: TextStyle(color: Colors.grey[400], fontSize: 9)),
+                    ],
+                  ),
                   if (sponsor.hasLocation) ...[
                     const SizedBox(width: 8),
                     GestureDetector(

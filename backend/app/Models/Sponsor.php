@@ -3,16 +3,20 @@
 namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Support\Str;
 
 class Sponsor extends Model
 {
     protected $fillable = [
-        'name', 'slug', 'logo', 'description', 'website',
+        'name', 'slug', 'logo', 'description', 'address', 'website',
         'latitude', 'longitude',
         'contact_email', 'contact_phone', 'is_active', 'sort_order',
+        'travel_partner_id',
     ];
+
+    protected $appends = ['logo_url'];
 
     protected function casts(): array
     {
@@ -41,6 +45,11 @@ class Sponsor extends Model
     public function shopItems(): HasMany
     {
         return $this->hasMany(ShopItem::class);
+    }
+
+    public function travelPartner(): BelongsTo
+    {
+        return $this->belongsTo(TravelPartner::class);
     }
 
     public function getLogoUrlAttribute(): ?string

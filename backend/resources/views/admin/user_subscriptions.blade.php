@@ -5,7 +5,12 @@
 <div class="space-y-6">
     <div class="flex items-center justify-between">
         <div><h3 class="text-2xl font-bold text-slate-900">User Subscriptions</h3><p class="text-sm text-slate-500 mt-1">Assign and manage premium subscriptions for users.</p></div>
-        <button onclick="document.getElementById('assignModal').classList.remove('hidden')" class="bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-2.5 rounded-xl text-sm font-semibold shadow transition flex items-center gap-2"><i class="fas fa-plus"></i> Assign Subscription</button>
+        <div class="flex gap-2">
+            <a href="{{ route('admin.subscription.users', ['filter' => 'active']) }}" class="px-4 py-2 rounded-lg text-sm font-medium transition {{ ($filter ?? 'active') === 'active' ? 'bg-primary-100 text-primary-700' : 'bg-slate-100 text-slate-600 hover:bg-slate-200' }}">Active</a>
+            <a href="{{ route('admin.subscription.users', ['filter' => 'cancelled']) }}" class="px-4 py-2 rounded-lg text-sm font-medium transition {{ ($filter ?? '') === 'cancelled' ? 'bg-primary-100 text-primary-700' : 'bg-slate-100 text-slate-600 hover:bg-slate-200' }}">Cancelled</a>
+            <a href="{{ route('admin.subscription.users', ['filter' => 'all']) }}" class="px-4 py-2 rounded-lg text-sm font-medium transition {{ ($filter ?? '') === 'all' ? 'bg-primary-100 text-primary-700' : 'bg-slate-100 text-slate-600 hover:bg-slate-200' }}">All</a>
+            <button onclick="document.getElementById('assignModal').classList.remove('hidden')" class="bg-primary-600 hover:bg-primary-700 text-white px-5 py-2 rounded-xl text-sm font-semibold shadow transition flex items-center gap-2"><i class="fas fa-plus"></i> Assign</button>
+        </div>
     </div>
 
     <div class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
@@ -30,7 +35,7 @@
                         <td class="px-6 py-4 text-center text-sm">{{ $sub->starts_at?->format('Y-m-d') ?? '—' }}</td>
                         <td class="px-6 py-4 text-center text-sm">{{ $sub->ends_at?->format('Y-m-d') ?? 'Unlimited' }}</td>
                         <td class="px-6 py-4 text-right">
-                            @if($sub->status === 'active' || $sub->status === 'trialing')
+                            @if(($sub->status === 'active' || $sub->status === 'trialing') && $sub->plan?->slug !== 'free')
                             <form method="POST" action="{{ route('admin.subscription.users.cancel', $sub) }}" onsubmit="return confirm('Cancel this subscription?')" class="inline">
                                 @csrf
                                 <button class="px-3 py-1.5 text-xs font-medium bg-red-50 text-red-600 rounded-lg hover:bg-red-100"><i class="fas fa-ban"></i> Cancel</button>
@@ -78,7 +83,7 @@
             </div>
             <div class="flex justify-end gap-3 pt-2">
                 <button type="button" onclick="document.getElementById('assignModal').classList.add('hidden')" class="px-4 py-2 text-sm text-slate-600 hover:bg-slate-100 rounded-lg">Cancel</button>
-                <button type="submit" class="px-4 py-2 text-sm font-semibold bg-indigo-600 text-white rounded-lg hover:bg-indigo-700">Assign</button>
+                <button type="submit" class="px-4 py-2 text-sm font-semibold bg-primary-600 text-white rounded-lg hover:bg-primary-700">Assign</button>
             </div>
         </form>
     </div>

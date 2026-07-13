@@ -144,8 +144,16 @@ class StoreItemCard extends StatelessWidget {
                             Icon(Icons.business, size: 14, color: Colors.grey[400]),
                           const SizedBox(width: 4),
                           Flexible(
-                            child: Text(item.sponsor!.name,
-                                style: TextStyle(color: Colors.grey[600], fontSize: 11), overflow: TextOverflow.ellipsis),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(item.sponsor!.name,
+                                    style: TextStyle(color: Colors.grey[600], fontSize: 11), overflow: TextOverflow.ellipsis),
+                                if (item.sponsor!.address != null)
+                                  Text(item.sponsor!.address!,
+                                      style: TextStyle(color: Colors.grey[400], fontSize: 9), overflow: TextOverflow.ellipsis),
+                              ],
+                            ),
                           ),
                           const SizedBox(width: 8),
                           if (item.sponsor!.hasLocation)

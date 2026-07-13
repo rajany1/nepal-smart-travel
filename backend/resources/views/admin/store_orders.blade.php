@@ -9,7 +9,7 @@
             <p class="text-sm text-slate-500 mt-1">View and manage user purchases from the XP store.</p>
         </div>
         <div class="flex gap-2">
-            <a href="{{ route('admin.store.orders', ['status' => '']) }}" class="px-3 py-1.5 text-xs font-medium rounded-lg {{ !$status ? 'bg-indigo-600 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200' }}">All</a>
+            <a href="{{ route('admin.store.orders', ['status' => '']) }}" class="px-3 py-1.5 text-xs font-medium rounded-lg {{ !$status ? 'bg-primary-600 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200' }}">All</a>
             <a href="{{ route('admin.store.orders', ['status' => 'pending']) }}" class="px-3 py-1.5 text-xs font-medium rounded-lg {{ $status === 'pending' ? 'bg-amber-600 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200' }}">Pending</a>
             <a href="{{ route('admin.store.orders', ['status' => 'completed']) }}" class="px-3 py-1.5 text-xs font-medium rounded-lg {{ $status === 'completed' ? 'bg-green-600 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200' }}">Completed</a>
             <a href="{{ route('admin.store.orders', ['status' => 'cancelled']) }}" class="px-3 py-1.5 text-xs font-medium rounded-lg {{ $status === 'cancelled' ? 'bg-red-600 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200' }}">Cancelled</a>
@@ -42,7 +42,7 @@
                         </td>
                         <td class="px-6 py-4">
                             <div class="flex items-center gap-2">
-                                <i class="fas fa-{{ $purchase->shopItem->icon }} text-indigo-600"></i>
+                                <i class="fas fa-{{ $purchase->shopItem->icon }} text-primary-600"></i>
                                 <span class="text-sm font-medium">{{ $purchase->shopItem->name }}</span>
                             </div>
                         </td>

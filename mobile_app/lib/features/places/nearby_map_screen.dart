@@ -21,6 +21,7 @@ import '../../providers/map_view_provider.dart';
 import 'place_details_screen.dart';
 import 'add_place_screen.dart';
 import 'filter_places_sheet.dart';
+import 'utils/category_utils.dart';
 
 /// Nepal Smart Travel enhanced nearby map screen with:
 /// - Satellite/Standard view toggle
@@ -140,6 +141,30 @@ class _NearbyMapScreenState extends State<NearbyMapScreen> {
     });
   }
 
+  void _safeMoveMap(LatLng point, double zoom) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        try {
+          _mapController.move(point, zoom);
+        } catch (e) {
+          debugPrint('MapController move failed: $e');
+        }
+      }
+    });
+  }
+
+  void _safeFitCamera(CameraFit fit) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        try {
+          _mapController.fitCamera(fit);
+        } catch (e) {
+          debugPrint('MapController fitCamera failed: $e');
+        }
+      }
+    });
+  }
+
   void _startPositionTracking() {
     _positionStream = _locationService
         .getPositionStream(intervalMs: 3000, distanceFilterM: 5)
@@ -154,18 +179,14 @@ class _NearbyMapScreenState extends State<NearbyMapScreen> {
         _lat = position.latitude;
         _lng = position.longitude;
       });
-      _mapController.move(
+      _safeMoveMap(
           LatLng(position.latitude, position.longitude), _currentZoom);
     });
   }
 
   void _recenterMap() {
     if (_lat != null && _lng != null) {
-      try {
-        _mapController.move(LatLng(_lat!, _lng!), _currentZoom);
-      } catch (e) {
-        debugPrint('MapController move failed: $e');
-      }
+      _safeMoveMap(LatLng(_lat!, _lng!), _currentZoom);
     }
   }
 
@@ -304,8 +325,8 @@ class _NearbyMapScreenState extends State<NearbyMapScreen> {
 
   void _onPlaceTap(PlaceModel place) async {
     setState(() => _selectedPlace = place);
+    _safeMoveMap(LatLng(place.latitude, place.longitude), 15.0);
     try {
-      _mapController.move(LatLng(place.latitude, place.longitude), 15.0);
       _sheetController.animateTo(
         0.25,
         duration: const Duration(milliseconds: 300),
@@ -364,7 +385,7 @@ class _NearbyMapScreenState extends State<NearbyMapScreen> {
             final allPoints = parsed.expand((r) => r['points'] as List<LatLng>).toList();
             final bounds = LatLngBounds.fromPoints(allPoints);
             final cameraFit = CameraFit.bounds(bounds: bounds, padding: const EdgeInsets.all(60));
-            _mapController.fitCamera(cameraFit);
+            _safeFitCamera(cameraFit);
           } else {
             _showRouteError('No valid routes found');
           }
@@ -772,7 +793,7 @@ class _NearbyMapScreenState extends State<NearbyMapScreen> {
   void _onMyLocationTap() async {
     if (_lat != null && _lng != null) {
       setState(() => _isTracking = true);
-      _mapController.move(LatLng(_lat!, _lng!), 15.0);
+      _safeMoveMap(LatLng(_lat!, _lng!), 15.0);
     } else {
       final loc = await _locationService.getCurrentLocation();
       if (loc != null && mounted) {
@@ -781,7 +802,7 @@ class _NearbyMapScreenState extends State<NearbyMapScreen> {
           _lng = loc.longitude;
           _isTracking = true;
         });
-        _mapController.move(LatLng(_lat!, _lng!), 15.0);
+        _safeMoveMap(LatLng(_lat!, _lng!), 15.0);
       }
     }
   }
@@ -1196,7 +1217,7 @@ class _NearbyMapScreenState extends State<NearbyMapScreen> {
   }
 
   Widget _placePlaceholder(PlaceModel place) {
-    final color = _getCategoryColor(place.category);
+    final color = getCategoryColor(place.category);
     return Container(
       width: 56,
       height: 56,
@@ -1204,13 +1225,13 @@ class _NearbyMapScreenState extends State<NearbyMapScreen> {
         color: color.withOpacity(0.1),
         borderRadius: BorderRadius.circular(10),
       ),
-      child: Icon(_getCategoryIcon(place.category), color: color, size: 24),
+      child: Icon(getCategoryIcon(place.category), color: color, size: 24),
     );
   }
 
   Widget _buildSelectedPlaceCard() {
     final place = _selectedPlace!;
-    final markerColor = _getCategoryColor(place.category);
+    final markerColor = getCategoryColor(place.category);
     return Material(
       elevation: 6,
       borderRadius: BorderRadius.circular(16),
@@ -1398,7 +1419,7 @@ class _NearbyMapScreenState extends State<NearbyMapScreen> {
   }
 
   Widget _buildSheetSelectedPreview(PlaceModel place, VoidCallback onTap) {
-    final markerColor = _getCategoryColor(place.category);
+    final markerColor = getCategoryColor(place.category);
     return Material(
       color: Colors.transparent,
       child: InkWell(
@@ -1422,7 +1443,7 @@ class _NearbyMapScreenState extends State<NearbyMapScreen> {
                       color: markerColor.withOpacity(0.15),
                       borderRadius: BorderRadius.circular(12),
                     ),
-                    child: Icon(_getCategoryIcon(place.category), color: markerColor, size: 24),
+                    child: Icon(getCategoryIcon(place.category), color: markerColor, size: 24),
                   ),
                   const SizedBox(width: 12),
                   Expanded(
@@ -1559,7 +1580,7 @@ class _NearbyMapScreenState extends State<NearbyMapScreen> {
   }
 
   Widget _placePlaceholderSmall(PlaceModel place) {
-    final color = _getCategoryColor(place.category);
+    final color = getCategoryColor(place.category);
     return Container(
       width: 50,
       height: 50,
@@ -1567,7 +1588,7 @@ class _NearbyMapScreenState extends State<NearbyMapScreen> {
         color: color.withOpacity(0.1),
         borderRadius: BorderRadius.circular(10),
       ),
-      child: Icon(_getCategoryIcon(place.category), color: color, size: 22),
+      child: Icon(getCategoryIcon(place.category), color: color, size: 22),
     );
   }
 
@@ -1617,7 +1638,7 @@ class _NearbyMapScreenState extends State<NearbyMapScreen> {
     for (int i = 0; i < places.length; i++) {
       final place = places[i];
       final assignment = _lastLabelAssignments[i];
-      final markerColor = _getCategoryColor(place.category);
+      final markerColor = getCategoryColor(place.category);
       final isSelected = _selectedPlace?.id == place.id;
       final markerSize = isSelected ? 44.0 : 32.0;
 
@@ -1644,7 +1665,7 @@ class _NearbyMapScreenState extends State<NearbyMapScreen> {
               child: Stack(
                 alignment: Alignment.center,
                 children: [
-                  Icon(_getCategoryIcon(place.category), color: Colors.white, size: isSelected ? 22 : 16),
+                  Icon(getCategoryIcon(place.category), color: Colors.white, size: isSelected ? 22 : 16),
                   if (isSelected)
                     Positioned(
                       top: 0, right: 0,
@@ -1903,99 +1924,6 @@ class _NearbyMapScreenState extends State<NearbyMapScreen> {
       case _LabelSide.left: return 1;
       case _LabelSide.top: return 2;
       case _LabelSide.bottom: return 3;
-    }
-  }
-
-  IconData _getCategoryIcon(String? category) {
-    switch (category?.toLowerCase()) {
-      case 'hotel':
-      case 'accommodation':
-      case 'hotels':
-        return Icons.hotel;
-      case 'restaurant':
-      case 'food':
-      case 'restaurants':
-        return Icons.restaurant;
-      case 'cafe':
-        return Icons.local_cafe;
-      case 'emergency':
-        return Icons.warning;
-      case 'hospital':
-      case 'clinic':
-        return Icons.local_hospital;
-      case 'pharmacy':
-        return Icons.medication;
-      case 'transport':
-      case 'bus':
-      case 'airport':
-        return Icons.directions_bus;
-      case 'attraction':
-      case 'landmark':
-      case 'sightseeing':
-      case 'attractions':
-        return Icons.photo_camera;
-      case 'activity':
-      case 'adventure':
-      case 'activities':
-        return Icons.directions_run;
-      case 'atm':
-      case 'atms':
-      case 'bank':
-        return Icons.account_balance;
-      case 'fuel':
-        return Icons.local_gas_station;
-      case 'shopping':
-        return Icons.shopping_bag;
-      case 'parking':
-        return Icons.local_parking;
-      case 'education':
-      case 'school':
-      case 'college':
-        return Icons.school;
-      case 'entertainment':
-        return Icons.movie;
-      case 'nature':
-        return Icons.forest;
-      case 'services':
-        return Icons.build;
-      case 'recreation':
-        return Icons.sports_tennis;
-      default:
-        return Icons.place;
-    }
-  }
-
-  Color _getCategoryColor(String? category) {
-    switch (category?.toLowerCase()) {
-      case 'hotel':
-      case 'accommodation':
-        return const Color(0xFF4A90D9);
-      case 'restaurant':
-      case 'food':
-      case 'cafe':
-        return const Color(0xFFE74C3C);
-      case 'hospital':
-      case 'clinic':
-      case 'pharmacy':
-        return const Color(0xFF27AE60);
-      case 'transport':
-      case 'bus_station':
-        return const Color(0xFFF39C12);
-      case 'attraction':
-      case 'museum':
-      case 'landmark':
-        return const Color(0xFF9B59B6);
-      case 'viewpoint':
-      case 'nature':
-        return const Color(0xFF2ECC71);
-      case 'shopping':
-      case 'market':
-        return const Color(0xFFE67E22);
-      case 'atm':
-      case 'bank':
-        return const Color(0xFF3498DB);
-      default:
-        return AppTheme.primaryColor;
     }
   }
 

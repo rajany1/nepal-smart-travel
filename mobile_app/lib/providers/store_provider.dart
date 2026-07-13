@@ -7,6 +7,7 @@ class SponsorInfo {
   final String name;
   final String? logo;
   final String? description;
+  final String? address;
   final String? website;
   final double? latitude;
   final double? longitude;
@@ -16,6 +17,7 @@ class SponsorInfo {
     required this.name,
     this.logo,
     this.description,
+    this.address,
     this.website,
     this.latitude,
     this.longitude,
@@ -27,8 +29,9 @@ class SponsorInfo {
     return SponsorInfo(
       id: json['id'] ?? 0,
       name: json['name'] ?? '',
-      logo: json['logo'],
+      logo: json['logo_url'] ?? json['logo'],
       description: json['description'],
+      address: json['address'],
       website: json['website'],
       latitude: (json['latitude'] is num) ? (json['latitude'] as num).toDouble() : double.tryParse(json['latitude']?.toString() ?? ''),
       longitude: (json['longitude'] is num) ? (json['longitude'] as num).toDouble() : double.tryParse(json['longitude']?.toString() ?? ''),
@@ -43,6 +46,8 @@ class ShopItem {
   final String icon;
   final SponsorInfo? sponsor;
   final String rewardType;
+  final String? discountType;
+  final double? discountValue;
   final int priceXp;
   final int minLevel;
   final String stockType;
@@ -61,6 +66,8 @@ class ShopItem {
     this.icon = 'fa-gift',
     this.sponsor,
     this.rewardType = 'voucher',
+    this.discountType,
+    this.discountValue,
     required this.priceXp,
     this.minLevel = 1,
     this.stockType = 'unlimited',
@@ -82,6 +89,8 @@ class ShopItem {
       icon: json['icon'] ?? 'fa-gift',
       sponsor: sponsorJson != null ? SponsorInfo.fromJson(sponsorJson) : null,
       rewardType: json['reward_type'] ?? 'voucher',
+      discountType: json['discount_type'],
+      discountValue: double.tryParse(json['discount_value']?.toString() ?? ''),
       priceXp: json['price_xp'] ?? 0,
       minLevel: json['min_level'] ?? 1,
       stockType: json['stock_type'] ?? 'unlimited',
@@ -152,6 +161,7 @@ class Purchase {
   final int? shopCodeId;
   final ShopItem? shopItem;
   final String? code;
+  final String? codeStatus; // 'assigned', 'applied', 'consumed'
   final String createdAt;
 
   Purchase({
@@ -167,12 +177,23 @@ class Purchase {
     this.shopCodeId,
     this.shopItem,
     this.code,
+    this.codeStatus,
     required this.createdAt,
   });
 
   factory Purchase.fromJson(Map<String, dynamic> json) {
     final shopItemJson = json['shop_item'] ?? json['shopItem'];
     final shopCodeJson = json['shop_code'] ?? json['shopCode'];
+    String? codeStatus;
+    if (shopCodeJson != null) {
+      if (shopCodeJson['consumed_at'] != null) {
+        codeStatus = 'consumed';
+      } else if (shopCodeJson['booking_id'] != null) {
+        codeStatus = 'applied';
+      } else {
+        codeStatus = 'assigned';
+      }
+    }
     return Purchase(
       id: json['id'] ?? 0,
       userId: json['user_id'] ?? 0,
@@ -186,6 +207,7 @@ class Purchase {
       shopCodeId: json['shop_code_id'],
       shopItem: shopItemJson != null ? ShopItem.fromJson(shopItemJson) : null,
       code: shopCodeJson != null ? shopCodeJson['code'] : null,
+      codeStatus: codeStatus,
       createdAt: json['created_at'] ?? '',
     );
   }
@@ -196,12 +218,14 @@ class StoreProvider extends ChangeNotifier {
 
   List<ShopItem> _items = [];
   List<Purchase> _purchases = [];
+  List<Map<String, dynamic>> _availableCodes = [];
   bool _isLoading = false;
   bool _isPurchasing = false;
   String? _errorMessage;
 
   List<ShopItem> get items => _items;
   List<Purchase> get purchases => _purchases;
+  List<Map<String, dynamic>> get availableCodes => _availableCodes;
   bool get isLoading => _isLoading;
   bool get isPurchasing => _isPurchasing;
   String? get errorMessage => _errorMessage;
@@ -230,7 +254,18 @@ class StoreProvider extends ChangeNotifier {
       _purchases = data.map((j) => Purchase.fromJson(j as Map<String, dynamic>)).toList();
       notifyListeners();
     } catch (e) {
-      print('❌ Failed to load purchases: $e');
+      print(' Failed to load purchases: $e');
+    }
+  }
+
+  Future<void> loadAvailableCodes() async {
+    try {
+      final response = await _api.getAvailableCodes();
+      final data = response.data['data'] as List? ?? [];
+      _availableCodes = data.cast<Map<String, dynamic>>();
+      notifyListeners();
+    } catch (e) {
+      print(' Failed to load available codes: $e');
     }
   }
 

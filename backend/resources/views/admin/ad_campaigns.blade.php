@@ -5,11 +5,11 @@
 <div class="space-y-6">
     <div class="flex items-center justify-between">
         <div><h3 class="text-2xl font-bold text-slate-900">Local Business Ads</h3><p class="text-sm text-slate-500 mt-1">Banner, promoted place & sponsored card campaigns.</p></div>
-        <button onclick="document.getElementById('createModal').classList.remove('hidden')" class="bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-2.5 rounded-xl text-sm font-semibold shadow transition flex items-center gap-2"><i class="fas fa-plus"></i> New Campaign</button>
+        <button onclick="document.getElementById('createModal').classList.remove('hidden')" class="bg-primary-600 hover:bg-primary-700 text-white px-5 py-2.5 rounded-xl text-sm font-semibold shadow transition flex items-center gap-2"><i class="fas fa-plus"></i> New Campaign</button>
     </div>
 
     <div class="flex gap-2">
-        <a href="{{ route('admin.ad-campaigns') }}" class="px-3 py-1.5 text-xs font-medium rounded-lg {{ !$status ? 'bg-indigo-600 text-white' : 'bg-slate-100 text-slate-600' }}">All</a>
+        <a href="{{ route('admin.ad-campaigns') }}" class="px-3 py-1.5 text-xs font-medium rounded-lg {{ !$status ? 'bg-primary-600 text-white' : 'bg-slate-100 text-slate-600' }}">All</a>
         <a href="{{ route('admin.ad-campaigns', ['status' => 'active']) }}" class="px-3 py-1.5 text-xs font-medium rounded-lg {{ $status === 'active' ? 'bg-green-600 text-white' : 'bg-slate-100 text-slate-600' }}">Active</a>
         <a href="{{ route('admin.ad-campaigns', ['status' => 'pending']) }}" class="px-3 py-1.5 text-xs font-medium rounded-lg {{ $status === 'pending' ? 'bg-amber-600 text-white' : 'bg-slate-100 text-slate-600' }}">Pending</a>
         <a href="{{ route('admin.ad-campaigns', ['status' => 'paused']) }}" class="px-3 py-1.5 text-xs font-medium rounded-lg {{ $status === 'paused' ? 'bg-orange-600 text-white' : 'bg-slate-100 text-slate-600' }}">Paused</a>
@@ -39,7 +39,7 @@
                             @endswitch
                         </td>
                         <td class="px-6 py-4 text-right">
-                            <button onclick="openEdit({{ $c->id }})" class="px-3 py-1.5 text-xs font-medium bg-indigo-50 text-indigo-600 rounded-lg hover:bg-indigo-100"><i class="fas fa-edit"></i> Edit</button>
+                            <button onclick="openEdit({{ $c->id }})" class="px-3 py-1.5 text-xs font-medium bg-primary-50 text-primary-600 rounded-lg hover:bg-primary-100"><i class="fas fa-edit"></i> Edit</button>
                             <form method="POST" action="{{ route('admin.ad-campaigns.destroy', $c) }}" class="inline" onsubmit="return confirm('Delete this campaign?')">
                                 @csrf @method('DELETE')
                                 <button class="px-3 py-1.5 text-xs font-medium bg-red-50 text-red-600 rounded-lg hover:bg-red-100"><i class="fas fa-trash"></i></button>
@@ -86,7 +86,7 @@
             </div>
             <div class="flex justify-end gap-3 pt-2">
                 <button type="button" onclick="document.getElementById('createModal').classList.add('hidden')" class="px-4 py-2 text-sm text-slate-600 hover:bg-slate-100 rounded-lg">Cancel</button>
-                <button type="submit" class="px-4 py-2 text-sm font-semibold bg-indigo-600 text-white rounded-lg hover:bg-indigo-700">Create</button>
+                <button type="submit" class="px-4 py-2 text-sm font-semibold bg-primary-600 text-white rounded-lg hover:bg-primary-700">Create</button>
             </div>
         </form>
     </div>
@@ -114,7 +114,7 @@
             </div>
             <div class="flex justify-end gap-3 pt-2">
                 <button type="button" onclick="document.getElementById('editModal').classList.add('hidden')" class="px-4 py-2 text-sm text-slate-600 hover:bg-slate-100 rounded-lg">Cancel</button>
-                <button type="submit" class="px-4 py-2 text-sm font-semibold bg-indigo-600 text-white rounded-lg hover:bg-indigo-700">Update</button>
+                <button type="submit" class="px-4 py-2 text-sm font-semibold bg-primary-600 text-white rounded-lg hover:bg-primary-700">Update</button>
             </div>
         </form>
     </div>

@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
-import '../config/themes/app_theme.dart';
 
 class ImageViewerWidget extends StatefulWidget {
   final List<String> images;

@@ -132,6 +132,7 @@ Route::prefix('v1')->group(function () {
         // Store (purchase & my-purchases require auth; items is public above)
         Route::post('/store/items/{shopItem}/purchase', [StoreController::class, 'purchase']);
         Route::get('/store/my-purchases', [StoreController::class, 'myPurchases']);
+        Route::get('/store/my-available-codes', [StoreController::class, 'availableCodes']);
 
         // Subscription
         Route::get('/subscription/my', [ApiSubscriptionController::class, 'my']);
@@ -143,6 +144,8 @@ Route::prefix('v1')->group(function () {
         // User bookings
         Route::post('/bookings', [ConsumerController::class, 'createBooking']);
         Route::get('/bookings/my', [ConsumerController::class, 'myBookings']);
+        Route::post('/bookings/{booking}/cancel', [ConsumerController::class, 'cancelBooking']);
+        Route::delete('/bookings/{booking}/coupon', [ConsumerController::class, 'removeCoupon']);
 
     });
 

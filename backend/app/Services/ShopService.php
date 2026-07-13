@@ -118,6 +118,11 @@ class ShopService
                 'cancellation_reason' => $reason,
             ]);
 
+            $item = $purchase->shopItem;
+            if ($item) {
+                $item->incrementStock();
+            }
+
             $user = $purchase->user;
             $this->achievementService->awardXp(
                 $user,
@@ -152,6 +157,11 @@ class ShopService
                 ]);
             }
 
+            $item = $purchase->shopItem;
+            if ($item) {
+                $item->incrementStock();
+            }
+
             $user = $purchase->user;
             $this->achievementService->awardXp(
                 $user,
@@ -177,7 +187,7 @@ class ShopService
     public function getUserPurchases(User $user, ?string $status = null)
     {
         $query = UserPurchase::where('user_id', $user->id)
-            ->with('shopItem.sponsor')
+            ->with('shopItem.sponsor', 'shopCode')
             ->orderBy('created_at', 'desc');
 
         if ($status) {
@@ -185,6 +195,60 @@ class ShopService
         }
 
         return $query->get();
+    }
+
+    public function getUserAvailableCodes(User $user)
+    {
+        return ShopCode::forUser($user)->with('shopItem')->get();
+    }
+
+    public function applyToBooking(User $user, ShopCode $code, Booking $booking): void
+    {
+        if ($code->purchased_by !== $user->id) {
+            throw new \RuntimeException('This code does not belong to you.');
+        }
+        if ($code->booking_id || $code->consumed_at) {
+            throw new \RuntimeException('This code has already been applied or consumed.');
+        }
+
+        $item = $code->shopItem;
+        $discount = 0;
+        if ($item && $item->discount_type && $item->discount_value) {
+            if ($item->discount_type === 'percentage') {
+                $discount = $booking->amount * $item->discount_value / 100;
+            } elseif ($item->discount_type === 'fixed') {
+                $discount = $item->discount_value;
+            }
+            $discount = min($discount, $booking->amount);
+        }
+
+        $code->update([
+            'booking_id' => $booking->id,
+            'applied_at' => now(),
+        ]);
+
+        if ($discount > 0) {
+            $booking->update([
+                'discount_amount' => $discount,
+                'amount' => $booking->amount - $discount,
+            ]);
+        }
+    }
+
+    public function releaseFromBooking(ShopCode $code): void
+    {
+        $booking = $code->booking;
+        if ($booking && $booking->discount_amount > 0) {
+            $booking->update([
+                'amount' => $booking->amount + $booking->discount_amount,
+                'discount_amount' => 0,
+            ]);
+        }
+
+        $code->update([
+            'booking_id' => null,
+            'applied_at' => null,
+        ]);
     }
 
     public function getAllPurchases(?string $status = null)

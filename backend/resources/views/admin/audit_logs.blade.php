@@ -51,7 +51,7 @@
                 </div>
             </div>
             <div class="flex gap-2">
-                <button type="submit" class="px-3 py-1.5 text-sm bg-indigo-600 text-white rounded-lg hover:bg-indigo-700"><i class="fas fa-search"></i> Filter</button>
+                <button type="submit" class="px-3 py-1.5 text-sm bg-primary-600 text-white rounded-lg hover:bg-primary-700"><i class="fas fa-search"></i> Filter</button>
                 <a href="{{ route('admin.audit-logs') }}" class="px-3 py-1.5 text-sm bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200">Clear</a>
             </div>
         </form>
@@ -79,8 +79,8 @@
                     </td>
                     <td class="px-6 py-3">
                         <div class="flex items-center gap-2">
-                            <span class="w-7 h-7 rounded-full {{ $suspicious ? 'bg-red-200' : 'bg-indigo-100' }} flex items-center justify-center flex-shrink-0">
-                                <span class="text-xs font-bold {{ $suspicious ? 'text-red-700' : 'text-indigo-600' }}">{{ strtoupper(substr($log->user?->name ?? '?', 0, 1)) }}</span>
+                            <span class="w-7 h-7 rounded-full {{ $suspicious ? 'bg-red-200' : 'bg-primary-100' }} flex items-center justify-center flex-shrink-0">
+                                <span class="text-xs font-bold {{ $suspicious ? 'text-red-700' : 'text-primary-600' }}">{{ strtoupper(substr($log->user?->name ?? '?', 0, 1)) }}</span>
                             </span>
                             <span class="text-sm text-gray-900">{{ $log->user?->name ?? 'System' }}</span>
                             @if($suspicious)
@@ -111,6 +111,35 @@
                                 'security.unauthorized-login' => 'bg-red-200 text-red-900',
                                 'security.unauthorized-access' => 'bg-red-100 text-red-800',
                                 'security.permission-denied' => 'bg-orange-100 text-orange-800',
+                                'travel-partner.created' => 'bg-teal-100 text-teal-800',
+                                'travel-partner.updated' => 'bg-blue-100 text-blue-800',
+                                'booking.created' => 'bg-primary-100 text-primary-800',
+                                'booking.confirmed' => 'bg-green-100 text-green-800',
+                                'booking.completed' => 'bg-emerald-100 text-emerald-800',
+                                'booking.cancelled' => 'bg-red-100 text-red-800',
+                                'sponsor.created' => 'bg-teal-100 text-teal-800',
+                                'sponsor.updated' => 'bg-blue-100 text-blue-800',
+                                'sponsor.deleted' => 'bg-red-100 text-red-800',
+                                'store-item.created' => 'bg-teal-100 text-teal-800',
+                                'store-item.updated' => 'bg-blue-100 text-blue-800',
+                                'store-item.codes-uploaded' => 'bg-cyan-100 text-cyan-800',
+                                'store-order.fulfilled' => 'bg-green-100 text-green-800',
+                                'store-order.cancelled' => 'bg-red-100 text-red-800',
+                                'store-order.refunded' => 'bg-orange-100 text-orange-800',
+                                'ad-campaign.created' => 'bg-teal-100 text-teal-800',
+                                'ad-campaign.updated' => 'bg-blue-100 text-blue-800',
+                                'ad-campaign.deleted' => 'bg-red-100 text-red-800',
+                                'subscription-plan.created' => 'bg-teal-100 text-teal-800',
+                                'subscription-plan.updated' => 'bg-blue-100 text-blue-800',
+                                'subscription-plan.deleted' => 'bg-red-100 text-red-800',
+                                'subscription-plan.toggled' => 'bg-amber-100 text-amber-800',
+                                'subscription.assigned' => 'bg-purple-100 text-purple-800',
+                                'subscription.cancelled' => 'bg-red-100 text-red-800',
+                                'place.image-deleted' => 'bg-red-100 text-red-800',
+                                'place.osm-import' => 'bg-cyan-100 text-cyan-800',
+                                'place-category.created' => 'bg-teal-100 text-teal-800',
+                                'place-category.updated' => 'bg-blue-100 text-blue-800',
+                                'place-category.deleted' => 'bg-red-100 text-red-800',
                             ];
                             $color = $actionColors[$log->action] ?? 'bg-slate-100 text-slate-700';
                         @endphp

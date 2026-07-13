@@ -6,12 +6,17 @@ use App\Http\Controllers\Controller;
 use App\Models\SubscriptionPlan;
 use App\Models\UserSubscription;
 use App\Models\User;
+use App\Services\ModeratorService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Str;
 
 class SubscriptionController extends Controller
 {
+    public function __construct(
+        private ModeratorService $moderatorService,
+    ) {}
+
     private function requireAdmin(Request $request): void
     {
         $user = Auth::user();
@@ -48,7 +53,8 @@ class SubscriptionController extends Controller
             $decoded = json_decode($data['features'], true);
             $data['features'] = is_array($decoded) ? $decoded : [];
         }
-        SubscriptionPlan::create($data);
+        $plan = SubscriptionPlan::create($data);
+        $this->moderatorService->log(Auth::user(), 'subscription-plan.created', 'subscription_plan', $plan->id, 'Created plan: ' . $plan->name);
         return redirect()->route('admin.subscription.plans')->with('success', 'Plan created.');
     }
 
@@ -76,16 +82,25 @@ class SubscriptionController extends Controller
             $data['features'] = is_array($decoded) ? $decoded : [];
         }
         $subscriptionPlan->update($data);
+        $this->moderatorService->log(Auth::user(), 'subscription-plan.updated', 'subscription_plan', $subscriptionPlan->id, 'Updated plan: ' . $subscriptionPlan->name);
         return redirect()->route('admin.subscription.plans')->with('success', 'Plan updated.');
     }
 
     public function users(Request $request)
     {
         $this->requireAdmin($request);
-        $subscriptions = UserSubscription::with(['user', 'plan'])
-            ->orderBy('created_at', 'desc')->paginate(20);
+        $filter = $request->get('filter', 'active');
+        $query = UserSubscription::with(['user', 'plan']);
+
+        if ($filter === 'active') {
+            $query->whereIn('status', ['active', 'trialing']);
+        } elseif ($filter === 'cancelled') {
+            $query->where('status', 'cancelled');
+        }
+
+        $subscriptions = $query->orderBy('created_at', 'desc')->paginate(20)->withQueryString();
         $plans = SubscriptionPlan::active()->orderBy('name')->get();
-        return view('admin.user_subscriptions', compact('subscriptions', 'plans'));
+        return view('admin.user_subscriptions', compact('subscriptions', 'plans', 'filter'));
     }
 
     public function assignSubscription(Request $request)
@@ -101,15 +116,20 @@ class SubscriptionController extends Controller
         $user = User::findOrFail($data['user_id']);
         $plan = SubscriptionPlan::findOrFail($data['subscription_plan_id']);
 
+        UserSubscription::where('user_id', $user->id)
+            ->whereIn('status', ['active', 'trialing'])
+            ->update(['status' => 'cancelled', 'cancelled_at' => now(), 'ends_at' => now()]);
+
         UserSubscription::create([
             'user_id' => $user->id,
             'subscription_plan_id' => $plan->id,
             'status' => $data['status'],
             'starts_at' => now(),
-            'ends_at' => now()->addMonths((int) $data['duration_months']),
+            'ends_at' => $plan->slug === 'free' ? null : now()->addMonths((int) $data['duration_months']),
             'trial_ends_at' => $data['status'] === 'trialing' ? now()->addDays(7) : null,
         ]);
 
+        $this->moderatorService->log(Auth::user(), 'subscription.assigned', 'user', $user->id, "Assigned '{$plan->name}' subscription to {$user->name} ({$user->email})");
         return redirect()->route('admin.subscription.users')->with('success', 'Subscription assigned.');
     }
 
@@ -119,7 +139,9 @@ class SubscriptionController extends Controller
         if ($subscriptionPlan->userSubscriptions()->exists()) {
             return back()->withErrors(['Cannot delete a plan that has active subscribers.']);
         }
+        $name = $subscriptionPlan->name;
         $subscriptionPlan->delete();
+        $this->moderatorService->log(Auth::user(), 'subscription-plan.deleted', 'subscription_plan', $subscriptionPlan->id, 'Deleted plan: ' . $name);
         return redirect()->route('admin.subscription.plans')->with('success', 'Plan deleted.');
     }
 
@@ -128,17 +150,45 @@ class SubscriptionController extends Controller
         $this->requireAdmin($request);
         $subscriptionPlan->update(['is_active' => !$subscriptionPlan->is_active]);
         $status = $subscriptionPlan->is_active ? 'visible' : 'hidden';
+        $this->moderatorService->log(Auth::user(), 'subscription-plan.toggled', 'subscription_plan', $subscriptionPlan->id, 'Toggled plan visibility: ' . $subscriptionPlan->name . " → {$status}");
         return redirect()->route('admin.subscription.plans')->with('success', "Plan is now {$status} to users.");
     }
 
     public function cancelSubscription(Request $request, UserSubscription $userSubscription)
     {
         $this->requireAdmin($request);
+        $planName = $userSubscription->plan?->name ?? 'N/A';
+        $user = $userSubscription->user;
+
+        if ($userSubscription->plan?->slug === 'free') {
+            return back()->with('error', 'Free plan cannot be cancelled.');
+        }
+
         $userSubscription->update([
             'status' => 'cancelled',
             'cancelled_at' => now(),
             'ends_at' => now(),
         ]);
-        return redirect()->route('admin.subscription.users')->with('success', 'Subscription cancelled.');
+
+        $hasFree = UserSubscription::where('user_id', $user->id)
+            ->whereHas('plan', fn($q) => $q->where('slug', 'free'))
+            ->where('status', 'active')
+            ->exists();
+
+        if (!$hasFree) {
+            $freePlan = SubscriptionPlan::where('slug', 'free')->first();
+            if ($freePlan) {
+                UserSubscription::create([
+                    'user_id' => $user->id,
+                    'subscription_plan_id' => $freePlan->id,
+                    'status' => 'active',
+                    'starts_at' => now(),
+                ]);
+            }
+        }
+
+        $userName = $user?->name ?? '#' . $userSubscription->user_id;
+        $this->moderatorService->log(Auth::user(), 'subscription.cancelled', 'user', $user->id, "Cancelled '{$planName}' subscription for {$userName}, reverted to Free plan");
+        return redirect()->route('admin.subscription.users')->with('success', 'Subscription cancelled. User reverted to Free plan.');
     }
 }

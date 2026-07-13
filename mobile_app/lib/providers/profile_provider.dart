@@ -656,6 +656,25 @@ class ProfileProvider extends ChangeNotifier {
     notifyListeners();
   }
 
+  // ============ Public Profile ============
+  Map<String, dynamic>? _publicProfile;
+  Map<String, dynamic>? get publicProfile => _publicProfile;
+  bool _isLoadingPublic = false;
+  bool get isLoadingPublic => _isLoadingPublic;
+
+  Future<void> loadPublicProfile(String userId) async {
+    _isLoadingPublic = true;
+    notifyListeners();
+    try {
+      final response = await ApiClient.instance.getUserProfile(userId);
+      _publicProfile = response.data['data'] as Map<String, dynamic>?;
+    } catch (e) {
+      _publicProfile = null;
+    }
+    _isLoadingPublic = false;
+    notifyListeners();
+  }
+
   /// Reset entire provider
   void reset() {
     stopAutoRefresh();

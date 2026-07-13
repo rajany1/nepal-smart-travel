@@ -10,7 +10,8 @@ class ShopItem extends Model
 {
     protected $fillable = [
         'name', 'description', 'icon', 'sponsor_id',
-        'reward_type', 'price_xp', 'min_level', 'stock_type',
+        'reward_type', 'discount_type', 'discount_value',
+        'price_xp', 'min_level', 'stock_type',
         'stock_qty', 'is_active', 'sort_order',
         'terms', 'expiry_days', 'usage_limit_per_user',
         'redemption_instructions',
@@ -26,6 +27,7 @@ class ShopItem extends Model
             'sort_order' => 'integer',
             'expiry_days' => 'integer',
             'usage_limit_per_user' => 'integer',
+            'discount_value' => 'decimal:2',
         ];
     }
 
@@ -62,6 +64,13 @@ class ShopItem extends Model
     {
         if ($this->stock_type === 'limited' && $this->stock_qty > 0) {
             $this->decrement('stock_qty');
+        }
+    }
+
+    public function incrementStock(): void
+    {
+        if ($this->stock_type === 'limited') {
+            $this->increment('stock_qty');
         }
     }
 }

@@ -7,6 +7,11 @@ import '../../providers/report_provider.dart';
 import '../../core/models/user.dart';
 import '../../core/models/report.dart';
 import '../../core/widgets/shimmer_loading.dart';
+import '../../widgets/section_card.dart';
+import '../../widgets/stats_row.dart';
+import '../../widgets/badge_chip.dart';
+import '../../widgets/verification_badge.dart';
+import '../../widgets/report_card.dart';
 import '../store/store_screen.dart';
 
 class ProfileScreen extends StatefulWidget {
@@ -378,7 +383,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     child: Icon(
                       Icons.verified,
                       size: 18,
-                      color: _getVerificationColor(profile.verificationTick),
+                      color: VerificationBadge.tickColorFromString(profile.verificationTick),
                     ),
                   ),
                 ),
@@ -457,49 +462,24 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   // ============ Stats Card ============
   Widget _buildStatsCard(BuildContext context, FullProfileData profile) {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: AppTheme.dividerColor),
-      ),
-      child: Column(
-        children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceAround,
-            children: [
-              _StatItem(icon: Icons.emoji_events, value: '${profile.totalXp}', label: 'Total XP', color: AppTheme.secondaryColor),
-              _StatItem(icon: Icons.assignment, value: '${profile.totalReports}', label: 'Reports', color: AppTheme.infoColor),
-              _StatItem(icon: Icons.check_circle, value: '${profile.approvedReports}', label: 'Approved', color: AppTheme.successColor),
-              _StatItem(icon: Icons.trending_up, value: '${profile.approvalRate}%', label: 'Rate', color: AppTheme.primaryColor),
-            ],
-          ),
-          const SizedBox(height: 12),
-          // Additional stats row
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceAround,
-            children: [
-              _StatItem(icon: Icons.warning_amber, value: '${profile.totalAlerts}', label: 'Alerts', color: AppTheme.warningColor),
-              _StatItem(icon: Icons.rate_review, value: '${profile.totalReviews}', label: 'Reviews', color: AppTheme.infoColor),
-              _StatItem(icon: Icons.comment, value: '${profile.totalComments}', label: 'Comments', color: AppTheme.accentColor),
-              _StatItem(icon: Icons.cancel, value: '${profile.rejectedReports}', label: 'Rejected', color: AppTheme.errorColor),
-            ],
-          ),
-        ],
-      ),
+    return SectionCard(
+      child: StatsRow(stats: [
+        StatItem(icon: Icons.emoji_events, value: '${profile.totalXp}', label: 'Total XP', color: AppTheme.secondaryColor),
+        StatItem(icon: Icons.assignment, value: '${profile.totalReports}', label: 'Reports', color: AppTheme.infoColor),
+        StatItem(icon: Icons.check_circle, value: '${profile.approvedReports}', label: 'Approved', color: AppTheme.successColor),
+        StatItem(icon: Icons.trending_up, value: '${profile.approvalRate}%', label: 'Rate', color: AppTheme.primaryColor),
+        StatItem(icon: Icons.warning_amber, value: '${profile.totalAlerts}', label: 'Alerts', color: AppTheme.warningColor),
+        StatItem(icon: Icons.rate_review, value: '${profile.totalReviews}', label: 'Reviews', color: AppTheme.infoColor),
+        StatItem(icon: Icons.comment, value: '${profile.totalComments}', label: 'Comments', color: AppTheme.accentColor),
+        StatItem(icon: Icons.cancel, value: '${profile.rejectedReports}', label: 'Rejected', color: AppTheme.errorColor),
+      ]),
     );
   }
 
   // ============ XP Progress ============
   Widget _buildXpProgress(BuildContext context, FullProfileData profile) {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: AppTheme.dividerColor),
-      ),
+    final levelColor = LevelBadge(level: profile.currentLevel).levelColor;
+    return SectionCard(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -507,7 +487,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
             children: [
               const Icon(Icons.trending_up, size: 18, color: AppTheme.secondaryColor),
               const SizedBox(width: 8),
-              Text('Level Progress', style: TextStyle(fontWeight: FontWeight.w600, fontSize: AppTheme.textBase, color: _getLevelColor(profile.currentLevel))),
+              Text('Level Progress', style: TextStyle(fontWeight: FontWeight.w600, fontSize: AppTheme.textBase, color: levelColor)),
               const Spacer(),
               Text('${profile.totalXp}/${profile.nextLevelXp} XP', style: const TextStyle(color: AppTheme.textSecondary, fontSize: AppTheme.textSm)),
             ],
@@ -518,7 +498,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
             child: LinearProgressIndicator(
               value: profile.levelProgress.clamp(0.0, 1.0),
               backgroundColor: AppTheme.dividerColor,
-              valueColor: AlwaysStoppedAnimation(_getLevelColor(profile.currentLevel)),
+              valueColor: AlwaysStoppedAnimation(levelColor),
               minHeight: 8,
             ),
           ),
@@ -560,34 +540,24 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   // ============ Verification Tick ============
   Widget _buildVerificationTick(BuildContext context, FullProfileData profile) {
-    final tickColor = _getVerificationColor(profile.verificationTick);
-    final tickLabel = profile.verificationTick.toUpperCase();
-
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: AppTheme.dividerColor),
-      ),
+    return SectionCard(
       child: Row(
         children: [
           Container(
             padding: const EdgeInsets.all(8),
             decoration: BoxDecoration(
-              color: tickColor.withOpacity(0.1),
+              color: VerificationBadge.tickColorFromString(profile.verificationTick).withOpacity(0.1),
               shape: BoxShape.circle,
             ),
-            child: Icon(Icons.verified, color: tickColor, size: 28),
+            child: Icon(Icons.verified, color: VerificationBadge.tickColorFromString(profile.verificationTick), size: 28),
           ),
           const SizedBox(width: 12),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text('$tickLabel TICK', style: TextStyle(fontWeight: FontWeight.bold, fontSize: AppTheme.textBase, color: tickColor)),
-                Text('${profile.approvedReports} approved reports • ${profile.totalReports} total contributions',
-                    style: const TextStyle(color: AppTheme.textSecondary, fontSize: AppTheme.textSm)),
+                Text('${profile.verificationTick.toUpperCase()} TICK', style: TextStyle(fontWeight: FontWeight.bold, fontSize: AppTheme.textBase, color: VerificationBadge.tickColorFromString(profile.verificationTick))),
+                Text('${profile.approvedReports} approved reports • ${profile.totalReports} total contributions', style: const TextStyle(color: AppTheme.textSecondary, fontSize: AppTheme.textSm)),
               ],
             ),
           ),
@@ -598,16 +568,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   // ============ Badges Section ============
   Widget _buildBadgesSection(BuildContext context, FullProfileData profile, ProfileProvider profileProv) {
-    final unlockedBadges = profile.badges.where((b) => b.unlocked).toList();
-    final lockedBadges = profile.badges.where((b) => !b.unlocked).toList();
+    final unlocked = profile.badges.where((b) => b.unlocked).toList();
+    final locked = profile.badges.where((b) => !b.unlocked).toList();
 
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: AppTheme.dividerColor),
-      ),
+    return SectionCard(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -615,96 +579,35 @@ class _ProfileScreenState extends State<ProfileScreen> {
             children: [
               const Icon(Icons.emoji_events, size: 18, color: AppTheme.secondaryColor),
               const SizedBox(width: 8),
-              Text(
-                'Badges & Achievements',
-                style: TextStyle(fontWeight: FontWeight.bold, fontSize: AppTheme.textLg, color: AppTheme.textPrimary),
-              ),
+              Text('Badges & Achievements', style: TextStyle(fontWeight: FontWeight.bold, fontSize: AppTheme.textLg, color: AppTheme.textPrimary)),
               const Spacer(),
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                decoration: BoxDecoration(
-                  color: AppTheme.secondaryColor.withOpacity(0.1),
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Text(
-                  '${unlockedBadges.length}/${profile.badges.length}',
-                  style: TextStyle(fontSize: AppTheme.textSm, fontWeight: FontWeight.w600, color: AppTheme.secondaryColor),
-                ),
+                decoration: BoxDecoration(color: AppTheme.secondaryColor.withOpacity(0.1), borderRadius: BorderRadius.circular(12)),
+                child: Text('${unlocked.length}/${profile.badges.length}', style: TextStyle(fontSize: AppTheme.textSm, fontWeight: FontWeight.w600, color: AppTheme.secondaryColor)),
               ),
             ],
           ),
           const SizedBox(height: 12),
-          // Unlocked badges
-          if (unlockedBadges.isNotEmpty) ...[
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: unlockedBadges.map((badge) => _buildBadgeChip(badge, true)).toList(),
-            ),
-            if (lockedBadges.isNotEmpty) const SizedBox(height: 12),
-          ],
-          // Locked badges
-          if (lockedBadges.isNotEmpty) ...[
+          if (unlocked.isNotEmpty)
+            Wrap(spacing: 8, runSpacing: 8, children: unlocked.map((b) => BadgeChip(icon: b.iconData, label: b.name, unlocked: true, unlockedColor: AppTheme.secondaryColor, tooltip: '${b.name}\n${b.description}')).toList()),
+          if (unlocked.isNotEmpty && locked.isNotEmpty) const SizedBox(height: 12),
+          if (locked.isNotEmpty) ...[
             Text('Locked Badges', style: TextStyle(fontSize: AppTheme.textSm, fontWeight: FontWeight.w500, color: AppTheme.textSecondary)),
             const SizedBox(height: 6),
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: lockedBadges.take(6).map((badge) => _buildBadgeChip(badge, false)).toList(),
-            ),
-            if (lockedBadges.length > 6)
+            Wrap(spacing: 8, runSpacing: 8, children: locked.take(6).map((b) => BadgeChip(icon: b.iconData, label: b.name, unlocked: false, tooltip: '${b.name}\n${b.description}')).toList()),
+            if (locked.length > 6)
               Padding(
                 padding: const EdgeInsets.only(top: 6),
-                child: Text(
-                  '+${lockedBadges.length - 6} more locked badges',
-                  style: const TextStyle(color: AppTheme.textSecondary, fontSize: AppTheme.textXs, fontStyle: FontStyle.italic),
-                ),
+                child: Text('+${locked.length - 6} more locked badges', style: const TextStyle(color: AppTheme.textSecondary, fontSize: AppTheme.textXs, fontStyle: FontStyle.italic)),
               ),
           ],
-          if (unlockedBadges.isEmpty && lockedBadges.isEmpty)
+          if (unlocked.isEmpty && locked.isEmpty)
             const Padding(
               padding: EdgeInsets.symmetric(vertical: 8),
-              child: Text('No badges available yet. Start contributing to earn badges!',
-                  style: TextStyle(color: AppTheme.textSecondary, fontSize: AppTheme.textSm)),
+              child: Text('No badges available yet.', style: TextStyle(color: AppTheme.textSecondary, fontSize: AppTheme.textSm)),
             ),
         ],
-      ),
-    );
-  }
-
-  Widget _buildBadgeChip(BadgeInfo badge, bool unlocked) {
-    return Tooltip(
-      message: '${badge.name}\n${badge.description}',
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-        decoration: BoxDecoration(
-          color: unlocked
-              ? AppTheme.secondaryColor.withOpacity(0.1)
-              : AppTheme.dividerColor.withOpacity(0.5),
-          borderRadius: BorderRadius.circular(20),
-          border: unlocked
-              ? Border.all(color: AppTheme.secondaryColor.withOpacity(0.3))
-              : null,
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(
-              badge.iconData,
-              size: 14,
-              color: unlocked ? AppTheme.secondaryColor : AppTheme.textSecondary,
-            ),
-            const SizedBox(width: 4),
-            Text(
-              badge.name.toUpperCase(),
-              style: TextStyle(
-                fontSize: AppTheme.textXs,
-                fontWeight: FontWeight.w600,
-                color: unlocked ? AppTheme.secondaryColor : AppTheme.textSecondary,
-              ),
-            ),
-          ],
-        ),
       ),
     );
   }
@@ -797,130 +700,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   }
 
   Widget _buildMyReportItem(ReportModel report) {
-    Color statusColor;
-    IconData statusIcon;
-    switch (report.status) {
-      case 'approved':
-        statusColor = AppTheme.successColor;
-        statusIcon = Icons.check_circle;
-        break;
-      case 'rejected':
-        statusColor = AppTheme.errorColor;
-        statusIcon = Icons.cancel;
-        break;
-      default:
-        statusColor = AppTheme.warningColor;
-        statusIcon = Icons.access_time;
-    }
-
-    // Get the first image URL if available
-    final hasImage = report.imageUrls.isNotEmpty;
-    final imageUrl = hasImage ? report.imageUrls.first : null;
-
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(8),
-        onTap: () => _showReportDetails(context, report),
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-          decoration: BoxDecoration(
-            color: AppTheme.dividerColor.withOpacity(0.15),
-            borderRadius: BorderRadius.circular(8),
-          ),
-          child: Row(
-            children: [
-              // Thumbnail image if available
-              if (hasImage)
-                ClipRRect(
-                  borderRadius: BorderRadius.circular(6),
-                  child: SizedBox(
-                    width: 44,
-                    height: 44,
-                    child: Image.network(
-                      imageUrl!,
-                      fit: BoxFit.cover,
-                      errorBuilder: (context, error, stackTrace) => Container(
-                        color: statusColor.withOpacity(0.1),
-                        child: Icon(statusIcon, size: 20, color: statusColor),
-                      ),
-                      loadingBuilder: (context, child, loadingProgress) {
-                        if (loadingProgress == null) return child;
-                        return Container(
-                          color: AppTheme.dividerColor.withOpacity(0.3),
-                          child: const Center(
-                            child: SizedBox(
-                              width: 16, height: 16,
-                              child: CircularProgressIndicator(strokeWidth: 2),
-                            ),
-                          ),
-                        );
-                      },
-                    ),
-                  ),
-                )
-              else
-                Container(
-                  width: 44,
-                  height: 44,
-                  padding: const EdgeInsets.all(4),
-                  decoration: BoxDecoration(
-                    color: statusColor.withOpacity(0.1),
-                    borderRadius: BorderRadius.circular(6),
-                  ),
-                  child: Icon(statusIcon, size: 20, color: statusColor),
-                ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-Text(
-                          report.title,
-                          style: const TextStyle(fontSize: AppTheme.textBase, fontWeight: FontWeight.w500),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                    const SizedBox(height: 2),
-                    Row(
-                      children: [
-                        Text(
-                          report.categoryName,
-                          style: const TextStyle(fontSize: AppTheme.textXs, color: AppTheme.textSecondary),
-                        ),
-                        const SizedBox(width: 8),
-                        Text(
-                          '·',
-                          style: TextStyle(fontSize: AppTheme.textXs, color: AppTheme.textSecondary.withOpacity(0.5)),
-                        ),
-                        const SizedBox(width: 8),
-                        Text(
-                          report.timeAgo.isNotEmpty
-                              ? report.timeAgo
-                              : _formatTimeAgo(report.createdAt),
-                          style: const TextStyle(fontSize: AppTheme.textXs, color: AppTheme.textSecondary),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                decoration: BoxDecoration(
-                  color: statusColor.withOpacity(0.1),
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Text(
-                  report.status.toUpperCase(),
-                  style: TextStyle(fontSize: AppTheme.textXs, color: statusColor, fontWeight: FontWeight.w600),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
+    return ReportCard(report: report, onTap: () => _showReportDetails(context, report));
   }
 
   // ============ Recent Activity (in bottom sheet) ============
@@ -1089,36 +869,6 @@ Text(
     );
   }
 
-  // ============ Color Helpers ============
-  Color _getVerificationColor(String tick) {
-    switch (tick) {
-      case 'gray': return AppTheme.grayTick;
-      case 'green': return AppTheme.greenTick;
-      case 'blue': return AppTheme.blueTick;
-      case 'gold': return AppTheme.goldTick;
-      case 'diamond': return AppTheme.diamondTick;
-      default: return AppTheme.grayTick;
-    }
-  }
-
-  Color _getLevelColor(int level) {
-    if (level <= 5) return AppTheme.explorerColor;
-    if (level <= 15) return AppTheme.contributorColor;
-    if (level <= 30) return AppTheme.trustedLocalColor;
-    if (level <= 50) return AppTheme.regionalGuideColor;
-    if (level <= 100) return AppTheme.communityExpertColor;
-    return AppTheme.communityExpertColor;
-  }
-
-  String _formatTimeAgo(DateTime dateTime) {
-    final now = DateTime.now();
-    final diff = now.difference(dateTime);
-    if (diff.inMinutes < 1) return 'Just now';
-    if (diff.inMinutes < 60) return '${diff.inMinutes}m ago';
-    if (diff.inHours < 24) return '${diff.inHours}h ago';
-    if (diff.inDays < 7) return '${diff.inDays}d ago';
-    return '${dateTime.day}/${dateTime.month}/${dateTime.year}';
-  }
 }
 
 // ============ PROFILE LOADING SHIMMER ============
@@ -1131,28 +881,6 @@ class _ProfileLoadingShimmer extends StatelessWidget {
       physics: AlwaysScrollableScrollPhysics(),
       padding: EdgeInsets.all(16),
       child: ProfileShimmer(),
-    );
-  }
-}
-
-// ============ Reusable Sub-widgets ============
-
-class _StatItem extends StatelessWidget {
-  final IconData icon;
-  final String value, label;
-  final Color color;
-
-  const _StatItem({required this.icon, required this.value, required this.label, required this.color});
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      children: [
-        Icon(icon, color: color, size: 22),
-        const SizedBox(height: 2),
-        Text(value, style: TextStyle(fontWeight: FontWeight.bold, fontSize: AppTheme.textBase, color: color)),
-        Text(label, style: const TextStyle(fontSize: AppTheme.textXs, color: AppTheme.textSecondary)),
-      ],
     );
   }
 }

@@ -9,7 +9,7 @@
         <div class="flex items-center gap-2">
             <div class="relative">
                 <i class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-xs"></i>
-                <input type="text" id="mapSearch" placeholder="Search places, reports..." oninput="filterMarkers(this.value)" class="pl-8 pr-3 py-1.5 text-sm border border-gray-300 rounded-lg w-72 focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 outline-none">
+                <input type="text" id="mapSearch" placeholder="Search places, reports..." oninput="filterMarkers(this.value)" class="pl-8 pr-3 py-1.5 text-sm border border-gray-300 rounded-lg w-72 focus:ring-2 focus:ring-primary-200 focus:border-primary-400 outline-none">
             </div>
             <div class="flex items-center gap-3 text-xs text-gray-500 ml-2">
                 <label class="flex items-center gap-1.5 cursor-pointer">
@@ -25,8 +25,8 @@
                     <span class="w-2.5 h-2.5 rounded-full bg-yellow-500 inline-block"></span> Alerts
                 </label>
                 <label class="flex items-center gap-1.5 cursor-pointer">
-                    <input type="checkbox" onchange="toggleLayer('weather', this.checked)" class="rounded border-gray-300 text-indigo-500">
-                    <span class="w-2.5 h-2.5 rounded-full bg-indigo-400 inline-block"></span> Weather
+                    <input type="checkbox" onchange="toggleLayer('weather', this.checked)" class="rounded border-gray-300 text-primary-500">
+                    <span class="w-2.5 h-2.5 rounded-full bg-primary-400 inline-block"></span> Weather
                 </label>
             </div>
         </div>
@@ -53,7 +53,7 @@
             <p id="infoPanelDesc" class="text-sm text-gray-600 mt-2 line-clamp-2"></p>
             <div id="infoPanelRating" class="flex items-center gap-2 mt-2 text-sm"></div>
             <div class="flex gap-2 mt-3">
-                <a id="infoPanelBtn" href="#" class="flex-1 text-center px-3 py-1.5 text-sm font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition">View Details</a>
+                <a id="infoPanelBtn" href="#" class="flex-1 text-center px-3 py-1.5 text-sm font-medium bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition">View Details</a>
                 <button id="infoPanelDir" onclick="openDirections()" class="px-3 py-1.5 text-sm font-medium bg-blue-50 text-blue-700 rounded-lg hover:bg-blue-100 transition"><i class="fas fa-directions"></i></button>
             </div>
         </div>
@@ -68,12 +68,12 @@
 <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css" />
 <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css" />
 <style>
-.marker-cluster-small { background-color: rgba(99, 102, 241, 0.2); }
-.marker-cluster-small div { background-color: rgba(99, 102, 241, 0.6); color: #fff; font-weight: 600; }
-.marker-cluster-medium { background-color: rgba(99, 102, 241, 0.25); }
-.marker-cluster-medium div { background-color: rgba(99, 102, 241, 0.7); color: #fff; font-weight: 600; }
-.marker-cluster-large { background-color: rgba(99, 102, 241, 0.3); }
-.marker-cluster-large div { background-color: rgba(99, 102, 241, 0.8); color: #fff; font-weight: 600; }
+.marker-cluster-small { background-color: rgba(0, 105, 92, 0.2); }
+.marker-cluster-small div { background-color: rgba(0, 105, 92, 0.6); color: #fff; font-weight: 600; }
+.marker-cluster-medium { background-color: rgba(0, 105, 92, 0.25); }
+.marker-cluster-medium div { background-color: rgba(0, 105, 92, 0.7); color: #fff; font-weight: 600; }
+.marker-cluster-large { background-color: rgba(0, 105, 92, 0.3); }
+.marker-cluster-large div { background-color: rgba(0, 105, 92, 0.8); color: #fff; font-weight: 600; }
 .custom-marker { display:flex; align-items:center; justify-content:center; border-radius:50%; border:2px solid #fff; box-shadow:0 2px 6px rgba(0,0,0,0.3); font-size:12px; color:#fff; transition:transform 0.15s; }
 .custom-marker:hover { transform:scale(1.15); z-index:1000 !important; }
 .leaflet-popup-content-wrapper { border-radius:12px !important; box-shadow:0 4px 20px rgba(0,0,0,0.15) !important; }
@@ -190,7 +190,7 @@ const allMarkers = [];
 
 resources.places.forEach(function(p) {
     const ico = p.icon || 'map-marker-alt';
-    const color = p.color || '#6366f1';
+    const color = p.color || '#00695C';
     const marker = L.marker([p.latitude, p.longitude], {
         icon: makeMarkerIcon(color, ico, 26),
     });
@@ -238,7 +238,7 @@ function buildPopup(r) {
         '<p style="font-size:11px;color:#6b7280;margin:2px 0">' + r.category + (r.status ? ' · ' + r.status : '') + '</p>' +
         (stars ? '<p style="font-size:12px;margin:2px 0">' + stars + ' ' + (r.rating || '').toFixed(1) + '</p>' : '') +
         (r.description ? '<p style="font-size:11px;color:#6b7280;margin:4px 0">' + r.description.substring(0,60) + '</p>' : '') +
-        '<a href="' + r.url + '" style="font-size:11px;color:#6366f1">View details →</a>' +
+        '<a href="' + r.url + '" style="font-size:11px;color:#00695C">View details →</a>' +
     '</div>';
 }
 
@@ -262,7 +262,7 @@ function showInfoPanel(r) {
     const badge = document.getElementById('infoPanelBadge');
     if (r.type === 'place') {
         badge.textContent = r.status === 'verified' ? 'Verified' : 'Place';
-        badge.className = 'text-xs font-medium px-2.5 py-0.5 rounded-full flex-shrink-0 ' + (r.status === 'verified' ? 'bg-green-100 text-green-700' : 'bg-indigo-100 text-indigo-700');
+        badge.className = 'text-xs font-medium px-2.5 py-0.5 rounded-full flex-shrink-0 ' + (r.status === 'verified' ? 'bg-green-100 text-green-700' : 'bg-primary-100 text-primary-700');
     } else if (r.type === 'report') {
         badge.textContent = r.status;
         badge.className = 'text-xs font-medium px-2.5 py-0.5 rounded-full flex-shrink-0 ' + (r.status === 'approved' ? 'bg-green-100 text-green-700' : 'bg-orange-100 text-orange-700');

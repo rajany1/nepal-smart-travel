@@ -38,10 +38,6 @@ class AuthProvider extends ChangeNotifier {
   // ✅ User level info getter
   String get userLevelName => _user?.levelName ?? 'Explorer';
 
-  bool get isAdmin => _user?.role == 'admin';
-  bool get isModerator => _user?.role == 'moderator';
-  bool get isRegularUser => _user?.role == 'user';
-
   bool canUseFeature(String featureName) {
     return _user?.permissions.contains(featureName) ?? false;
   }

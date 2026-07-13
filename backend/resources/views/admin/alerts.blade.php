@@ -7,7 +7,7 @@
         <div class="px-6 py-4 border-b border-gray-100 flex flex-wrap items-center justify-between gap-4">
             <h3 class="font-semibold text-gray-800">All Alerts</h3>
             <div class="flex gap-2">
-                <a href="{{ route('admin.alerts', ['severity' => 'all']) }}" class="px-3 py-1.5 text-sm rounded-lg {{ $severity === 'all' ? 'bg-indigo-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200' }}">All</a>
+                <a href="{{ route('admin.alerts', ['severity' => 'all']) }}" class="px-3 py-1.5 text-sm rounded-lg {{ $severity === 'all' ? 'bg-primary-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200' }}">All</a>
                 <a href="{{ route('admin.alerts', ['severity' => 'critical']) }}" class="px-3 py-1.5 text-sm rounded-lg {{ $severity === 'critical' ? 'bg-red-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200' }}">Critical</a>
                 <a href="{{ route('admin.alerts', ['severity' => 'high']) }}" class="px-3 py-1.5 text-sm rounded-lg {{ $severity === 'high' ? 'bg-orange-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200' }}">High</a>
                 <a href="{{ route('admin.alerts', ['severity' => 'info']) }}" class="px-3 py-1.5 text-sm rounded-lg {{ $severity === 'info' ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200' }}">Info</a>
@@ -79,15 +79,15 @@
                 <div class="space-y-4">
                     <div>
                         <label class="block text-sm font-medium text-gray-700 mb-1">Title</label>
-                        <input type="text" name="title" required class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500">
+                        <input type="text" name="title" required class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-primary-500 focus:border-primary-500">
                     </div>
                     <div>
                         <label class="block text-sm font-medium text-gray-700 mb-1">Description</label>
-                        <textarea name="description" rows="3" required class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"></textarea>
+                        <textarea name="description" rows="3" required class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-primary-500 focus:border-primary-500"></textarea>
                     </div>
                     <div>
                         <label class="block text-sm font-medium text-gray-700 mb-1">Alert Type</label>
-                        <select name="alert_type" required class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500">
+                        <select name="alert_type" required class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-primary-500 focus:border-primary-500">
                             <option value="weather">Weather</option>
                             <option value="landslide">Landslide</option>
                             <option value="earthquake">Earthquake</option>
@@ -98,7 +98,7 @@
                     </div>
                     <div>
                         <label class="block text-sm font-medium text-gray-700 mb-1">Severity</label>
-                        <select name="severity" required class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500">
+                        <select name="severity" required class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-primary-500 focus:border-primary-500">
                             <option value="info">Info</option>
                             <option value="low">Low</option>
                             <option value="medium">Medium</option>
@@ -108,9 +108,9 @@
                     </div>
                     <div>
                         <label class="block text-sm font-medium text-gray-700 mb-1">Affected District</label>
-                        <input type="text" name="affected_district" required class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500">
+                        <input type="text" name="affected_district" required class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-primary-500 focus:border-primary-500">
                     </div>
-                    <button type="submit" class="w-full bg-indigo-600 text-white py-2 px-4 rounded-lg text-sm font-medium hover:bg-indigo-700 transition">
+                    <button type="submit" class="w-full bg-primary-600 text-white py-2 px-4 rounded-lg text-sm font-medium hover:bg-primary-700 transition">
                         <i class="fas fa-plus mr-1"></i> Create Alert
                     </button>
                 </div>

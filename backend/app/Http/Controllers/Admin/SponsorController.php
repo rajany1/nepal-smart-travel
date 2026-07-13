@@ -4,11 +4,17 @@ namespace App\Http\Controllers\Admin;
 
 use App\Http\Controllers\Controller;
 use App\Models\Sponsor;
+use App\Models\TravelPartner;
+use App\Services\ModeratorService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 
 class SponsorController extends Controller
 {
+    public function __construct(
+        private ModeratorService $moderatorService,
+    ) {}
+
     private function requireAdmin(Request $request): void
     {
         $user = Auth::user();
@@ -29,8 +35,9 @@ class SponsorController extends Controller
     {
         $this->requireAdmin($request);
 
-        $sponsors = Sponsor::orderBy('sort_order')->orderBy('name')->paginate(20);
-        return view('admin.sponsors', compact('sponsors'));
+        $sponsors = Sponsor::with('travelPartner')->orderBy('sort_order')->orderBy('name')->paginate(20);
+        $travelPartners = TravelPartner::active()->orderBy('name')->get();
+        return view('admin.sponsors', compact('sponsors', 'travelPartners'));
     }
 
     public function store(Request $request)
@@ -40,12 +47,14 @@ class SponsorController extends Controller
         $data = $request->validate([
             'name' => 'required|string|max:255',
             'website' => 'nullable|string|max:255',
+            'address' => 'nullable|string|max:500',
             'latitude' => 'nullable|numeric|between:-90,90',
             'longitude' => 'nullable|numeric|between:-180,180',
             'contact_email' => 'nullable|email|max:255',
             'contact_phone' => 'nullable|string|max:50',
             'description' => 'nullable|string',
             'is_active' => 'sometimes|boolean',
+            'travel_partner_id' => 'nullable|exists:travel_partners,id',
             'sort_order' => 'required|integer|min:0',
         ]);
 
@@ -58,8 +67,9 @@ class SponsorController extends Controller
             $data['logo'] = $request->file('logo')->store('sponsors', 'public');
         }
 
-        Sponsor::create($data);
+        $sponsor = Sponsor::create($data);
 
+        $this->moderatorService->log(Auth::user(), 'sponsor.created', 'sponsor', $sponsor->id, 'Created sponsor: ' . $sponsor->name);
         return redirect()->route('admin.sponsors')
             ->with('success', 'Sponsor created successfully.');
     }
@@ -71,11 +81,13 @@ class SponsorController extends Controller
         $data = $request->validate([
             'name' => 'required|string|max:255',
             'website' => 'nullable|string|max:255',
+            'address' => 'nullable|string|max:500',
             'latitude' => 'nullable|numeric|between:-90,90',
             'longitude' => 'nullable|numeric|between:-180,180',
             'contact_email' => 'nullable|email|max:255',
             'contact_phone' => 'nullable|string|max:50',
             'description' => 'nullable|string',
+            'travel_partner_id' => 'nullable|exists:travel_partners,id',
             'is_active' => 'sometimes|boolean',
             'sort_order' => 'required|integer|min:0',
         ]);
@@ -91,6 +103,7 @@ class SponsorController extends Controller
 
         $sponsor->update($data);
 
+        $this->moderatorService->log(Auth::user(), 'sponsor.updated', 'sponsor', $sponsor->id, 'Updated sponsor: ' . $sponsor->name);
         return redirect()->route('admin.sponsors')
             ->with('success', 'Sponsor updated successfully.');
     }
@@ -104,8 +117,10 @@ class SponsorController extends Controller
                 ->with('error', 'Cannot delete sponsor with active shop items. Remove or reassign items first.');
         }
 
+        $sponsorName = $sponsor->name;
         $sponsor->delete();
 
+        $this->moderatorService->log(Auth::user(), 'sponsor.deleted', 'sponsor', $sponsor->id, 'Deleted sponsor: ' . $sponsorName);
         return redirect()->route('admin.sponsors')
             ->with('success', 'Sponsor deleted.');
     }

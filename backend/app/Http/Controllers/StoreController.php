@@ -42,4 +42,10 @@ class StoreController extends Controller
         $purchases = $this->shopService->getUserPurchases(Auth::user());
         return response()->json(['data' => $purchases]);
     }
+
+    public function availableCodes(): JsonResponse
+    {
+        $codes = $this->shopService->getUserAvailableCodes(Auth::user());
+        return response()->json(['data' => $codes]);
+    }
 }

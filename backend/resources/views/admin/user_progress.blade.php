@@ -6,7 +6,7 @@
     <!-- User Header -->
     <div class="bg-white rounded-2xl shadow-sm border border-slate-200 p-6">
         <div class="flex items-center gap-4">
-            <div class="w-14 h-14 rounded-full bg-indigo-600 grid place-items-center text-white text-xl font-bold shadow">
+            <div class="w-14 h-14 rounded-full bg-primary-600 grid place-items-center text-white text-xl font-bold shadow">
                 {{ strtoupper(substr($user->name, 0, 1)) }}
             </div>
             <div>
@@ -14,7 +14,7 @@
                 <p class="text-sm text-slate-500">{{ $user->email }} · {{ $user->roleName ?? 'user' }}</p>
                 <p class="text-xs text-slate-400">Joined {{ $user->created_at?->format('M d, Y') }}</p>
             </div>
-            <a href="{{ route('admin.users') }}" class="ml-auto text-sm text-indigo-600 hover:text-indigo-800">
+            <a href="{{ route('admin.users') }}" class="ml-auto text-sm text-primary-600 hover:text-primary-800">
                 <i class="fas fa-arrow-left"></i> Back to Users
             </a>
         </div>
@@ -24,7 +24,7 @@
     <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
         <div class="bg-white rounded-2xl shadow-sm border border-slate-200 p-5">
             <p class="text-xs font-semibold text-slate-500 uppercase tracking-wider">Total XP</p>
-            <p class="text-3xl font-bold text-indigo-600 mt-1">{{ number_format($user->total_xp ?? 0) }}</p>
+            <p class="text-3xl font-bold text-primary-600 mt-1">{{ number_format($user->total_xp ?? 0) }}</p>
         </div>
         <div class="bg-white rounded-2xl shadow-sm border border-slate-200 p-5">
             <p class="text-xs font-semibold text-slate-500 uppercase tracking-wider">Current Level</p>
@@ -35,7 +35,7 @@
             <p class="text-xs font-semibold text-slate-500 uppercase tracking-wider">Level Progress</p>
             <div class="mt-2">
                 <div class="w-full bg-slate-200 rounded-full h-2.5">
-                    <div class="bg-indigo-600 h-2.5 rounded-full" style="width: {{ $levelProgress * 100 }}%"></div>
+                    <div class="bg-primary-600 h-2.5 rounded-full" style="width: {{ $levelProgress * 100 }}%"></div>
                 </div>
                 <p class="text-xs text-slate-500 mt-1">{{ number_format($user->total_xp ?? 0) }} / {{ $nextLevelXp }} XP</p>
             </div>
@@ -79,7 +79,7 @@
                         </div>
                     </div>
                     @endif
-                    <i class="fas fa-{{ $badge['icon'] }} text-2xl {{ $badge['unlocked'] ? 'text-indigo-600' : 'text-slate-400' }}"></i>
+                    <i class="fas fa-{{ $badge['icon'] }} text-2xl {{ $badge['unlocked'] ? 'text-primary-600' : 'text-slate-400' }}"></i>
                     <p class="text-sm font-semibold text-slate-900 mt-2">{{ $badge['name'] }}</p>
                     <p class="text-xs text-slate-500 mt-0.5">{{ $badge['description'] }}</p>
                     <p class="text-xs mt-2">
@@ -159,7 +159,7 @@
                     <label class="block text-sm font-medium text-slate-700 mb-1">Reason</label>
                     <input type="text" name="reason" required class="w-full border border-slate-300 rounded-xl px-3 py-2 text-sm" placeholder="Why this adjustment?">
                 </div>
-                <button type="submit" class="bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-2 rounded-xl text-sm font-semibold">
+                <button type="submit" class="bg-primary-600 hover:bg-primary-700 text-white px-5 py-2 rounded-xl text-sm font-semibold">
                     <i class="fas fa-coins"></i> Apply XP Adjustment
                 </button>
             </form>

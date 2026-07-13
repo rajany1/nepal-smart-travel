@@ -8,7 +8,7 @@
             <h3 class="text-2xl font-bold text-slate-900">Role Management</h3>
             <p class="text-sm text-slate-500 mt-1">Define custom roles and assign permissions to control access.</p>
         </div>
-        <button onclick="document.getElementById('createRoleModal').classList.remove('hidden')" class="bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-2.5 rounded-xl text-sm font-semibold shadow transition flex items-center gap-2">
+        <button onclick="document.getElementById('createRoleModal').classList.remove('hidden')" class="bg-primary-600 hover:bg-primary-700 text-white px-5 py-2.5 rounded-xl text-sm font-semibold shadow transition flex items-center gap-2">
             <i class="fas fa-plus"></i> New Role
         </button>
     </div>
@@ -21,7 +21,7 @@
                     <h4 class="text-lg font-bold text-slate-900">{{ $role->display_name }}</h4>
                     <p class="text-xs text-slate-500 mt-0.5">
                         <code class="bg-slate-100 px-1.5 py-0.5 rounded text-xs">{{ $role->name }}</code>
-                        @if($role->is_system) <span class="ml-1 text-indigo-500 font-semibold">System</span> @endif
+                        @if($role->is_system) <span class="ml-1 text-primary-500 font-semibold">System</span> @endif
                         @if($role->is_default) <span class="ml-1 text-green-500 font-semibold">Default</span> @endif
                     </p>
                 </div>
@@ -38,7 +38,7 @@
                 <p class="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">Permissions</p>
                 <div class="flex flex-wrap gap-1.5">
                     @forelse($role->permissions as $perm)
-                    <span class="text-xs bg-indigo-50 text-indigo-700 px-2 py-0.5 rounded-full">{{ $perm->display_name }}</span>
+                    <span class="text-xs bg-primary-50 text-primary-700 px-2 py-0.5 rounded-full">{{ $perm->display_name }}</span>
                     @empty
                     <span class="text-xs text-slate-400 italic">No permissions assigned</span>
                     @endforelse
@@ -46,7 +46,7 @@
             </div>
 
             <div class="flex gap-2 pt-3 border-t border-slate-100">
-                <button onclick="openEditRole({{ $role->id }})" class="text-sm text-indigo-600 hover:text-indigo-800 font-medium flex items-center gap-1">
+                <button onclick="openEditRole({{ $role->id }})" class="text-sm text-primary-600 hover:text-primary-800 font-medium flex items-center gap-1">
                     <i class="fas fa-edit text-xs"></i> Edit
                 </button>
                 @if(!$role->is_system)
@@ -89,7 +89,7 @@
             </div>
             <div class="flex gap-3 justify-end mt-6">
                 <button type="button" onclick="document.getElementById('createRoleModal').classList.add('hidden')" class="px-4 py-2 text-sm text-slate-600 hover:text-slate-800">Cancel</button>
-                <button type="submit" class="bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-2 rounded-xl text-sm font-semibold">Create Role</button>
+                <button type="submit" class="bg-primary-600 hover:bg-primary-700 text-white px-5 py-2 rounded-xl text-sm font-semibold">Create Role</button>
             </div>
         </form>
     </div>
@@ -130,7 +130,7 @@
                         <div class="grid grid-cols-2 md:grid-cols-3 gap-2">
                             @foreach($perms as $perm)
                             <label class="flex items-center gap-2 text-sm text-slate-700 cursor-pointer">
-                                <input type="checkbox" name="permissions[]" value="{{ $perm->name }}" class="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 edit-perm-checkbox">
+                                <input type="checkbox" name="permissions[]" value="{{ $perm->name }}" class="rounded border-slate-300 text-primary-600 focus:ring-primary-500 edit-perm-checkbox">
                                 {{ $perm->display_name }}
                             </label>
                             @endforeach
@@ -141,7 +141,7 @@
             </div>
             <div class="flex gap-3 justify-end mt-6">
                 <button type="button" onclick="closeEditRole()" class="px-4 py-2 text-sm text-slate-600 hover:text-slate-800">Cancel</button>
-                <button type="submit" class="bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-2 rounded-xl text-sm font-semibold">Update Role</button>
+                <button type="submit" class="bg-primary-600 hover:bg-primary-700 text-white px-5 py-2 rounded-xl text-sm font-semibold">Update Role</button>
             </div>
         </form>
     </div>

@@ -11,7 +11,7 @@ class Booking extends Model
     protected $fillable = [
         'travel_partner_id', 'user_id', 'customer_name',
         'customer_phone', 'customer_email', 'amount',
-        'commission_earned', 'reward_pool_share', 'status',
+        'commission_earned', 'reward_pool_share', 'discount_amount', 'status',
         'notes', 'booked_at', 'confirmed_at', 'completed_at',
     ];
 
@@ -21,6 +21,7 @@ class Booking extends Model
             'amount' => 'decimal:2',
             'commission_earned' => 'decimal:2',
             'reward_pool_share' => 'decimal:2',
+            'discount_amount' => 'decimal:2',
             'booked_at' => 'datetime',
             'confirmed_at' => 'datetime',
             'completed_at' => 'datetime',
@@ -40,6 +41,11 @@ class Booking extends Model
     public function commissionTransaction(): HasOne
     {
         return $this->hasOne(CommissionTransaction::class);
+    }
+
+    public function shopCode(): HasOne
+    {
+        return $this->hasOne(ShopCode::class);
     }
 
     public function isPending(): bool { return $this->status === 'pending'; }

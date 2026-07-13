@@ -11,7 +11,7 @@
     <div class="px-6 py-4 border-b border-gray-100 flex flex-wrap items-center justify-between gap-4">
         <h3 class="font-semibold text-gray-800">All Users</h3>
         <div class="flex flex-wrap gap-2">
-            <a href="{{ route('admin.users', ['role' => 'all', 'status' => $status]) }}" class="px-3 py-1.5 text-sm rounded-lg {{ $role === 'all' ? 'bg-indigo-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200' }}">All</a>
+            <a href="{{ route('admin.users', ['role' => 'all', 'status' => $status]) }}" class="px-3 py-1.5 text-sm rounded-lg {{ $role === 'all' ? 'bg-primary-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200' }}">All</a>
             <a href="{{ route('admin.users', ['role' => 'admin', 'status' => $status]) }}" class="px-3 py-1.5 text-sm rounded-lg {{ $role === 'admin' ? 'bg-purple-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200' }}">Admins</a>
             <a href="{{ route('admin.users', ['role' => 'moderator', 'status' => $status]) }}" class="px-3 py-1.5 text-sm rounded-lg {{ $role === 'moderator' ? 'bg-yellow-500 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200' }}">Moderators</a>
             <a href="{{ route('admin.users', ['role' => 'user', 'status' => $status]) }}" class="px-3 py-1.5 text-sm rounded-lg {{ $role === 'user' ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200' }}">Users</a>
@@ -31,8 +31,8 @@
         <form method="GET" action="{{ route('admin.users') }}" class="ml-auto flex gap-2">
             <input type="hidden" name="role" value="{{ $role }}">
             <input type="hidden" name="status" value="{{ $status }}">
-            <input type="search" name="search" value="{{ request('search') }}" placeholder="Search by name or email..." class="px-3 py-1.5 text-sm border border-gray-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500 w-64" />
-            <button type="submit" class="px-3 py-1.5 text-sm bg-indigo-600 text-white rounded-lg hover:bg-indigo-700"><i class="fas fa-search"></i></button>
+            <input type="search" name="search" value="{{ request('search') }}" placeholder="Search by name or email..." class="px-3 py-1.5 text-sm border border-gray-300 rounded-lg focus:ring-primary-500 focus:border-primary-500 w-64" />
+            <button type="submit" class="px-3 py-1.5 text-sm bg-primary-600 text-white rounded-lg hover:bg-primary-700"><i class="fas fa-search"></i></button>
         </form>
     </div>
     <div class="overflow-x-auto">
@@ -56,8 +56,8 @@
                     <td class="px-6 py-4 text-sm text-gray-500">#{{ $user->id }}</td>
                     <td class="px-6 py-4">
                         <div class="flex items-center gap-3">
-                            <div class="w-8 h-8 rounded-full bg-indigo-100 flex items-center justify-center flex-shrink-0">
-                                <span class="text-xs font-bold text-indigo-600">{{ strtoupper(substr($user->name, 0, 1)) }}</span>
+                            <div class="w-8 h-8 rounded-full bg-primary-100 flex items-center justify-center flex-shrink-0">
+                                <span class="text-xs font-bold text-primary-600">{{ strtoupper(substr($user->name, 0, 1)) }}</span>
                             </div>
                             <span class="text-sm font-medium text-gray-900">{{ $user->name }}</span>
                         </div>
@@ -228,8 +228,8 @@
                 <div class="flex flex-wrap gap-2">
                     @php $modPerms = $mod->role?->permissions ?? collect(); @endphp
                     @forelse($modPerms as $perm)
-                        <span class="inline-flex items-center gap-1 rounded-full bg-indigo-50 border border-indigo-200 px-3 py-1 text-xs font-medium text-indigo-700">
-                            <i class="fas fa-check-circle text-indigo-400"></i>
+                        <span class="inline-flex items-center gap-1 rounded-full bg-primary-50 border border-primary-200 px-3 py-1 text-xs font-medium text-primary-700">
+                            <i class="fas fa-check-circle text-primary-400"></i>
                             {{ $perm->display_name }}
                         </span>
                     @empty

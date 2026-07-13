@@ -963,8 +963,10 @@ class AdminController extends Controller
         $this->requirePermission('manage_places');
 
         $image = PlaceImage::findOrFail($id);
+        $placeId = $image->place_id;
         $image->delete();
 
+        $this->logAction('place.image-deleted', 'place_image', $id, "Deleted image #{$id} from place #{$placeId}");
         return back()->with('success', 'Image deleted');
     }
 
@@ -985,6 +987,7 @@ class AdminController extends Controller
                 '--limit' => 200,
             ]);
             $output = \Illuminate\Support\Facades\Artisan::output();
+            $this->logAction('place.osm-import', 'place', null, "OSM import from city: {$city}, radius: {$radius}");
             return back()->with('success', "OSM import complete. Output: " . nl2br(e($output)));
         } catch (\Exception $e) {
             return back()->with('error', 'OSM import failed: ' . $e->getMessage());
@@ -1001,7 +1004,8 @@ class AdminController extends Controller
                 'name' => 'required|string|max:255|unique:place_categories,name',
                 'icon' => 'nullable|string|max:100',
             ]);
-            PlaceCategories::create($validated);
+            $cat = PlaceCategories::create($validated);
+            $this->logAction('place-category.created', 'place_category', $cat->id, 'Created category: ' . $cat->name);
             return back()->with('success', 'Category created');
         }
 
@@ -1012,6 +1016,7 @@ class AdminController extends Controller
                 'icon' => 'nullable|string|max:100',
             ]);
             $cat->update($validated);
+            $this->logAction('place-category.updated', 'place_category', $cat->id, 'Updated category: ' . $cat->name);
             return back()->with('success', 'Category updated');
         }
 
@@ -1020,7 +1025,9 @@ class AdminController extends Controller
             if ($cat->places()->count() > 0) {
                 return back()->with('error', 'Cannot delete category with existing places');
             }
+            $name = $cat->name;
             $cat->delete();
+            $this->logAction('place-category.deleted', 'place_category', $cat->id, 'Deleted category: ' . $name);
             return back()->with('success', 'Category deleted');
         }
 

@@ -8,7 +8,7 @@
             <h3 class="text-2xl font-bold text-slate-900">Achievement & Badge Management</h3>
             <p class="text-sm text-slate-500 mt-1">Create and manage achievements, badges, and unlock criteria.</p>
         </div>
-        <button onclick="document.getElementById('createModal').classList.remove('hidden')" class="bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-2.5 rounded-xl text-sm font-semibold shadow transition flex items-center gap-2">
+        <button onclick="document.getElementById('createModal').classList.remove('hidden')" class="bg-primary-600 hover:bg-primary-700 text-white px-5 py-2.5 rounded-xl text-sm font-semibold shadow transition flex items-center gap-2">
             <i class="fas fa-plus"></i> New Achievement
         </button>
     </div>
@@ -31,7 +31,7 @@
                 <tbody class="divide-y divide-slate-100">
                     @forelse($achievements as $achievement)
                     <tr class="hover:bg-slate-50 transition">
-                        <td class="px-6 py-4 text-xl"><i class="fas fa-{{ $achievement->icon }} text-indigo-600"></i></td>
+                        <td class="px-6 py-4 text-xl"><i class="fas fa-{{ $achievement->icon }} text-primary-600"></i></td>
                         <td class="px-6 py-4">
                             <p class="font-semibold text-slate-900">{{ $achievement->display_name }}</p>
                             <p class="text-xs text-slate-500"><code class="bg-slate-100 px-1 py-0.5 rounded">{{ $achievement->name }}</code></p>
@@ -45,18 +45,18 @@
                         <td class="px-6 py-4">
                             <code class="text-xs bg-gray-100 px-1.5 py-0.5 rounded text-gray-700">{{ json_encode($achievement->criteria) }}</code>
                         </td>
-                        <td class="px-6 py-4 text-center font-semibold text-indigo-600">{{ $achievement->xp_reward }} XP</td>
+                        <td class="px-6 py-4 text-center font-semibold text-primary-600">{{ $achievement->xp_reward }} XP</td>
                         <td class="px-6 py-4 text-center text-sm text-slate-600">{{ $achievement->users_count ?? 0 }}</td>
                         <td class="px-6 py-4 text-center">
                             @if($achievement->is_system)
-                            <span class="text-xs bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded-full font-medium">System</span>
+                            <span class="text-xs bg-primary-100 text-primary-700 px-2 py-0.5 rounded-full font-medium">System</span>
                             @else
                             <span class="text-xs text-slate-400">—</span>
                             @endif
                         </td>
                         <td class="px-6 py-4 text-right">
                             <div class="flex items-center justify-end gap-2">
-                                <button onclick="openEdit({{ $achievement->id }})" class="px-3 py-1.5 text-xs font-medium bg-indigo-50 text-indigo-600 rounded-lg hover:bg-indigo-100 transition">
+                                <button onclick="openEdit({{ $achievement->id }})" class="px-3 py-1.5 text-xs font-medium bg-primary-50 text-primary-600 rounded-lg hover:bg-primary-100 transition">
                                     <i class="fas fa-edit"></i> Edit
                                 </button>
                                 @if(!$achievement->is_system)
@@ -138,7 +138,7 @@
             </div>
             <div class="flex gap-3 justify-end mt-6">
                 <button type="button" onclick="document.getElementById('createModal').classList.add('hidden')" class="px-4 py-2 text-sm text-slate-600 hover:text-slate-800">Cancel</button>
-                <button type="submit" class="bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-2 rounded-xl text-sm font-semibold">Create</button>
+                <button type="submit" class="bg-primary-600 hover:bg-primary-700 text-white px-5 py-2 rounded-xl text-sm font-semibold">Create</button>
             </div>
         </form>
     </div>
@@ -193,7 +193,7 @@
             </div>
             <div class="flex gap-3 justify-end mt-6">
                 <button type="button" onclick="closeEdit()" class="px-4 py-2 text-sm text-slate-600 hover:text-slate-800">Cancel</button>
-                <button type="submit" class="bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-2 rounded-xl text-sm font-semibold">Update</button>
+                <button type="submit" class="bg-primary-600 hover:bg-primary-700 text-white px-5 py-2 rounded-xl text-sm font-semibold">Update</button>
             </div>
         </form>
     </div>

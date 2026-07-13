@@ -15,7 +15,6 @@ import '../assistant/assistant_screen.dart';
 import '../profile/profile_screen.dart';
 import '../alerts/alerts_screen.dart';
 import '../leaderboard/leaderboard_screen.dart';
-import '../partners/partners_list_screen.dart';
 import '../sponsors/sponsors_screen.dart';
 import '../store/store_screen.dart';
 import '../bookings/my_bookings_screen.dart';
@@ -204,18 +203,21 @@ color: AppTheme.surfaceColor,
                 _QuickActionItem(icon: Icons.chat, label: 'AI Help', color: AppTheme.infoColor, onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const AssistantScreen()))),
               ],
             ),
-            const SizedBox(height: 24),
-
-            // Featured Partners
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Text('Travel Partners', style: Theme.of(context).textTheme.titleLarge),
-                TextButton(onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const PartnersListScreen())), child: const Text('View All')),
-              ],
+            const SizedBox(height: 4),
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton.icon(
+                onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const MyBookingsScreen())),
+                icon: const Icon(Icons.book_online, size: 18),
+                label: const Text('My Bookings'),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: AppTheme.primaryColor,
+                  side: const BorderSide(color: AppTheme.primaryColor),
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                ),
+              ),
             ),
-            const SizedBox(height: 8),
-            const _PartnersHorizontalList(),
             const SizedBox(height: 24),
 
             // Live Alerts
@@ -450,75 +452,6 @@ class _PlaceCard extends StatelessWidget {
             ),
           ],
         ),
-      ),
-    );
-  }
-}
-
-class _PartnersHorizontalList extends StatefulWidget {
-  const _PartnersHorizontalList();
-  @override
-  State<_PartnersHorizontalList> createState() => _PartnersHorizontalListState();
-}
-
-class _PartnersHorizontalListState extends State<_PartnersHorizontalList> {
-  final _api = ApiClient.instance;
-  List<dynamic> _partners = [];
-  bool _loaded = false;
-
-  @override
-  void initState() {
-    super.initState();
-    _load();
-  }
-
-  Future<void> _load() async {
-    try {
-      final res = await _api.getPartners();
-      _partners = res.data['data'] as List<dynamic>;
-    } catch (_) {}
-    if (mounted) setState(() { _loaded = true; });
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    if (!_loaded || _partners.isEmpty) return const SizedBox.shrink();
-    return SizedBox(
-      height: 140,
-      child: ListView.builder(
-        scrollDirection: Axis.horizontal,
-        itemCount: _partners.length > 5 ? 5 : _partners.length,
-        itemBuilder: (_, i) {
-          final p = _partners[i] as Map<String, dynamic>;
-          return GestureDetector(
-            onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const PartnersListScreen())),
-            child: Container(
-              width: 130,
-              margin: const EdgeInsets.only(right: 10),
-              child: Card(
-                margin: EdgeInsets.zero,
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    CircleAvatar(
-                      radius: 24,
-                      backgroundColor: Colors.blue.shade50,
-                      child: Text(p['name']?[0]?.toUpperCase() ?? '?', style: TextStyle(fontSize: 22, color: Colors.blue.shade700, fontWeight: FontWeight.bold)),
-                    ),
-                    const SizedBox(height: 6),
-                    Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 8),
-                      child: Text(p['name'] ?? '', style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 12), maxLines: 1, overflow: TextOverflow.ellipsis, textAlign: TextAlign.center),
-                    ),
-                    if (p['district'] != null)
-                      Text(p['district'], style: TextStyle(color: Colors.grey.shade500, fontSize: 11), maxLines: 1, overflow: TextOverflow.ellipsis),
-                  ],
-                ),
-              ),
-            ),
-          );
-        },
       ),
     );
   }

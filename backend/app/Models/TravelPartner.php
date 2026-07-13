@@ -10,7 +10,7 @@ class TravelPartner extends Model
     protected $fillable = [
         'name', 'type', 'description', 'logo', 'phone', 'email',
         'website', 'address', 'district', 'commission_rate',
-        'commission_fixed', 'is_active',
+        'commission_fixed', 'value_npr', 'is_active',
     ];
 
     protected function casts(): array
@@ -18,6 +18,7 @@ class TravelPartner extends Model
         return [
             'commission_rate' => 'decimal:2',
             'commission_fixed' => 'decimal:2',
+            'value_npr' => 'decimal:2',
             'is_active' => 'boolean',
         ];
     }
@@ -30,6 +31,11 @@ class TravelPartner extends Model
     public function bookings(): HasMany
     {
         return $this->hasMany(Booking::class);
+    }
+
+    public function sponsors(): HasMany
+    {
+        return $this->hasMany(Sponsor::class);
     }
 
     public function adCampaigns(): HasMany

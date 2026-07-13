@@ -5,9 +5,31 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Admin Login - {{ config('app.name') }}</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        primary: {
+                            '50': '#E0F2F1', '100': '#B2DFDB', '200': '#80CBC4',
+                            '300': '#4DB6AC', '400': '#26A69A', '500': '#009688',
+                            '600': '#00897B', '700': '#00796B', '800': '#00695C',
+                            '900': '#004D40',
+                        },
+                        accent: {
+                            '50': '#FFF3E0', '100': '#FFE0B2', '200': '#FFCC80',
+                            '300': '#FFB74D', '400': '#FFA726', '500': '#F39C12',
+                            '600': '#D68910', '700': '#B9770E', '800': '#9A6A0C',
+                            '900': '#7B550A',
+                        },
+                    },
+                },
+            },
+        };
+    </script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
 </head>
-<body class="bg-gradient-to-br from-indigo-900 via-indigo-800 to-purple-900 min-h-screen flex items-center justify-center p-4">
+<body class="bg-gradient-to-br from-primary-900 via-primary-800 to-accent-900 min-h-screen flex items-center justify-center p-4">
     <div class="w-full max-w-md">
         <!-- Logo -->
         <div class="text-center mb-8">
@@ -15,7 +37,7 @@
                 <i class="fas fa-shield-alt text-white text-3xl"></i>
             </div>
             <h1 class="text-2xl font-bold text-white">Admin Panel</h1>
-            <p class="text-indigo-200 text-sm mt-1">{{ config('app.name') }}</p>
+            <p class="text-accent-200 text-sm mt-1">{{ config('app.name') }}</p>
         </div>
 
         <!-- Login Card -->
@@ -40,7 +62,7 @@
                                 <i class="fas fa-envelope text-gray-400"></i>
                             </div>
                             <input type="email" name="email" value="{{ old('email') }}" required autofocus
-                                class="w-full pl-10 pr-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                                class="w-full pl-10 pr-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
                                 placeholder="admin@example.com">
                         </div>
                     </div>
@@ -52,19 +74,19 @@
                                 <i class="fas fa-lock text-gray-400"></i>
                             </div>
                             <input type="password" name="password" required
-                                class="w-full pl-10 pr-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                                class="w-full pl-10 pr-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
                                 placeholder="Enter your password">
                         </div>
                     </div>
 
                     <div class="flex items-center justify-between">
                         <label class="flex items-center gap-2">
-                            <input type="checkbox" name="remember" class="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500">
+                            <input type="checkbox" name="remember" class="rounded border-gray-300 text-primary-600 focus:ring-primary-500">
                             <span class="text-sm text-gray-600">Remember me</span>
                         </label>
                     </div>
 
-                    <button type="submit" class="w-full bg-indigo-600 text-white py-2.5 px-4 rounded-lg text-sm font-medium hover:bg-indigo-700 transition flex items-center justify-center gap-2">
+                    <button type="submit" class="w-full bg-primary-600 text-white py-2.5 px-4 rounded-lg text-sm font-medium hover:bg-primary-700 transition flex items-center justify-center gap-2">
                         <i class="fas fa-sign-in-alt"></i>
                         Sign In
                     </button>
@@ -72,7 +94,7 @@
             </form>
         </div>
 
-        <p class="text-center text-indigo-200 text-xs mt-6">
+        <p class="text-center text-accent-200 text-xs mt-6">
             &copy; {{ date('Y') }} {{ config('app.name') }}. All rights reserved.
         </p>
     </div>

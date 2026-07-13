@@ -19,6 +19,7 @@ import '../../providers/ad_provider.dart';
 import '../../widgets/ad_cards.dart';
 import 'place_details_screen.dart';
 import '../../core/widgets/shimmer_loading.dart';
+import 'utils/category_utils.dart';
 
 class NearbyPlacesScreen extends StatefulWidget {
   final double? destinationLat;
@@ -90,6 +91,30 @@ class _NearbyPlacesScreenState extends State<NearbyPlacesScreen> {
   int _lastPlacesHash = 0;
   List<_LabelAssignment> _lastLabelAssignments = [];
 
+  void _safeMoveMap(LatLng point, double zoom) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        try {
+          _mapController.move(point, zoom);
+        } catch (e) {
+          debugPrint('Map move failed: $e');
+        }
+      }
+    });
+  }
+
+  void _safeFitCamera(CameraFit fit) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        try {
+          _mapController.fitCamera(fit);
+        } catch (e) {
+          debugPrint('Map fitCamera failed: $e');
+        }
+      }
+    });
+  }
+
   @override
   void initState() {
     super.initState();
@@ -133,11 +158,7 @@ class _NearbyPlacesScreenState extends State<NearbyPlacesScreen> {
       WidgetsBinding.instance.addPostFrameCallback((_) async {
         await Future.delayed(const Duration(milliseconds: 200));
         if (mounted && _lat != null && _lng != null) {
-          try {
-            _mapController.move(LatLng(_lat!, _lng!), 14.0);
-          } catch (e) {
-            debugPrint('Failed to move map: $e');
-          }
+          _safeMoveMap(LatLng(_lat!, _lng!), 14.0);
         }
       });
       // Auto-fetch route to destination if set
@@ -236,7 +257,7 @@ class _NearbyPlacesScreenState extends State<NearbyPlacesScreen> {
             final allPoints = parsed.expand((r) => r['points'] as List<LatLng>).toList();
             final bounds = LatLngBounds.fromPoints(allPoints);
             final cameraFit = CameraFit.bounds(bounds: bounds, padding: const EdgeInsets.all(60));
-            _mapController.fitCamera(cameraFit);
+            _safeFitCamera(cameraFit);
           } else {
             _showRouteError('No valid routes found');
           }
@@ -309,7 +330,7 @@ class _NearbyPlacesScreenState extends State<NearbyPlacesScreen> {
               ..add(LatLng(originLat, originLng));
             final bounds = LatLngBounds.fromPoints(allPoints);
             final cameraFit = CameraFit.bounds(bounds: bounds, padding: const EdgeInsets.all(80));
-            _mapController.fitCamera(cameraFit);
+            _safeFitCamera(cameraFit);
           } else {
             _showRouteError('No valid routes found');
           }
@@ -336,94 +357,6 @@ class _NearbyPlacesScreenState extends State<NearbyPlacesScreen> {
       '&travelmode=driving',
     );
     await launchUrl(uri, mode: LaunchMode.externalApplication);
-  }
-
-  IconData _getCategoryIcon(String? category) {
-    switch (category?.toLowerCase()) {
-      case 'hotel':
-      case 'accommodation':
-      case 'hotels':
-        return Icons.hotel;
-      case 'restaurant':
-      case 'food':
-      case 'restaurants':
-        return Icons.restaurant;
-      case 'cafe':
-        return Icons.local_cafe;
-      case 'emergency':
-        return Icons.warning;
-      case 'hospital':
-      case 'clinic':
-        return Icons.local_hospital;
-      case 'pharmacy':
-        return Icons.medication;
-      case 'transport':
-      case 'bus':
-      case 'airport':
-        return Icons.directions_bus;
-      case 'attraction':
-      case 'landmark':
-      case 'sightseeing':
-      case 'attractions':
-        return Icons.photo_camera;
-      case 'activity':
-      case 'adventure':
-      case 'activities':
-        return Icons.directions_run;
-      case 'atm':
-      case 'atms':
-      case 'bank':
-        return Icons.account_balance;
-      case 'fuel':
-        return Icons.local_gas_station;
-      case 'shopping':
-        return Icons.shopping_bag;
-      case 'parking':
-        return Icons.local_parking;
-      case 'education':
-      case 'school':
-      case 'college':
-        return Icons.school;
-      case 'entertainment':
-        return Icons.movie;
-      case 'nature':
-        return Icons.forest;
-      case 'services':
-        return Icons.build;
-      case 'recreation':
-        return Icons.sports_tennis;
-      default:
-        return Icons.place;
-    }
-  }
-
-  Color _getCategoryColor(String? category) {
-    switch (category?.toLowerCase()) {
-      case 'hotel':
-      case 'accommodation':
-        return AppTheme.markerHotel;
-      case 'restaurant':
-      case 'food':
-      case 'cafe':
-        return AppTheme.markerFood;
-      case 'emergency':
-      case 'hospital':
-      case 'clinic':
-        return AppTheme.markerEmergency;
-      case 'transport':
-      case 'bus':
-      case 'airport':
-        return AppTheme.markerTransport;
-      case 'attraction':
-      case 'landmark':
-      case 'sightseeing':
-        return AppTheme.markerTourist;
-      case 'activity':
-      case 'adventure':
-        return AppTheme.markerActivity;
-      default:
-        return AppTheme.markerUtility;
-    }
   }
 
   @override
@@ -489,9 +422,9 @@ class _NearbyPlacesScreenState extends State<NearbyPlacesScreen> {
                   onTap: () {
                     final loc = _currentLocation;
                     if (loc != null) {
-                      _mapController.move(loc, 15.0);
+                      _safeMoveMap(loc, 15.0);
                     } else if (_lat != null && _lng != null) {
-                      _mapController.move(LatLng(_lat!, _lng!), 15.0);
+                      _safeMoveMap(LatLng(_lat!, _lng!), 15.0);
                     }
                   },
                 ),
@@ -1074,7 +1007,7 @@ class _NearbyPlacesScreenState extends State<NearbyPlacesScreen> {
   }
 
   Widget _buildSheetSelectedPreview(PlaceModel place, VoidCallback onTap) {
-    final markerColor = _getCategoryColor(place.category);
+    final markerColor = getCategoryColor(place.category);
     return Material(
       color: Colors.transparent,
       child: InkWell(
@@ -1098,7 +1031,7 @@ class _NearbyPlacesScreenState extends State<NearbyPlacesScreen> {
                       color: markerColor.withOpacity(0.15),
                       borderRadius: BorderRadius.circular(12),
                     ),
-                    child: Icon(_getCategoryIcon(place.category), color: markerColor, size: 24),
+                    child: Icon(getCategoryIcon(place.category), color: markerColor, size: 24),
                   ),
                   const SizedBox(width: 12),
                   Expanded(
@@ -1458,12 +1391,12 @@ Text(
       width: 60,
       height: 60,
       decoration: BoxDecoration(
-        color: _getCategoryColor(place.category).withOpacity(0.1),
+        color: getCategoryColor(place.category).withOpacity(0.1),
         borderRadius: BorderRadius.circular(10),
       ),
       child: Icon(
-        _getCategoryIcon(place.category),
-        color: _getCategoryColor(place.category),
+        getCategoryIcon(place.category),
+        color: getCategoryColor(place.category),
         size: 24,
       ),
     );
@@ -1580,12 +1513,12 @@ Text(
       width: 50,
       height: 50,
       decoration: BoxDecoration(
-        color: _getCategoryColor(place.category).withOpacity(0.1),
+        color: getCategoryColor(place.category).withOpacity(0.1),
         borderRadius: BorderRadius.circular(10),
       ),
       child: Icon(
-        _getCategoryIcon(place.category),
-        color: _getCategoryColor(place.category),
+        getCategoryIcon(place.category),
+        color: getCategoryColor(place.category),
         size: 22,
       ),
     );
@@ -1662,7 +1595,7 @@ Text(
     for (int i = 0; i < places.length; i++) {
       final place = places[i];
       final assignment = _lastLabelAssignments[i];
-      final markerColor = _getCategoryColor(place.category);
+      final markerColor = getCategoryColor(place.category);
       final isSelected = _selectedPlace?.id == place.id;
       final isFeatured = place.isFeatured;
       final isOsm = place.source == 'osm';
@@ -1670,7 +1603,7 @@ Text(
       final markerSize = isFeatured ? 42.0 : (isSelected ? 44.0 : (isOsm ? 30.0 : 32.0));
 
       final icon = Icon(
-        _getCategoryIcon(place.category),
+        getCategoryIcon(place.category),
         color: Colors.white,
         size: iconSize,
       );
@@ -2048,7 +1981,7 @@ class _AdPlacesList extends StatelessWidget {
   final List<PlaceModel> places;
   final List<AdCampaignModel> ads;
   final ScrollController scrollController;
-  final int? selectedPlaceId;
+  final dynamic? selectedPlaceId;
   final void Function(PlaceModel) onPlaceTap;
   final Widget Function(PlaceModel, bool) buildPlaceItem;
 

@@ -32,10 +32,10 @@
 <div class="max-w-6xl mx-auto">
     <!-- Breadcrumb -->
     <div class="flex items-center gap-2 text-sm text-gray-500 mb-4">
-        <a href="{{ route('admin.places') }}" class="hover:text-indigo-600">Places</a>
+        <a href="{{ route('admin.places') }}" class="hover:text-primary-600">Places</a>
         <span>/</span>
         <span class="text-gray-900 font-medium truncate max-w-[300px]">{{ $place->name }}</span>
-        <a href="{{ route('admin.live-map') }}" class="ml-auto text-indigo-600 hover:text-indigo-800"><i class="fas fa-globe-asia mr-1"></i> Live Map</a>
+        <a href="{{ route('admin.live-map') }}" class="ml-auto text-primary-600 hover:text-primary-800"><i class="fas fa-globe-asia mr-1"></i> Live Map</a>
     </div>
 
     <!-- Hero Image -->
@@ -50,7 +50,7 @@
             <div>
                 <h1 class="text-3xl font-bold text-white drop-shadow-lg">{{ $place->name }}</h1>
                 <div class="flex items-center gap-3 mt-2">
-                    <span class="inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-semibold bg-white/90 text-indigo-700">
+                    <span class="inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-semibold bg-white/90 text-primary-700">
                         <i class="fas fa-{{ $place->category?->icon ?? 'tag' }}"></i> {{ $place->category?->name ?? 'Uncategorized' }}
                     </span>
                     <span class="inline-flex items-center gap-1 text-white/90 text-sm">
@@ -94,7 +94,7 @@
                 </a>
                 @endif
                 @if($place->website)
-                <a href="{{ $place->website }}" target="_blank" class="flex items-center gap-2 px-4 py-2 bg-indigo-50 text-indigo-700 rounded-lg hover:bg-indigo-100 transition text-sm font-medium">
+                <a href="{{ $place->website }}" target="_blank" class="flex items-center gap-2 px-4 py-2 bg-primary-50 text-primary-700 rounded-lg hover:bg-primary-100 transition text-sm font-medium">
                     <i class="fas fa-globe"></i> Website
                 </a>
                 @endif
@@ -179,7 +179,7 @@
                     <div class="border border-gray-100 rounded-lg p-4 hover:bg-gray-50 transition">
                         <div class="flex items-start justify-between gap-3">
                             <div class="flex items-center gap-3">
-                                <div class="w-9 h-9 rounded-full bg-gradient-to-br from-indigo-400 to-indigo-600 flex items-center justify-center text-sm font-bold text-white shadow-sm flex-shrink-0">
+                                <div class="w-9 h-9 rounded-full bg-gradient-to-br from-primary-400 to-primary-600 flex items-center justify-center text-sm font-bold text-white shadow-sm flex-shrink-0">
                                     {{ strtoupper(substr($review->user?->name ?? 'U', 0, 1)) }}
                                 </div>
                                 <div>
@@ -212,10 +212,10 @@
             <div class="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
                 <div id="detailMap" style="height:200px;"></div>
                 <div class="p-3 border-t border-gray-100 flex items-center justify-between text-sm">
-                    <span class="text-gray-500"><i class="fas fa-map-pin mr-1 text-indigo-500"></i> {{ number_format($place->latitude, 4) }}, {{ number_format($place->longitude, 4) }}</span>
+                    <span class="text-gray-500"><i class="fas fa-map-pin mr-1 text-primary-500"></i> {{ number_format($place->latitude, 4) }}, {{ number_format($place->longitude, 4) }}</span>
                     <div class="flex gap-2">
-                        <a href="https://www.google.com/maps?q={{ $place->latitude }},{{ $place->longitude }}" target="_blank" class="text-indigo-600 hover:text-indigo-800 text-xs" title="Open in Google Maps"><i class="fas fa-external-link-alt"></i></a>
-                        <a href="https://www.openstreetmap.org/?mlat={{ $place->latitude }}&mlon={{ $place->longitude }}" target="_blank" class="text-indigo-600 hover:text-indigo-800 text-xs" title="Open in OSM"><i class="fas fa-map"></i></a>
+                        <a href="https://www.google.com/maps?q={{ $place->latitude }},{{ $place->longitude }}" target="_blank" class="text-primary-600 hover:text-primary-800 text-xs" title="Open in Google Maps"><i class="fas fa-external-link-alt"></i></a>
+                        <a href="https://www.openstreetmap.org/?mlat={{ $place->latitude }}&mlon={{ $place->longitude }}" target="_blank" class="text-primary-600 hover:text-primary-800 text-xs" title="Open in OSM"><i class="fas fa-map"></i></a>
                     </div>
                 </div>
             </div>
@@ -263,13 +263,13 @@
                 <h4 class="text-sm font-semibold text-gray-900 mb-3">Contact</h4>
                 <div class="space-y-2 text-sm">
                     @if($place->phone)
-                    <div class="flex items-center gap-2"><i class="fas fa-phone text-gray-400 w-4"></i> <a href="tel:{{ $place->phone }}" class="text-indigo-600 hover:underline">{{ $place->phone }}</a></div>
+                    <div class="flex items-center gap-2"><i class="fas fa-phone text-gray-400 w-4"></i> <a href="tel:{{ $place->phone }}" class="text-primary-600 hover:underline">{{ $place->phone }}</a></div>
                     @endif
                     @if($place->email)
-                    <div class="flex items-center gap-2"><i class="fas fa-envelope text-gray-400 w-4"></i> <a href="mailto:{{ $place->email }}" class="text-indigo-600 hover:underline truncate">{{ $place->email }}</a></div>
+                    <div class="flex items-center gap-2"><i class="fas fa-envelope text-gray-400 w-4"></i> <a href="mailto:{{ $place->email }}" class="text-primary-600 hover:underline truncate">{{ $place->email }}</a></div>
                     @endif
                     @if($place->website)
-                    <div class="flex items-center gap-2"><i class="fas fa-globe text-gray-400 w-4"></i> <a href="{{ $place->website }}" target="_blank" class="text-indigo-600 hover:underline truncate">{{ parse_url($place->website, PHP_URL_HOST) ?: $place->website }}</a></div>
+                    <div class="flex items-center gap-2"><i class="fas fa-globe text-gray-400 w-4"></i> <a href="{{ $place->website }}" target="_blank" class="text-primary-600 hover:underline truncate">{{ parse_url($place->website, PHP_URL_HOST) ?: $place->website }}</a></div>
                     @endif
                 </div>
             </div>
@@ -281,7 +281,7 @@
                 <h4 class="text-sm font-semibold text-gray-900 mb-3">Photos ({{ $images->count() }})</h4>
                 <div class="grid grid-cols-3 gap-2">
                     @foreach($images as $i => $img)
-                    <div class="aspect-square rounded-lg overflow-hidden cursor-pointer border border-gray-200 hover:border-indigo-400 transition" onclick="openGallery({{ $i }})">
+                    <div class="aspect-square rounded-lg overflow-hidden cursor-pointer border border-gray-200 hover:border-primary-400 transition" onclick="openGallery({{ $i }})">
                         <img src="{{ asset('storage/' . $img->image_url) }}" class="w-full h-full object-cover" onerror="this.style.display='none'">
                     </div>
                     @endforeach
@@ -325,12 +325,16 @@ document.addEventListener('keydown', function(e) {
     if (e.key === 'ArrowLeft') prevImage();
 });
 
-document.addEventListener('DOMContentLoaded', function () {
+(function() {
     @if($place->latitude && $place->longitude)
-    const map = L.map('detailMap', { zoomControl: false, attributionControl: false }).setView([{{ $place->latitude }}, {{ $place->longitude }}], 15);
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19 }).addTo(map);
-    L.marker([{{ $place->latitude }}, {{ $place->longitude }}]).addTo(map);
+    var el = document.getElementById('detailMap');
+    if (el && !el._leaflet_map) {
+        var map = L.map(el, { zoomControl: false, attributionControl: false }).setView([{{ $place->latitude }}, {{ $place->longitude }}], 15);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19 }).addTo(map);
+        L.marker([{{ $place->latitude }}, {{ $place->longitude }}]).addTo(map);
+        el._leaflet_map = map;
+    }
     @endif
-});
+})();
 </script>
 @endsection

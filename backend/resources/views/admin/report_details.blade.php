@@ -119,8 +119,10 @@
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="" crossorigin="" />
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script>
-        document.addEventListener('DOMContentLoaded', function () {
-            var map = L.map('map').setView([27.7, 85.3], 7);
+        (function() {
+            var el = document.getElementById('map');
+            if (!el || el._leaflet_map) return;
+            var map = L.map(el).setView([27.7, 85.3], 7);
 
             L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
                 maxZoom: 19,
@@ -139,12 +141,14 @@
             if (photoLat && photoLng) {
                 var p = L.marker([photoLat, photoLng], {icon: L.icon({iconUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-icon-red.png', iconSize: [25,41]})}).addTo(map).bindPopup('Photo EXIF location');
                 bounds.push([photoLat, photoLng]);
-            }
 
-            if (bounds.length) {
-                map.fitBounds(bounds, {padding: [40,40]});
             }
-        });
+            if (bounds.length > 0) {
+                map.fitBounds(bounds, {padding: [50,50]});
+            }
+            map.invalidateSize();
+            el._leaflet_map = map;
+        })();
     </script>
 @endif
 

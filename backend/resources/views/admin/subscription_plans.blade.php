@@ -5,7 +5,7 @@
 <div class="space-y-6">
     <div class="flex items-center justify-between">
         <div><h3 class="text-2xl font-bold text-slate-900">Subscription Plans</h3><p class="text-sm text-slate-500 mt-1">Premium plans for users — offline maps, AI itinerary, trek planner.</p></div>
-        <button onclick="document.getElementById('createModal').classList.remove('hidden')" class="bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-2.5 rounded-xl text-sm font-semibold shadow transition flex items-center gap-2"><i class="fas fa-plus"></i> New Plan</button>
+        <button onclick="document.getElementById('createModal').classList.remove('hidden')" class="bg-primary-600 hover:bg-primary-700 text-white px-5 py-2.5 rounded-xl text-sm font-semibold shadow transition flex items-center gap-2"><i class="fas fa-plus"></i> New Plan</button>
     </div>
 
     <div class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
@@ -25,7 +25,7 @@
                             <div class="flex gap-1 mt-1">@foreach(array_slice($planFeatures, 0, 3) as $f)<span class="text-xs bg-slate-100 px-1.5 py-0.5 rounded">{{ $f }}</span>@endforeach @if(count($planFeatures) > 3)<span class="text-xs text-slate-400">+{{ count($planFeatures)-3 }} more</span>@endif</div>
                             @endif
                         </td>
-                        <td class="px-6 py-4 text-center font-bold text-lg text-indigo-600">Rs. {{ number_format($plan->price) }}</td>
+                        <td class="px-6 py-4 text-center font-bold text-lg text-primary-600">Rs. {{ number_format($plan->price) }}</td>
                         <td class="px-6 py-4 text-center text-sm text-slate-600">{{ $plan->billing_interval }}</td>
                         <td class="px-6 py-4 text-center text-sm text-slate-600">{{ $plan->userSubscriptions()->count() }}</td>
                         <td class="px-6 py-4 text-center">
@@ -37,7 +37,7 @@
                             </form>
                         </td>
                         <td class="px-6 py-4 text-right">
-                            <button onclick="openEdit({{ $plan->id }})" class="px-3 py-1.5 text-xs font-medium bg-indigo-50 text-indigo-600 rounded-lg hover:bg-indigo-100"><i class="fas fa-edit"></i> Edit</button>
+                            <button onclick="openEdit({{ $plan->id }})" class="px-3 py-1.5 text-xs font-medium bg-primary-50 text-primary-600 rounded-lg hover:bg-primary-100"><i class="fas fa-edit"></i> Edit</button>
                             <form method="POST" action="{{ route('admin.subscription.plans.destroy', $plan) }}" onsubmit="return confirm('Delete this plan? This cannot be undone.')" class="inline ml-1">
                                 @csrf @method('DELETE')
                                 <button type="submit" class="px-3 py-1.5 text-xs font-medium bg-red-50 text-red-600 rounded-lg hover:bg-red-100"><i class="fas fa-trash"></i></button>
@@ -72,7 +72,7 @@
             <div class="flex items-center gap-2"><input type="checkbox" name="is_active" value="1" checked class="rounded border-slate-300"><label class="text-sm">Active</label></div>
             <div class="flex justify-end gap-3 pt-2">
                 <button type="button" onclick="document.getElementById('createModal').classList.add('hidden')" class="px-4 py-2 text-sm text-slate-600 hover:bg-slate-100 rounded-lg">Cancel</button>
-                <button type="submit" class="px-4 py-2 text-sm font-semibold bg-indigo-600 text-white rounded-lg hover:bg-indigo-700">Create</button>
+                <button type="submit" class="px-4 py-2 text-sm font-semibold bg-primary-600 text-white rounded-lg hover:bg-primary-700">Create</button>
             </div>
         </form>
     </div>
@@ -96,7 +96,7 @@
             <div class="flex items-center gap-2"><input type="checkbox" name="is_active" id="editActive" value="1" class="rounded border-slate-300"><label class="text-sm">Active</label></div>
             <div class="flex justify-end gap-3 pt-2">
                 <button type="button" onclick="document.getElementById('editModal').classList.add('hidden')" class="px-4 py-2 text-sm text-slate-600 hover:bg-slate-100 rounded-lg">Cancel</button>
-                <button type="submit" class="px-4 py-2 text-sm font-semibold bg-indigo-600 text-white rounded-lg hover:bg-indigo-700">Update</button>
+                <button type="submit" class="px-4 py-2 text-sm font-semibold bg-primary-600 text-white rounded-lg hover:bg-primary-700">Update</button>
             </div>
         </form>
     </div>

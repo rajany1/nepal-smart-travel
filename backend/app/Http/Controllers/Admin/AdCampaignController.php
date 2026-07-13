@@ -5,11 +5,16 @@ namespace App\Http\Controllers\Admin;
 use App\Http\Controllers\Controller;
 use App\Models\AdCampaign;
 use App\Models\TravelPartner;
+use App\Services\ModeratorService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 
 class AdCampaignController extends Controller
 {
+    public function __construct(
+        private ModeratorService $moderatorService,
+    ) {}
+
     private function requireAdmin(Request $request): void
     {
         $user = Auth::user();
@@ -30,7 +35,7 @@ class AdCampaignController extends Controller
     public function store(Request $request)
     {
         $this->requireAdmin($request);
-        AdCampaign::create($request->validate([
+        $campaign = AdCampaign::create($request->validate([
             'name' => 'required|string|max:255',
             'business_id' => 'nullable|exists:travel_partners,id',
             'ad_type' => 'required|in:banner,promoted_place,sponsored_card',
@@ -45,12 +50,14 @@ class AdCampaignController extends Controller
             'starts_at' => 'nullable|date',
             'ends_at' => 'nullable|date|after:starts_at',
         ]));
+        $this->moderatorService->log(Auth::user(), 'ad-campaign.created', 'ad_campaign', $campaign->id, 'Created campaign: ' . $campaign->name);
         return redirect()->route('admin.ad-campaigns')->with('success', 'Campaign created.');
     }
 
     public function update(Request $request, AdCampaign $adCampaign)
     {
         $this->requireAdmin($request);
+        $oldStatus = $adCampaign->status;
         $adCampaign->update($request->validate([
             'name' => 'required|string|max:255',
             'business_id' => 'nullable|exists:travel_partners,id',
@@ -66,13 +73,16 @@ class AdCampaignController extends Controller
             'starts_at' => 'nullable|date',
             'ends_at' => 'nullable|date|after:starts_at',
         ]));
+        $this->moderatorService->log(Auth::user(), 'ad-campaign.updated', 'ad_campaign', $adCampaign->id, 'Updated campaign: ' . $adCampaign->name . ' (status: ' . $oldStatus . ' → ' . $adCampaign->status . ')');
         return redirect()->route('admin.ad-campaigns')->with('success', 'Campaign updated.');
     }
 
     public function destroy(Request $request, AdCampaign $adCampaign)
     {
         $this->requireAdmin($request);
+        $name = $adCampaign->name;
         $adCampaign->delete();
+        $this->moderatorService->log(Auth::user(), 'ad-campaign.deleted', 'ad_campaign', $adCampaign->id, 'Deleted campaign: ' . $name);
         return redirect()->route('admin.ad-campaigns')->with('success', 'Campaign deleted.');
     }
 }
