@@ -59,7 +59,7 @@ class Place {
       website: json['website'],
       operatingHours: json['operating_hours'],
       averageRating: double.tryParse((json['average_rating'] ?? 0).toString()) ?? 0.0,
-      totalReviews: json['total_reviews'] ?? 0,
+      totalReviews: int.tryParse(json['total_reviews']?.toString() ?? '') ?? 0,
       images: List<String>.from(json['images'] ?? []),
       amenities: List<String>.from(json['amenities'] ?? []),
       distanceKm: double.tryParse((json['distance_km'] ?? 0).toString()) ?? 0.0,
@@ -126,7 +126,7 @@ class Review {
       userAvatar: json['user_avatar'],
       title: json['title'],
       description: json['description'],
-      rating: json['rating'] ?? 0,
+      rating: int.tryParse(json['rating']?.toString() ?? '') ?? 0,
       images: List<String>.from(json['images'] ?? []),
       createdAt: json['created_at'] != null
           ? DateTime.parse(json['created_at'])

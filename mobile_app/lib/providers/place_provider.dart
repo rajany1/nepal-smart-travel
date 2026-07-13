@@ -48,7 +48,7 @@ class PlaceModel {
       latitude: double.tryParse((json['latitude'] ?? 0).toString()) ?? 0.0,
       longitude: double.tryParse((json['longitude'] ?? 0).toString()) ?? 0.0,
       averageRating: double.tryParse(json['average_rating']?.toString() ?? ''),
-      totalReviews: json['total_reviews'] ?? 0,
+      totalReviews: int.tryParse(json['total_reviews']?.toString() ?? '') ?? 0,
       distanceKm: double.tryParse(json['distance_km']?.toString() ?? ''),
       category: json['category'],
       isVerified: json['is_verified'] ?? false,
