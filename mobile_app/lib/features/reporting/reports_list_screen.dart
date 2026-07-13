@@ -77,10 +77,6 @@ class _ReportsListScreenState extends State<ReportsListScreen>
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      floatingActionButton: FloatingActionButton(
-        onPressed: () => _showSubmitReportSheet(context),
-        child: const Icon(Icons.add),
-      ),
       body: SafeArea(
         child: Column(
           children: [
