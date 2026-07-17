@@ -44,7 +44,7 @@ import 'features/sponsors/sponsors_screen.dart';
 import 'features/subscriptions/subscription_plans_screen.dart';
 import 'features/store/store_screen.dart';
 
-import 'services/onesignal_service.dart';
+import 'services/push_notification_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -57,8 +57,8 @@ void main() async {
   final authProvider = AuthProvider();
   await authProvider.initializeAuth();
 
-  final oneSignal = OneSignalService();
-  await oneSignal.initialize();
+  final pushService = PushNotificationService();
+  await pushService.initialize();
 
   runApp(NepalSmartTravelApp(authProvider: authProvider));
 }

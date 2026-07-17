@@ -31,6 +31,8 @@ class Report extends Model
         'gps_distance_km',
         'photo_captured_at',
         'is_live_capture',
+        'ai_analysis',
+        'ai_analyzed_at',
     ];
 
     protected $casts = [
@@ -42,6 +44,8 @@ class Report extends Model
         'is_live_capture' => 'boolean',
         'photo_captured_at' => 'datetime',
         'verified_at' => 'datetime',
+        'ai_analysis' => 'array',
+        'ai_analyzed_at' => 'datetime',
         'helpful_count' => 'integer',
         'unhelpful_count' => 'integer',
         'comments_count' => 'integer',

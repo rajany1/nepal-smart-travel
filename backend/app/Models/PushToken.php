@@ -9,7 +9,7 @@ class PushToken extends Model
 {
     protected $fillable = [
         'user_id',
-        'player_id',
+        'fcm_token',
         'device_type',
         'subscribed',
     ];

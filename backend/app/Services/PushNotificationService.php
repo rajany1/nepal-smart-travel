@@ -8,80 +8,72 @@ use Illuminate\Support\Facades\Log;
 
 class PushNotificationService
 {
-    protected static string $appId = '';
-    protected static string $restApiKey = '';
-
-    public static function init(): void
+    public static function sendToUser(int $userId, string $title, string $body, array $data = []): void
     {
-        self::$appId = config('onesignal.app_id', env('ONESIGNAL_APP_ID', ''));
-        self::$restApiKey = config('onesignal.rest_api_key', env('ONESIGNAL_REST_API_KEY', ''));
-    }
-
-    public static function sendToUser(int $userId, string $title, string $message, array $data = []): void
-    {
-        self::init();
-        if (empty(self::$appId) || empty(self::$restApiKey)) return;
-
-        $playerIds = PushToken::where('user_id', $userId)
+        $fcmTokens = PushToken::where('user_id', $userId)
             ->where('subscribed', true)
-            ->pluck('player_id')
+            ->pluck('fcm_token')
             ->toArray();
 
-        if (empty($playerIds)) return;
+        if (empty($fcmTokens)) return;
 
-        self::sendNotification($playerIds, $title, $message, $data);
+        self::sendFcm($fcmTokens, $title, $body, $data);
     }
 
     public static function notifyNearbyUsers(
         string $title,
-        string $message,
+        string $body,
         float $latitude,
         float $longitude,
         float $radiusKm = 20,
         array $data = []
     ): void {
-        self::init();
-        if (empty(self::$appId) || empty(self::$restApiKey)) return;
-
-        // Include location in the data payload so the app can filter client-side
         $data['latitude'] = $latitude;
         $data['longitude'] = $longitude;
         $data['radius_km'] = $radiusKm;
 
-        $playerIds = PushToken::where('subscribed', true)
-            ->pluck('player_id')
+        $fcmTokens = PushToken::where('subscribed', true)
+            ->pluck('fcm_token')
             ->toArray();
 
-        if (empty($playerIds)) return;
+        if (empty($fcmTokens)) return;
 
-        $chunks = array_chunk($playerIds, 2000);
+        $chunks = array_chunk($fcmTokens, 500);
         foreach ($chunks as $chunk) {
-            self::sendNotification($chunk, $title, $message, $data);
+            self::sendFcm($chunk, $title, $body, $data);
         }
     }
 
-    protected static function sendNotification(array $playerIds, string $title, string $message, array $data = []): void
+    protected static function sendFcm(array $tokens, string $title, string $body, array $data = []): void
     {
+        $serverKey = config('services.firebase.server_key');
+        if (empty($serverKey)) {
+            Log::warning('FCM server key not configured.');
+            return;
+        }
+
         $payload = [
-            'app_id' => self::$appId,
-            'include_player_ids' => $playerIds,
-            'headings' => ['en' => $title],
-            'contents' => ['en' => $message],
-            'small_icon' => 'ic_stat_onesignal_default',
+            'registration_ids' => $tokens,
+            'notification' => [
+                'title' => $title,
+                'body' => $body,
+                'sound' => 'default',
+            ],
             'data' => $data,
+            'priority' => 'high',
         ];
 
         try {
             $response = Http::withHeaders([
-                'Authorization' => 'Basic ' . self::$restApiKey,
+                'Authorization' => 'key=' . $serverKey,
                 'Content-Type' => 'application/json',
-            ])->post('https://onesignal.com/api/v1/notifications', $payload);
+            ])->timeout(15)->post('https://fcm.googleapis.com/fcm/send', $payload);
 
             if (!$response->successful()) {
-                Log::warning('OneSignal push failed: ' . $response->body());
+                Log::warning('FCM push failed: ' . $response->body());
             }
         } catch (\Exception $e) {
-            Log::error('OneSignal push error: ' . $e->getMessage());
+            Log::error('FCM push error: ' . $e->getMessage());
         }
     }
 }

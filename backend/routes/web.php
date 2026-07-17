@@ -11,6 +11,8 @@ use App\Http\Controllers\Admin\SponsorController;
 use App\Http\Controllers\Admin\TravelPartnerController;
 use App\Http\Controllers\Admin\SubscriptionController;
 use App\Http\Controllers\Admin\AdCampaignController;
+use App\Http\Controllers\Admin\AiAgentController;
+use App\Http\Controllers\Admin\AiAgentTaskController;
 
 // Welcome/landing page
 Route::get('/', function () {
@@ -141,6 +143,15 @@ Route::prefix('admin')->name('admin.')->middleware(['auth', 'status'])->group(fu
     Route::post('/ad-campaigns', [AdCampaignController::class, 'store'])->name('ad-campaigns.store');
     Route::put('/ad-campaigns/{adCampaign}', [AdCampaignController::class, 'update'])->name('ad-campaigns.update');
     Route::delete('/ad-campaigns/{adCampaign}', [AdCampaignController::class, 'destroy'])->name('ad-campaigns.destroy');
+
+    // AI Agents
+    Route::get('/ai/agents', [AiAgentController::class, 'index'])->name('ai.agents');
+    Route::post('/ai/agents', [AiAgentController::class, 'store'])->name('ai.agents.store');
+    Route::post('/ai/agents/{agent}/update', [AiAgentController::class, 'update'])->name('ai.agents.update');
+    Route::get('/ai/agents/{agent}/run', [AiAgentController::class, 'run'])->name('ai.agents.run');
+    Route::get('/ai/tasks', [AiAgentTaskController::class, 'index'])->name('ai.tasks');
+    Route::post('/ai/tasks', [AiAgentTaskController::class, 'store'])->name('ai.tasks.store');
+    Route::get('/ai/tasks/{task}/retry', [AiAgentTaskController::class, 'retry'])->name('ai.tasks.retry');
 
     // Store
     Route::get('/store/items', [AdminStoreController::class, 'items'])->name('store.items');

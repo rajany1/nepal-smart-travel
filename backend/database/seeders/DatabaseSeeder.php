@@ -87,6 +87,9 @@ class DatabaseSeeder extends Seeder
         // Seed test users
         $this->call(\Database\Seeders\UserSeeder::class);
 
+        // Seed AI agents
+        $this->call(\Database\Seeders\AiAgentSeeder::class);
+
         // Seed default moderator permissions (deprecated — replaced by RolePermissionSeeder)
         // $this->call(\Database\Seeders\PermissionSeeder::class);
     }

@@ -160,12 +160,12 @@ class ApiClient {
   }
 
   // Push token endpoints
-  Future<Response> registerPushToken(String playerId, {String? deviceType}) async {
-    return _dio.post('/push-tokens', data: {'player_id': playerId, 'device_type': deviceType ?? 'android'});
+  Future<Response> registerPushToken(String fcmToken, {String? deviceType}) async {
+    return _dio.post('/push-tokens', data: {'fcm_token': fcmToken, 'device_type': deviceType ?? 'android'});
   }
 
-  Future<Response> unsubscribePushToken(String playerId) async {
-    return _dio.put('/push-tokens/unsubscribe', data: {'player_id': playerId});
+  Future<Response> unsubscribePushToken(String fcmToken) async {
+    return _dio.put('/push-tokens/unsubscribe', data: {'fcm_token': fcmToken});
   }
 
   // Place endpoints

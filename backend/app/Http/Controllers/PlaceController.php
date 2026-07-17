@@ -7,6 +7,9 @@ use App\Models\Place;
 use App\Models\PlaceReview;
 use App\Models\PlaceCategories;
 use App\Helpers\GeoHelper;
+use App\Jobs\ModerateReview;
+use App\Jobs\TranslateContent;
+use App\Services\TranslationService;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Str;
 
@@ -57,26 +60,30 @@ class PlaceController extends Controller
             ->limit($limit)
             ->get();
 
+        $data = $places->map(fn($place) => [
+            'id' => $place->id,
+            'uuid' => $place->uuid,
+            'name' => $place->name,
+            'description' => $place->description,
+            'address' => $place->address,
+            'district' => $place->district,
+            'latitude' => (float)$place->latitude,
+            'longitude' => (float)$place->longitude,
+            'phone' => $place->phone,
+            'average_rating' => $place->average_rating !== null ? (float)$place->average_rating : null,
+            'total_reviews' => $place->total_reviews,
+            'category' => $place->category ? $place->category->name : null,
+            'is_verified' => $place->is_verified,
+            'is_featured' => $place->is_featured,
+            'source' => $place->source ?? 'admin',
+            'images' => $place->images->pluck('image_url')->toArray(),
+        ])->toArray();
+
+        $data = TranslationService::attachToPlaces($data);
+
         return response()->json([
             'success' => true,
-            'data' => $places->map(fn($place) => [
-                'id' => $place->id,
-                'uuid' => $place->uuid,
-                'name' => $place->name,
-                'description' => $place->description,
-                'address' => $place->address,
-                'district' => $place->district,
-                'latitude' => (float)$place->latitude,
-                'longitude' => (float)$place->longitude,
-                'phone' => $place->phone,
-                'average_rating' => $place->average_rating !== null ? (float)$place->average_rating : null,
-                'total_reviews' => $place->total_reviews,
-                'category' => $place->category ? $place->category->name : null,
-                'is_verified' => $place->is_verified,
-                'is_featured' => $place->is_featured,
-                'source' => $place->source ?? 'admin',
-                'images' => $place->images->pluck('image_url')->toArray(),
-            ]),
+            'data' => $data,
         ]);
     }
 
@@ -124,28 +131,32 @@ class PlaceController extends Controller
         ->limit($limit)
         ->get();
 
+        $data = $places->map(fn($place) => [
+            'id' => $place->id,
+            'uuid' => $place->uuid,
+            'name' => $place->name,
+            'description' => $place->description,
+            'address' => $place->address,
+            'district' => $place->district,
+            'latitude' => $place->latitude !== null ? (float)$place->latitude : null,
+            'longitude' => $place->longitude !== null ? (float)$place->longitude : null,
+            'phone' => $place->phone,
+            'average_rating' => $place->average_rating !== null ? (float)$place->average_rating : null,
+            'total_reviews' => $place->total_reviews,
+            'distance_km' => round($place->distance, 2),
+            'category' => $place->category ? $place->category->name : null,
+            'is_verified' => $place->is_verified,
+            'is_featured' => $place->is_featured,
+            'is_active' => $place->is_active,
+            'source' => $place->source ?? 'admin',
+            'images' => $place->images->pluck('image_url')->toArray(),
+        ])->toArray();
+
+        $data = TranslationService::attachToPlaces($data);
+
         return response()->json([
             'success' => true,
-            'data' => $places->map(fn($place) => [
-                'id' => $place->id,
-                'uuid' => $place->uuid,
-                'name' => $place->name,
-                'description' => $place->description,
-                'address' => $place->address,
-                'district' => $place->district,
-                'latitude' => $place->latitude !== null ? (float)$place->latitude : null,
-                'longitude' => $place->longitude !== null ? (float)$place->longitude : null,
-                'phone' => $place->phone,
-                'average_rating' => $place->average_rating !== null ? (float)$place->average_rating : null,
-                'total_reviews' => $place->total_reviews,
-                'distance_km' => round($place->distance, 2),
-                'category' => $place->category ? $place->category->name : null,
-                'is_verified' => $place->is_verified,
-                'is_featured' => $place->is_featured,
-                'is_active' => $place->is_active,
-                'source' => $place->source ?? 'admin',
-                'images' => $place->images->pluck('image_url')->toArray(),
-            ]),
+            'data' => $data,
         ]);
     }
 
@@ -237,6 +248,9 @@ class PlaceController extends Controller
                 'source' => 'admin',
                 'images' => $place->images->pluck('image_url')->toArray(),
             ])->toArray();
+
+        // Attach Nepali translations (name_ne, description_ne, etc.)
+        $adminPlaces = TranslationService::attachToPlaces($adminPlaces);
 
         // 3. Merge: featured admin first, then OSM, then regular admin
         $featuredAdmin = [];
@@ -518,25 +532,29 @@ class PlaceController extends Controller
 
         $places = $query->limit($limit)->get();
 
+        $data = $places->map(fn($place) => [
+            'id' => $place->id,
+            'uuid' => $place->uuid,
+            'name' => $place->name,
+            'description' => $place->description,
+            'address' => $place->address,
+            'district' => $place->district,
+            'latitude' => $place->latitude !== null ? (float)$place->latitude : null,
+            'longitude' => $place->longitude !== null ? (float)$place->longitude : null,
+            'average_rating' => $place->average_rating !== null ? (float)$place->average_rating : null,
+            'total_reviews' => $place->total_reviews,
+            'distance_km' => isset($place->distance) ? round($place->distance, 2) : null,
+            'category' => $place->category ? $place->category->name : null,
+            'is_verified' => $place->is_verified,
+            'is_featured' => true,
+            'source' => 'admin',
+        ])->toArray();
+
+        $data = TranslationService::attachToPlaces($data);
+
         return response()->json([
             'success' => true,
-            'data' => $places->map(fn($place) => [
-                'id' => $place->id,
-                'uuid' => $place->uuid,
-                'name' => $place->name,
-                'description' => $place->description,
-                'address' => $place->address,
-                'district' => $place->district,
-                'latitude' => $place->latitude !== null ? (float)$place->latitude : null,
-                'longitude' => $place->longitude !== null ? (float)$place->longitude : null,
-                'average_rating' => $place->average_rating !== null ? (float)$place->average_rating : null,
-                'total_reviews' => $place->total_reviews,
-                'distance_km' => isset($place->distance) ? round($place->distance, 2) : null,
-                'category' => $place->category ? $place->category->name : null,
-                'is_verified' => $place->is_verified,
-                'is_featured' => true,
-                'source' => 'admin',
-            ]),
+            'data' => $data,
         ]);
     }
 
@@ -596,6 +614,11 @@ class PlaceController extends Controller
                 'rating' => $request->rating,
             ]
         );
+
+        dispatch(new ModerateReview($review->id));
+        if ($request->description) {
+            dispatch(new TranslateContent('place_review', $review->id, 'description'));
+        }
 
         // Handle uploaded images
         if ($request->hasFile('images')) {
@@ -674,9 +697,23 @@ class PlaceController extends Controller
         } else {
             $place = Place::with(['category', 'reviews', 'images'])->findOrFail($id);
         }
+        $data = TranslationService::attachToModel($place, 'place');
         return response()->json([
             'success' => true,
-            'data' => $place,
+            'data' => $data,
+        ]);
+    }
+
+    public function translations($id)
+    {
+        $translations = \App\Models\ModelTranslation::where('translatable_type', 'place')
+            ->where('translatable_id', $id)
+            ->where('locale', 'ne')
+            ->get(['field', 'value']);
+
+        return response()->json([
+            'success' => true,
+            'data' => $translations,
         ]);
     }
 }

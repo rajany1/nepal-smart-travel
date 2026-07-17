@@ -3,7 +3,7 @@ import 'package:provider/provider.dart';
 import '../../config/themes/app_theme.dart';
 import '../../providers/auth_provider.dart';
 import '../../providers/profile_provider.dart';
-import '../../services/onesignal_service.dart';
+import '../../services/push_notification_service.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -105,7 +105,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 _pushNotifications,
                 (v) {
                   setState(() => _pushNotifications = v);
-                  OneSignalService().setSubscription(v);
+                  PushNotificationService().setSubscription(v);
                 },
               ),
               const Divider(height: 1),

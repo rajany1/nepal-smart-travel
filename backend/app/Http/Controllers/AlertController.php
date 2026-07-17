@@ -9,6 +9,7 @@ use App\Models\PushToken;
 use App\Models\GameSetting;
 use App\Services\AchievementService;
 use App\Services\PushNotificationService;
+use App\Services\TranslationService;
 
 class AlertController extends Controller
 {
@@ -46,20 +47,24 @@ class AlertController extends Controller
         ->limit(100)
         ->get();
 
+        $data = $alerts->map(fn($alert) => [
+            'id' => $alert->id,
+            'uuid' => $alert->uuid,
+            'title' => $alert->title,
+            'description' => $alert->description,
+            'alert_type' => $alert->alert_type,
+            'severity' => $alert->severity,
+            'latitude' => $alert->latitude,
+            'longitude' => $alert->longitude,
+            'affected_district' => $alert->affected_district,
+            'created_at' => $alert->created_at,
+        ])->toArray();
+
+        $data = TranslationService::attachToItems($data, 'alert');
+
         return response()->json([
             'success' => true,
-            'data' => $alerts->map(fn($alert) => [
-                'id' => $alert->id,
-                'uuid' => $alert->uuid,
-                'title' => $alert->title,
-                'description' => $alert->description,
-                'alert_type' => $alert->alert_type,
-                'severity' => $alert->severity,
-                'latitude' => $alert->latitude,
-                'longitude' => $alert->longitude,
-                'affected_district' => $alert->affected_district,
-                'created_at' => $alert->created_at,
-            ]),
+            'data' => $data,
         ]);
     }
 
@@ -121,7 +126,10 @@ class AlertController extends Controller
                 'created_at' => $r->created_at,
             ]);
 
-        $items = $alerts->concat($emergencyReports)->sortByDesc('created_at')->values();
+        $items = $alerts->concat($emergencyReports)->sortByDesc('created_at')->values()->toArray();
+
+        $items = TranslationService::attachToItems($items, 'alert');
+        $items = TranslationService::attachToItems($items, 'report');
 
         return response()->json([
             'success' => true,

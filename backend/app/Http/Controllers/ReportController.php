@@ -9,9 +9,12 @@ use App\Models\ReportComment;
 use App\Models\ReportReaction;
 use App\Models\Place;
 use App\Models\GameSetting;
+use App\Jobs\AnalyzeReport;
+use App\Jobs\TranslateContent;
 use App\Services\AchievementService;
 use App\Services\ExifGpsVerificationService;
 use App\Services\ModeratorService;
+use App\Services\TranslationService;
 use App\Helpers\GeoHelper;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\Auth;
@@ -362,6 +365,10 @@ class ReportController extends Controller
         // If photo has no GPS data or GPS mismatched, still allow submission
         // but flag it for admin review. Moderators can reject based on this.
         $report = Report::create($validated);
+
+        dispatch(new AnalyzeReport($report->id));
+        dispatch(new TranslateContent('report', $report->id, 'title'));
+        dispatch(new TranslateContent('report', $report->id, 'description'));
 
         app(AchievementService::class)->checkAndAwardAchievements($request->user());
 
@@ -765,6 +772,8 @@ class ReportController extends Controller
 
             $data['comments'] = $commentTree;
         }
+
+        $data = TranslationService::attachToItems([$data], 'report')[0];
 
         return $data;
     }

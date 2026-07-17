@@ -41,4 +41,22 @@ return [
         'android_client_id' => env('GOOGLE_ANDROID_CLIENT_ID'),
     ],
 
+    'ai' => [
+        'provider' => env('AI_PROVIDER', 'gemini'),
+        'model' => env('AI_MODEL', 'gemini-2.0-flash'),
+    ],
+
+    'gemini' => [
+        'api_key' => env('GEMINI_API_KEY'),
+    ],
+
+    'groq' => [
+        'api_key' => env('GROQ_API_KEY'),
+    ],
+
+    'firebase' => [
+        'credentials' => env('FIREBASE_CREDENTIALS'),
+        'server_key' => env('FIREBASE_SERVER_KEY'),
+    ],
+
 ];

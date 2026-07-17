@@ -10,21 +10,17 @@ class PushTokenController extends Controller
     public function store(Request $request)
     {
         $validated = $request->validate([
-            'player_id' => 'required|string|max:255',
+            'fcm_token' => 'required|string|max:255',
             'device_type' => 'nullable|string|max:50',
         ]);
 
-        // Check if this token belongs to another user
-        $existing = PushToken::where('player_id', $validated['player_id'])->first();
+        $existing = PushToken::where('fcm_token', $validated['fcm_token'])->first();
         if ($existing && $existing->user_id !== $request->user()->id) {
-            return response()->json([
-                'success' => false,
-                'message' => 'This push token is already registered to another user.',
-            ], 409);
+            $existing->update(['user_id' => $request->user()->id]);
         }
 
         $token = PushToken::updateOrCreate(
-            ['player_id' => $validated['player_id']],
+            ['fcm_token' => $validated['fcm_token']],
             [
                 'user_id' => $request->user()->id,
                 'device_type' => $validated['device_type'] ?? null,
@@ -38,10 +34,10 @@ class PushTokenController extends Controller
     public function unsubscribe(Request $request)
     {
         $validated = $request->validate([
-            'player_id' => 'required|string|max:255',
+            'fcm_token' => 'required|string|max:255',
         ]);
 
-        PushToken::where('player_id', $validated['player_id'])
+        PushToken::where('fcm_token', $validated['fcm_token'])
             ->where('user_id', $request->user()->id)
             ->update(['subscribed' => false]);
 

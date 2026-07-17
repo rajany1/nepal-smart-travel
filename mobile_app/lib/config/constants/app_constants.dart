@@ -10,7 +10,7 @@ class AppConstants {
 
   // API
   static const String devEmulator = 'http://10.0.2.2:8000/api/v1';
-  static const String devPhone = 'http://192.168.10.66:8000/api/v1';
+  static const String devPhone = 'http://192.168.10.68:8000/api/v1';
   static String get prod => const String.fromEnvironment(
     'API_BASE_URL',
     defaultValue: 'https://api.nepalsmarttravel.com/api/v1',

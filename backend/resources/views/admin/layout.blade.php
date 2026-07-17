@@ -101,6 +101,19 @@
                         @endforeach
                     @endif
                 @endforeach
+
+                <!-- AI Agents - hardcoded link -->
+                <div class="pt-3 border-t border-primary-800">
+                    <p class="px-4 text-xs font-semibold text-teal-400 uppercase tracking-wider mb-2">AI</p>
+                </div>
+                <a href="{{ route('admin.ai.agents') }}" class="group flex items-center gap-3 rounded-3xl px-4 py-3 transition {{ request()->routeIs('admin.ai.agents*') ? 'bg-accent-500 text-white shadow-lg' : 'text-teal-200 hover:bg-primary-800 hover:text-white' }}">
+                    <i class="fas fa-robot w-5 text-center"></i>
+                    <span class="font-medium">AI Employees</span>
+                </a>
+                <a href="{{ route('admin.ai.tasks') }}" class="group flex items-center gap-3 rounded-3xl px-4 py-3 transition {{ request()->routeIs('admin.ai.tasks*') ? 'bg-accent-500 text-white shadow-lg' : 'text-teal-200 hover:bg-primary-800 hover:text-white' }}">
+                    <i class="fas fa-tasks w-5 text-center"></i>
+                    <span class="font-medium">AI Tasks</span>
+                </a>
             </nav>
             <div class="border-t border-primary-800 px-6 py-4">
                 <a href="/" class="flex items-center gap-3 rounded-3xl px-4 py-3 text-teal-200 hover:bg-primary-800 hover:text-white transition">
@@ -141,6 +154,11 @@
                         @endforeach
                     @endif
                 @endforeach
+                <div class="border-t border-primary-700 my-2 pt-2">
+                    <p class="px-3 text-xs font-semibold text-accent-300 uppercase tracking-wider mb-1">AI</p>
+                </div>
+                <a href="{{ route('admin.ai.agents') }}" class="block px-3 py-2 rounded {{ request()->routeIs('admin.ai.agents*') ? 'bg-primary-700' : '' }}"><i class="fas fa-robot w-5"></i> AI Employees</a>
+                <a href="{{ route('admin.ai.tasks') }}" class="block px-3 py-2 rounded {{ request()->routeIs('admin.ai.tasks*') ? 'bg-primary-700' : '' }}"><i class="fas fa-tasks w-5"></i> AI Tasks</a>
                 <hr class="border-primary-700 my-2">
                 <a href="/" class="block px-3 py-2"><i class="fas fa-arrow-left w-5"></i> Back to Site</a>
                 <form method="POST" action="{{ route('logout') }}">

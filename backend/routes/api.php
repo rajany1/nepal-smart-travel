@@ -76,6 +76,7 @@ Route::prefix('v1')->group(function () {
     Route::get('/sponsors', [ConsumerController::class, 'sponsors']);
     Route::get('/road-conditions', [AlertController::class, 'roadConditions']);
     Route::post('/assistant/chat', [ReportController::class, 'assistantChat']);
+    Route::get('/places/{id}/translations', [PlaceController::class, 'translations']);
 
     // ✅ Store items - public read (purchase & my-purchases require auth)
     Route::get('/store/items', [StoreController::class, 'items']);
