@@ -85,6 +85,15 @@ class Place extends Model
         return $this->hasMany(PlaceReview::class, 'place_id');
     }
 
+    public function approvedReviews()
+    {
+        return $this->hasMany(PlaceReview::class, 'place_id')
+            ->where(function ($q) {
+                $q->whereNull('moderation_status')
+                    ->orWhere('moderation_status', 'approved');
+            });
+    }
+
     public function images()
     {
         return $this->hasMany(PlaceImage::class, 'place_id');

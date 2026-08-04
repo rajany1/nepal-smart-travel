@@ -143,7 +143,7 @@ class ProfileController extends Controller
                 'total_reviews' => $totalReviews,
                 
                 // Verification
-                'verification_tick' => $user->verification_tick ?? 'none',
+                'verification_tick' => ($user->verification_tick && $user->verification_tick !== 'none') ? $user->verification_tick : 'gray',
                 
                 // Badges & Achievements
                 'badges' => $badges,
@@ -249,7 +249,7 @@ class ProfileController extends Controller
             'critical' => $hasAlertCreator ? Alert::where('created_by', $user->id)->where('severity', 'critical')->count() : 0,
             'high' => $hasAlertCreator ? Alert::where('created_by', $user->id)->where('severity', 'high')->count() : 0,
             'medium' => $hasAlertCreator ? Alert::where('created_by', $user->id)->where('severity', 'medium')->count() : 0,
-            'low' => $hasAlertCreator ? Alert::where('created_by', $user->id)->where('severity', 'low')->count() : 0,
+            'info' => $hasAlertCreator ? Alert::where('created_by', $user->id)->where('severity', 'info')->count() : 0,
         ];
         
         // XP breakdown
@@ -373,10 +373,27 @@ class ProfileController extends Controller
                 ];
             });
         
+        $recentPlaces = \App\Models\Place::where('created_by', $user->id)
+            ->orderBy('created_at', 'desc')
+            ->take($limit)
+            ->get()
+            ->map(function ($place) {
+                return [
+                    'id' => (string)$place->id,
+                    'type' => 'place',
+                    'action' => 'submitted_place',
+                    'title' => $place->name ?? 'Place',
+                    'description' => $place->description ?? '',
+                    'status' => $place->is_active ? 'approved' : 'pending',
+                    'created_at' => $place->created_at,
+                ];
+            });
+        
         $activity = collect()
             ->merge($recentReports)
             ->merge($recentAlerts)
             ->merge($recentReviews)
+            ->merge($recentPlaces)
             ->sortByDesc('created_at')
             ->take($limit)
             ->values();

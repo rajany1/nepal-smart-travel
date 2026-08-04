@@ -43,7 +43,10 @@ class _SubscriptionPlansScreenState extends State<SubscriptionPlansScreen> {
       final mySubRes = await _api.getMySubscription();
       final mySubRaw = mySubRes.data['data'];
       if (mySubRaw is Map) {
-        _currentPlanId = mySubRaw['subscription_plan_id'] as int?;
+        final rawPlanId = mySubRaw['subscription_plan_id'];
+        _currentPlanId = rawPlanId is num
+            ? rawPlanId.toInt()
+            : int.tryParse(rawPlanId?.toString() ?? '');
       }
     } catch (_) {
       _currentPlanId = null;

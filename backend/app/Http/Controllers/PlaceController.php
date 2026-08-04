@@ -9,8 +9,13 @@ use App\Models\PlaceCategories;
 use App\Helpers\GeoHelper;
 use App\Jobs\ModerateReview;
 use App\Jobs\TranslateContent;
+use App\Models\GameSetting;
+use App\Services\AchievementService;
 use App\Services\TranslationService;
+use App\Models\PlaceImage;
+use App\Models\AuditLog;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 
 class PlaceController extends Controller
@@ -28,6 +33,75 @@ class PlaceController extends Controller
      * Bounding box query - fetch places within a lat/lng rectangle
      * Optimized for map viewport queries.
      */
+    public function store(Request $request)
+    {
+        $request->validate([
+            'name' => 'required|string|max:255',
+            'description' => 'nullable|string',
+            'address' => 'nullable|string',
+            'latitude' => 'required|numeric|between:-90,90',
+            'longitude' => 'required|numeric|between:-180,180',
+            'phone' => 'nullable|string',
+            'website' => 'nullable|url',
+            'category' => 'required|string|max:255',
+            'images' => 'nullable|array',
+            'images.*' => 'image|mimes:jpg,jpeg,png,webp|max:5120',
+            'osm_id' => 'nullable|string|max:50',
+        ]);
+
+        $category = PlaceCategories::where('name', $request->category)->first();
+        if (!$category) {
+            $category = PlaceCategories::create(['name' => $request->category]);
+        }
+
+        $place = Place::create([
+            'uuid' => (string) Str::uuid(),
+            'name' => $request->name,
+            'description' => $request->description ?? '',
+            'address' => $request->address ?? '',
+            'latitude' => $request->latitude,
+            'longitude' => $request->longitude,
+            'phone' => $request->phone ?? '',
+            'category_id' => $category->id,
+            'source' => 'user_submitted',
+            'osm_id' => $request->osm_id ? preg_replace('/^osm_/', '', $request->osm_id) : null,
+            'created_by' => $request->user()?->id,
+            'is_active' => false,
+            'is_verified' => false,
+            'is_featured' => false,
+        ]);
+
+        if ($request->hasFile('images')) {
+            foreach ($request->file('images') as $image) {
+                $path = $image->store('places/' . $place->id, 'public');
+                PlaceImage::create([
+                    'place_id' => $place->id,
+                    'image_url' => $path,
+                ]);
+            }
+        }
+
+        if ($request->description) {
+            dispatch(new TranslateContent('place', $place->id, 'description'));
+        }
+
+        // Log activity
+        AuditLog::create([
+            'user_id' => $request->user()?->id,
+            'action' => 'place.submitted',
+            'resource_type' => 'place',
+            'resource_id' => $place->id,
+            'description' => 'Submitted place: ' . $place->name,
+            'ip_address' => $request->ip(),
+        ]);
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Place submitted for review.',
+            'data' => ['id' => (string)$place->id, 'uuid' => $place->uuid],
+        ], 201);
+    }
+
     public function bboxQuery(Request $request)
     {
         $request->validate([
@@ -76,7 +150,7 @@ class PlaceController extends Controller
             'is_verified' => $place->is_verified,
             'is_featured' => $place->is_featured,
             'source' => $place->source ?? 'admin',
-            'images' => $place->images->pluck('image_url')->toArray(),
+            'images' => $this->placeImageUrls($place->images),
         ])->toArray();
 
         $data = TranslationService::attachToPlaces($data);
@@ -149,7 +223,7 @@ class PlaceController extends Controller
             'is_featured' => $place->is_featured,
             'is_active' => $place->is_active,
             'source' => $place->source ?? 'admin',
-            'images' => $place->images->pluck('image_url')->toArray(),
+            'images' => $this->placeImageUrls($place->images),
         ])->toArray();
 
         $data = TranslationService::attachToPlaces($data);
@@ -246,13 +320,15 @@ class PlaceController extends Controller
                 'is_verified' => $place->is_verified,
                 'is_featured' => $place->is_featured,
                 'source' => 'admin',
-                'images' => $place->images->pluck('image_url')->toArray(),
+                'images' => $this->placeImageUrls($place->images),
             ])->toArray();
 
         // Attach Nepali translations (name_ne, description_ne, etc.)
         $adminPlaces = TranslationService::attachToPlaces($adminPlaces);
 
-        // 3. Merge: featured admin first, then OSM, then regular admin
+        // 3. Merge: featured admin first, then OSM, then regular admin.
+        // Reserve half the slots for OSM so both sources always appear,
+        // even in OSM-dense areas (city centres).
         $featuredAdmin = [];
         $regularAdmin = [];
         foreach ($adminPlaces as $p) {
@@ -262,6 +338,11 @@ class PlaceController extends Controller
                 $regularAdmin[] = $p;
             }
         }
+
+        $osmSlots = (int) ceil($limit * 0.5);
+        $osmPlaces = array_slice($osmPlaces, 0, $osmSlots);
+        $adminSlots = $limit - count($featuredAdmin) - count($osmPlaces);
+        $regularAdmin = array_slice($regularAdmin, 0, max($adminSlots, 0));
 
         $combined = array_merge($featuredAdmin, $osmPlaces, $regularAdmin);
 
@@ -328,108 +409,150 @@ class PlaceController extends Controller
             "node[\"natural\"~\"" . implode('|', ['peak', 'volcano', 'bay', 'cape', 'beach']) . "\"](around:{$radiusMeters},{$lat},{$lng});",
         ];
 
-        $overpassQuery = "[out:json];(" . implode('', $queries) . ");out body 100;";
+        $overpassQuery = "[out:json][timeout:25];(" . implode('', $queries) . ");out body 100;";
 
-        try {
-            $opts = [
-                'http' => [
-                    'method' => 'POST',
-                    'header' => "Content-Type: application/x-www-form-urlencoded\r\nAccept: application/json\r\nUser-Agent: NepalSmartTravel/1.0",
-                    'content' => 'data=' . urlencode($overpassQuery),
-                    'timeout' => 15,
-                    'ignore_errors' => true,
-                ]
-            ];
-            $context = stream_context_create($opts);
-            $responseBody = @file_get_contents('https://overpass-api.de/api/interpreter', false, $context);
+        // Try multiple Overpass mirrors so rate limits (429) or outages (504) on
+        // one server don't silently kill OSM results for the app.
+        $endpoints = [
+            'https://overpass-api.de/api/interpreter',
+            'https://maps.mail.ru/osm/tools/overpass/api/interpreter',
+            'https://overpass.kumi.systems/api/interpreter',
+        ];
 
-            if ($responseBody === false) {
-                \Log::warning('OSM Overpass API connection failed');
-                return [];
-            }
+        foreach ($endpoints as $endpoint) {
+            try {
+                $opts = [
+                    'http' => [
+                        'method' => 'POST',
+                        'header' => "Content-Type: application/x-www-form-urlencoded\r\nAccept: application/json\r\nUser-Agent: NepalSmartTravel/1.0",
+                        'content' => 'data=' . urlencode($overpassQuery),
+                        'timeout' => 10,
+                        'ignore_errors' => true,
+                    ]
+                ];
+                $context = stream_context_create($opts);
+                $responseBody = @file_get_contents($endpoint, false, $context);
 
-            $httpCode = 200;
-            if (isset($http_response_header[0]) && preg_match('/\d{3}/', $http_response_header[0], $m)) {
-                $httpCode = (int)$m[0];
-            }
-
-            if ($httpCode !== 200) {
-                \Log::warning('OSM Overpass API request failed', ['status' => $httpCode]);
-                return [];
-            }
-
-            $data = json_decode($responseBody, true);
-            $elements = $data['elements'] ?? [];
-
-            $places = [];
-            $seen = [];
-
-            foreach ($elements as $element) {
-                $tags = $element['tags'] ?? [];
-                $elemLat = $element['lat'] ?? null;
-                $elemLng = $element['lon'] ?? null;
-
-                if (!$elemLat || !$elemLng) continue;
-
-                // Determine name
-                $name = $tags['name'] ?? $tags['name:en'] ?? null;
-                if (!$name) continue; // Skip unnamed nodes
-
-                // Deduplicate by OSM id
-                $osmId = $element['type'] . '/' . $element['id'];
-                if (isset($seen[$osmId])) continue;
-                $seen[$osmId] = true;
-
-                // Determine category
-                $category = $this->osmToCategory($tags);
-
-                // Calculate distance
-                $distance = $this->haversineDistance($lat, $lng, $elemLat, $elemLng);
-
-                // Build address from tags
-                $address = implode(', ', array_filter([
-                    $tags['addr:street'] ?? null,
-                    $tags['addr:city'] ?? null,
-                ]));
-
-                // Rating - OSM doesn't have ratings, but some have `rating` tag
-                $rating = null;
-                if (isset($tags['rating'])) {
-                    $rating = (float)$tags['rating'];
+                if ($responseBody === false) {
+                    \Log::warning('OSM Overpass API connection failed', ['endpoint' => $endpoint]);
+                    continue;
                 }
 
-                $places[] = [
-                    'id' => 'osm_' . $osmId,
-                    'name' => $name,
-                    'description' => $tags['description'] ?? $tags['note'] ?? null,
-                    'address' => $address ?: null,
-                    'district' => $tags['addr:city'] ?? $tags['addr:district'] ?? null,
-                    'latitude' => $elemLat,
-                    'longitude' => $elemLng,
-                    'phone' => $tags['phone'] ?? $tags['contact:phone'] ?? null,
-                    'average_rating' => $rating,
-                    'total_reviews' => 0,
-                    'distance_km' => round($distance, 2),
-                    'category' => $category,
-                    'is_verified' => false,
-                    'is_featured' => false,
-                    'source' => 'osm',
-                    'images' => [],
-                ];
+                $httpCode = 200;
+                if (isset($http_response_header[0]) && preg_match('/\d{3}/', $http_response_header[0], $m)) {
+                    $httpCode = (int)$m[0];
+                }
+
+                if ($httpCode === 429) {
+                    \Log::warning('OSM Overpass API rate limited', ['endpoint' => $endpoint]);
+                    usleep(700000); // brief backoff before trying the next mirror
+                    continue;
+                }
+
+                if ($httpCode !== 200) {
+                    \Log::warning('OSM Overpass API request failed', ['status' => $httpCode, 'endpoint' => $endpoint]);
+                    continue;
+                }
+
+                $data = json_decode($responseBody, true);
+                if (!is_array($data) || !isset($data['elements'])) {
+                    \Log::warning('OSM Overpass API returned invalid payload', ['endpoint' => $endpoint]);
+                    continue;
+                }
+                $elements = $data['elements'];
+
+                $places = $this->parseOsmElements($lat, $lng, $elements);
+                if (count($places) < count($elements)) {
+                    \Log::warning('OSM Overpass API returned partial data', [
+                        'endpoint' => $endpoint,
+                        'elements' => count($elements),
+                        'parsed' => count($places),
+                    ]);
+                }
+
+                // Cache OSM results for 10 minutes (only non-empty results,
+                // so a flaky/empty response never blocks fresh fetches)
+                if (!empty($places)) {
+                    Cache::put($cacheKey, $places, 600);
+                }
+
+                return $places;
+
+            } catch (\Exception $e) {
+                \Log::error('OSM Overpass API error: ' . $e->getMessage() . ' @ ' . $endpoint);
+            }
+        }
+
+        \Log::warning('OSM Overpass API: all endpoints failed');
+        return [];
+    }
+
+    /**
+     * Parse Overpass elements into place arrays (shared by mirrors)
+     */
+    private function parseOsmElements(float $lat, float $lng, array $elements): array
+    {
+        $places = [];
+        $seen = [];
+
+        foreach ($elements as $element) {
+            $tags = $element['tags'] ?? [];
+            $elemLat = $element['lat'] ?? null;
+            $elemLng = $element['lon'] ?? null;
+
+            if (!$elemLat || !$elemLng) continue;
+
+            // Determine name
+            $name = $tags['name'] ?? $tags['name:en'] ?? null;
+            if (!$name) continue; // Skip unnamed nodes
+
+            // Deduplicate by OSM id
+            $osmId = $element['type'] . '/' . $element['id'];
+            if (isset($seen[$osmId])) continue;
+            $seen[$osmId] = true;
+
+            // Determine category
+            $category = $this->osmToCategory($tags);
+
+            // Calculate distance
+            $distance = $this->haversineDistance($lat, $lng, $elemLat, $elemLng);
+
+            // Build address from tags
+            $address = implode(', ', array_filter([
+                $tags['addr:street'] ?? null,
+                $tags['addr:city'] ?? null,
+            ]));
+
+            // Rating - OSM doesn't have ratings, but some have `rating` tag
+            $rating = null;
+            if (isset($tags['rating'])) {
+                $rating = (float)$tags['rating'];
             }
 
-            // Sort by distance
-            usort($places, fn($a, $b) => $a['distance_km'] <=> $b['distance_km']);
-
-            // Cache OSM results for 10 minutes
-            Cache::put($cacheKey, $places, 600);
-
-            return $places;
-
-        } catch (\Exception $e) {
-            \Log::error('OSM Overpass API error: ' . $e->getMessage());
-            return [];
+            $places[] = [
+                'id' => 'osm_' . $osmId,
+                'name' => $name,
+                'description' => $tags['description'] ?? $tags['note'] ?? null,
+                'address' => $address ?: null,
+                'district' => $tags['addr:city'] ?? $tags['addr:district'] ?? null,
+                'latitude' => $elemLat,
+                'longitude' => $elemLng,
+                'phone' => $tags['phone'] ?? $tags['contact:phone'] ?? null,
+                'average_rating' => $rating,
+                'total_reviews' => 0,
+                'distance_km' => round($distance, 2),
+                'category' => $category,
+                'is_verified' => false,
+                'is_featured' => false,
+                'source' => 'osm',
+                'images' => [],
+            ];
         }
+
+        // Sort by distance
+        usort($places, fn($a, $b) => $a['distance_km'] <=> $b['distance_km']);
+
+        return $places;
     }
 
     /**
@@ -594,7 +717,8 @@ class PlaceController extends Controller
                     'phone' => $request->input('phone', ''),
                     'source' => 'osm',
                     'osm_id' => $osmId,
-                    'is_active' => true,
+                    // BE-18: OSM-auto places must pass moderation like user submissions
+                    'is_active' => false,
                     'is_verified' => false,
                     'is_featured' => false,
                 ]);
@@ -606,14 +730,26 @@ class PlaceController extends Controller
         $place = Place::findOrFail($id);
         $user = $request->user();
 
+        // Re-submitting an existing review resets moderation so it gets re-moderated
         $review = PlaceReview::updateOrCreate(
             ['place_id' => $place->id, 'user_id' => $user->id],
             [
                 'title' => $request->title,
                 'description' => $request->description,
                 'rating' => $request->rating,
+                'moderation_status' => null,
+                'moderated_at' => null,
             ]
         );
+
+        // Award review XP only for the first submission of this review
+        if ($review->wasRecentlyCreated) {
+            $reviewXp = GameSetting::getValue('review_xp', 3);
+            app(AchievementService::class)->awardXp(
+                $user, $reviewXp, 'review_created',
+                "Reviewed: {$place->name}", $review
+            );
+        }
 
         dispatch(new ModerateReview($review->id));
         if ($request->description) {
@@ -628,9 +764,9 @@ class PlaceController extends Controller
             }
         }
 
-        // Recalculate average
-        $place->average_rating = PlaceReview::where('place_id', $place->id)->avg('rating');
-        $place->total_reviews = PlaceReview::where('place_id', $place->id)->count();
+        // Recalculate average over approved reviews only
+        $place->average_rating = $place->approvedReviews()->avg('rating');
+        $place->total_reviews = $place->approvedReviews()->count();
         $place->save();
 
         return response()->json([
@@ -665,6 +801,10 @@ class PlaceController extends Controller
 
         $reviews = PlaceReview::with('user')
             ->where('place_id', $id)
+            ->where(function ($q) {
+                $q->whereNull('moderation_status')
+                    ->orWhere('moderation_status', 'approved');
+            })
             ->latest()
             ->get()
             ->map(fn($review) => [
@@ -683,19 +823,27 @@ class PlaceController extends Controller
         ]);
     }
 
+    /**
+     * Return absolute storage URLs for place images (relative paths would 404 in the app).
+     */
+    private function placeImageUrls($images): array
+    {
+        return $images
+            ->map(fn($img) => asset('storage/' . $img->image_url))
+            ->toArray();
+    }
+
     public function show($id)
     {
         if (str_starts_with($id, 'osm_')) {
             $osmId = substr($id, 4);
-            $place = Place::with(['category', 'reviews', 'images'])->where('osm_id', $osmId)->first();
+            $place = Place::with(['category', 'approvedReviews', 'images'])->where('osm_id', $osmId)->first();
             if (!$place) {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'This OSM place has not been reviewed yet.',
-                ], 404);
+                // IN-09: unreviewed OSM POI — no 404; client renders its cached OSM data as "be the first to review"
+                return response()->json(['success' => true, 'data' => null]);
             }
         } else {
-            $place = Place::with(['category', 'reviews', 'images'])->findOrFail($id);
+            $place = Place::with(['category', 'approvedReviews', 'images'])->findOrFail($id);
         }
         $data = TranslationService::attachToModel($place, 'place');
         return response()->json([
@@ -714,6 +862,44 @@ class PlaceController extends Controller
         return response()->json([
             'success' => true,
             'data' => $translations,
+        ]);
+    }
+
+    public function osmStatus(Request $request)
+    {
+        $request->validate([
+            'osm_ids' => 'required|array',
+            'osm_ids.*' => 'string|max:50',
+        ]);
+
+        $user = $request->user();
+        $statuses = [];
+
+        foreach ($request->osm_ids as $osmId) {
+            // Normalize: app sends "osm_node/123", DB stores "node/123"
+            $dbOsmId = preg_replace('/^osm_/', '', $osmId);
+
+            $place = Place::where('osm_id', $dbOsmId)
+                ->where('created_by', $user?->id)
+                ->first();
+
+            if (!$place) {
+                $statuses[$osmId] = 'none';
+            } elseif ($place->is_active) {
+                $statuses[$osmId] = 'approved';
+            } else {
+                $rejected = \App\Models\ModerationQueue::where('content_type', 'place')
+                    ->where('content_id', $place->id)
+                    ->where('status', 'rejected')
+                    ->exists();
+
+                $statuses[$osmId] = $rejected ? 'rejected' : 'pending';
+            }
+        }
+
+        return response()->json([
+            'success' => true,
+            'data' => $statuses,
         ]);
     }
 }

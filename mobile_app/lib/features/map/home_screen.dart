@@ -7,8 +7,9 @@ import '../../core/api/api_client.dart';
 import '../../providers/auth_provider.dart';
 import '../../providers/alert_provider.dart';
 import '../../providers/place_provider.dart';
+import '../../providers/report_provider.dart';
 
-import '../places/nearby_places_screen.dart';
+import '../places/nearby_map_screen.dart';
 import '../reporting/reports_list_screen.dart';
 import '../emergency/emergency_screen.dart';
 import '../assistant/assistant_screen.dart';
@@ -62,6 +63,15 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   void _onTabChanged(int index) {
+    // FL-29: hidden IndexedStack tabs keep polling — pause the reports
+    // auto-refresh while its tab is not visible
+    final provider = context.read<ReportProvider>();
+    if (_currentIndex == 2) provider.stopAutoRefresh();
+    if (index == 2) {
+      provider.startAutoRefresh();
+      provider.fetchReports(lat: provider.lastFetchLat, lng: provider.lastFetchLng, radiusKm: 20.0);
+      provider.fetchEmergencyReports(lat: provider.lastFetchLat, lng: provider.lastFetchLng, radiusKm: 20.0, refresh: true);
+    }
     setState(() => _currentIndex = index);
   }
 
@@ -76,7 +86,7 @@ class _HomeScreenState extends State<HomeScreen> {
       {
         'icon': Icons.place,
         'label': 'Nearby',
-        'screen': const NearbyPlacesScreen(),
+        'screen': const NearbyMapScreen(),
       },
       {
         'icon': Icons.assignment,
@@ -275,7 +285,7 @@ color: AppTheme.surfaceColor,
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
                 Text('Nearby Highlights', style: Theme.of(context).textTheme.titleLarge),
-                TextButton(onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const NearbyPlacesScreen())), child: const Text('View All')),
+                TextButton(onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const NearbyMapScreen())), child: const Text('View All')),
               ],
             ),
             const SizedBox(height: 8),

@@ -29,7 +29,7 @@ class LeaderboardUser {
     this.totalAlerts = 0,
     this.totalReviews = 0,
     this.badgeCount = 0,
-    this.verificationTick = 'none',
+    this.verificationTick = 'gray',
   });
 
   factory LeaderboardUser.fromJson(Map<String, dynamic> json) {
@@ -46,7 +46,7 @@ class LeaderboardUser {
       totalAlerts: json['total_alerts'] ?? 0,
       totalReviews: json['total_reviews'] ?? 0,
       badgeCount: json['badge_count'] ?? 0,
-      verificationTick: json['verification_tick'] ?? 'none',
+      verificationTick: json['verification_tick'] ?? 'gray',
     );
   }
 }

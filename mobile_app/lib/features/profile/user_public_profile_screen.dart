@@ -85,7 +85,7 @@ class _UserPublicProfileScreenState extends State<UserPublicProfileScreen> {
           final name = p['name'] as String? ?? '';
           final avatarUrl = p['avatar_url'] as String?;
           final bio = p['bio'] as String?;
-          final tick = p['verification_tick'] as String? ?? 'none';
+          final tick = p['verification_tick'] as String? ?? 'gray';
           final totalXp = p['total_xp'] as int? ?? 0;
           final level = p['current_level'] as int? ?? 1;
           final levelName = p['level_name'] as String? ?? 'Explorer';

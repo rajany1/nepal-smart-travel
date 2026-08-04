@@ -7,11 +7,30 @@ use App\Models\AiAgent;
 use App\Models\AiAgentTask;
 use App\Services\Ai\AgentOrchestrator;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Auth;
 
 class AiAgentTaskController extends Controller
 {
-    public function index()
+    private function requireAdmin(Request $request): void
     {
+        $user = Auth::user();
+        if (!$user || !$user->isAdmin() && !$user->isModerator()) {
+            abort(403, 'Unauthorized');
+        }
+
+        $routeName = $request->route()?->getName();
+        if ($routeName) {
+            $routePerms = \App\Models\Permission::where('route_name', $routeName)->get();
+            if ($routePerms->isNotEmpty() && !$routePerms->contains(fn($p) => $user->hasPermission($p->name))) {
+                abort(403, 'You do not have permission for this page.');
+            }
+        }
+    }
+
+    public function index(Request $request)
+    {
+        $this->requireAdmin($request);
+
         $tasks = AiAgentTask::with('agent')->latest()->paginate(50);
         $agents = AiAgent::all();
         return view('admin.ai_agents_tasks', compact('tasks', 'agents'));
@@ -19,6 +38,8 @@ class AiAgentTaskController extends Controller
 
     public function store(Request $request)
     {
+        $this->requireAdmin($request);
+
         $data = $request->validate([
             'ai_agent_id' => 'required|exists:ai_agents,id',
             'type' => 'required|string|max:100',
@@ -37,8 +58,10 @@ class AiAgentTaskController extends Controller
         return redirect()->route('admin.ai.tasks')->with('success', 'Task created and processed.');
     }
 
-    public function retry(AiAgentTask $task, AgentOrchestrator $orchestrator)
+    public function retry(Request $request, AiAgentTask $task, AgentOrchestrator $orchestrator)
     {
+        $this->requireAdmin($request);
+
         $task->update(['status' => 'pending', 'error_message' => null, 'completed_at' => null]);
         $result = $orchestrator->executeTask($task);
 

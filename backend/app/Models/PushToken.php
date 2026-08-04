@@ -11,11 +11,15 @@ class PushToken extends Model
         'user_id',
         'fcm_token',
         'device_type',
+        'latitude',
+        'longitude',
         'subscribed',
     ];
 
     protected $casts = [
         'subscribed' => 'boolean',
+        'latitude' => 'decimal:7',
+        'longitude' => 'decimal:7',
     ];
 
     public function user(): BelongsTo

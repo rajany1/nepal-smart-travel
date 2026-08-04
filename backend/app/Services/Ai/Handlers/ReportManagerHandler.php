@@ -73,7 +73,7 @@ class ReportManagerHandler extends BaseHandler
                         'reviewed_at' => $now,
                     ]);
 
-                $processed[] = "report#{$report->id}: {$action} ({$result['suggested_priority']})";
+                $processed[] = "report#{$report->id}: {$action} ({$result['suggested_priority'] ?? 'not-set'})";
             } catch (\Exception $e) {
                 Log::error("Report analysis failed for report#{$report->id}: " . $e->getMessage());
             }

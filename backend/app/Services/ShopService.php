@@ -80,9 +80,8 @@ class ShopService
                 'user_id' => $user->id,
                 'shop_item_id' => $item->id,
                 'xp_spent' => $item->price_xp,
-                'status' => 'completed',
+                'status' => 'pending',
                 'shop_code_id' => $shopCode->id,
-                'fulfilled_at' => now(),
             ]);
 
             return $purchase;
@@ -117,6 +116,14 @@ class ShopService
                 'cancelled_at' => now(),
                 'cancellation_reason' => $reason,
             ]);
+
+            if ($purchase->shop_code_id) {
+                $purchase->shopCode->update([
+                    'is_used' => false,
+                    'purchased_by' => null,
+                    'used_at' => null,
+                ]);
+            }
 
             $item = $purchase->shopItem;
             if ($item) {
@@ -218,6 +225,8 @@ class ShopService
                 $discount = $booking->amount * $item->discount_value / 100;
             } elseif ($item->discount_type === 'fixed') {
                 $discount = $item->discount_value;
+            } else {
+                $discount = (float)$item->value_npr;
             }
             $discount = min($discount, $booking->amount);
         }

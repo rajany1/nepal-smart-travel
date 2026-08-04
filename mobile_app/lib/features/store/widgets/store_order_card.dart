@@ -92,7 +92,10 @@ class StoreOrderCard extends StatelessWidget {
                     borderRadius: BorderRadius.circular(12),
                   ),
                   child: Text(
-                    purchase.status[0].toUpperCase() + purchase.status.substring(1),
+                    purchase.status.isEmpty
+                        ? ''
+                        : purchase.status[0].toUpperCase() +
+                            purchase.status.substring(1),
                     style: TextStyle(color: statusColor, fontSize: 11, fontWeight: FontWeight.w600),
                   ),
                 ),

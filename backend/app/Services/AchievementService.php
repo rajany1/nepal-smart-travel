@@ -123,12 +123,7 @@ class AchievementService
 
     public function getNextLevelXp(int $level): int
     {
-        if ($level <= 5) return 50;
-        if ($level <= 15) return 150;
-        if ($level <= 30) return 300;
-        if ($level <= 50) return 500;
-        if ($level <= 100) return 1000;
-        return 0;
+        return $this->xpForLevel($level + 1);
     }
 
     public function getLevelProgress(User $user): float

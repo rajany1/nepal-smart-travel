@@ -11,7 +11,10 @@ use App\Models\Place;
 use App\Models\GameSetting;
 use App\Jobs\AnalyzeReport;
 use App\Jobs\TranslateContent;
+use App\Models\AiAgent;
+use App\Models\AiAgentTask;
 use App\Services\AchievementService;
+use App\Services\Ai\AgentOrchestrator;
 use App\Services\ExifGpsVerificationService;
 use App\Services\ModeratorService;
 use App\Services\TranslationService;
@@ -121,7 +124,6 @@ class ReportController extends Controller
         } else {
             // Default: only show approved reports for public,
             // but include own reports regardless of status
-            $user = $request->user();
             if (!$user || !($user->isAdmin() || $user->isModerator())) {
                 $query->where(function($q) use ($user) {
                     $q->where('status', 'approved');
@@ -142,9 +144,30 @@ class ReportController extends Controller
             $query->where('district', $request->district);
         }
 
+        // Filter by search query
+        if ($request->filled('search')) {
+            $search = $request->search;
+            $query->where(function ($q) use ($search) {
+                $q->where('title', 'like', "%{$search}%")
+                  ->orWhere('content', 'like', "%{$search}%")
+                  ->orWhere('address', 'like', "%{$search}%")
+                  ->orWhere('district', 'like', "%{$search}%");
+            });
+        }
+
         // Filter by priority
         if ($request->filled('priority')) {
             $query->where('priority', $request->priority);
+        }
+
+        // Filter by emergency (high/critical priority)
+        if ($request->filled('is_emergency')) {
+            $isEmergency = filter_var($request->is_emergency, FILTER_VALIDATE_BOOL);
+            if ($isEmergency) {
+                $query->whereIn('priority', ['high', 'critical']);
+            } else {
+                $query->whereNotIn('priority', ['high', 'critical']);
+            }
         }
 
         // Location-based filter (nearby)
@@ -239,6 +262,17 @@ class ReportController extends Controller
     {
         $report = Report::with(['user', 'category', 'comments.user', 'comments.parentComment.user', 'media'])->findOrFail($id);
 
+        // BE-22: only approved reports are public by ID; owner and admins/moderators may see any
+        $user = $request->user();
+        $isOwner = $user && (string) $user->id === (string) $report->user_id;
+        $isStaff = $user && ($user->isAdmin() || $user->isModerator());
+        if ($report->status !== 'approved' && !$isOwner && !$isStaff) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Report not found',
+            ], 404);
+        }
+
         return response()->json([
             'success' => true,
             'data' => $this->formatReport($report, true),
@@ -278,6 +312,8 @@ class ReportController extends Controller
             'image' => 'required|image|max:5120', // 5MB max, now REQUIRED
             'is_live_capture' => 'required|boolean', // Must be true - in-app camera only
             'photo_captured_at' => 'nullable|date',
+            'capture_latitude' => 'nullable|numeric|between:-90,90',
+            'capture_longitude' => 'nullable|numeric|between:-180,180',
         ]);
 
         // Layer 1: Enforce in-app camera capture (no gallery uploads)
@@ -345,6 +381,20 @@ class ReportController extends Controller
                 (float) $validated['longitude']
             );
 
+            // Fallback: if the image has no EXIF GPS (image_picker strips it),
+            // verify against the capture-time coordinates sent by the app.
+            if ($gpsVerificationResult['photo_lat'] === null
+                && $gpsVerificationResult['photo_lng'] === null
+                && isset($validated['capture_latitude'])
+                && isset($validated['capture_longitude'])) {
+                $gpsVerificationResult = $gpsService->verifyCaptureCoordinates(
+                    (float) $validated['capture_latitude'],
+                    (float) $validated['capture_longitude'],
+                    (float) $validated['latitude'],
+                    (float) $validated['longitude']
+                );
+            }
+
             // Store GPS verification results
             $validated['photo_gps_lat'] = $gpsVerificationResult['photo_lat'];
             $validated['photo_gps_lng'] = $gpsVerificationResult['photo_lng'];
@@ -408,7 +458,7 @@ class ReportController extends Controller
                     data: ['type' => 'report', 'id' => $report->id],
                 );
             } catch (\Throwable $e) {
-                // Non-fatal: push failure shouldn't block report creation
+                \Illuminate\Support\Facades\Log::warning('Report submit push notification failed: ' . $e->getMessage());
             }
         }
 
@@ -483,7 +533,7 @@ class ReportController extends Controller
                         data: ['type' => 'report', 'id' => $report->id],
                     );
                 } catch (\Throwable $e) {
-                    // Non-fatal: push failure shouldn't block update
+                    \Illuminate\Support\Facades\Log::warning('Report approval push notification failed: ' . $e->getMessage());
                 }
             }
         }
@@ -789,46 +839,48 @@ class ReportController extends Controller
             'context.lng' => 'nullable|numeric',
         ]);
 
-        $message = $request->input('message');
-        $lat = $request->input('context.lat');
-        $lng = $request->input('context.lng');
+        $agent = AiAgent::where('agent_type', 'customer_support')
+            ->where('status', '!=', 'paused')
+            ->first();
 
-        // Return a helpful response with nearby info context
-        $response = "I understand you're asking about: \"$message\". ";
-
-        if ($lat && $lng) {
-            $nearbyPlaces = Place::select('name', 'category_id', 'latitude', 'longitude')
-                ->selectRaw(
-                    "(6371 * acos(cos(radians(?)) * cos(radians(latitude)) * cos(radians(longitude) - radians(?)) + sin(radians(?)) * sin(radians(latitude)))) AS distance",
-                    [$lat, $lng, $lat]
-                )
-                ->having('distance', '<=', 5)
-                ->orderBy('distance')
-                ->limit(5)
-                ->get();
-
-            if ($nearbyPlaces->isNotEmpty()) {
-                $names = $nearbyPlaces->pluck('name')->implode(', ');
-                $response .= "Nearby places include: $names. ";
-            }
+        if (!$agent) {
+            return response()->json([
+                'success' => false,
+                'data' => ['reply' => 'Customer Support AI is currently unavailable.'],
+            ], 503);
         }
 
-        // Log the chat for future AI training
-        if ($request->user()) {
-            \App\Models\AssistantChat::create([
-                'user_id' => $request->user()->id,
-                'message' => $message,
-                'response' => $response,
-            ]);
-        }
+        $task = AiAgentTask::create([
+            'ai_agent_id' => $agent->id,
+            'type' => 'chat',
+            'status' => 'pending',
+            'input_data' => [
+                'action' => 'chat',
+                'message' => $request->input('message'),
+                'lat' => $request->input('context.lat'),
+                'lng' => $request->input('context.lng'),
+                'user_id' => $request->user()?->id,
+            ],
+        ]);
+
+        $orchestrator = app(AgentOrchestrator::class);
+        $result = $orchestrator->executeTask($task);
+
+        $task->refresh();
+
+        $output = $task->output_data;
 
         return response()->json([
-            'success' => true,
+            'success' => $task->status === 'completed',
             'data' => [
-                'response' => $response,
-                'context' => [
-                    'nearby_places' => $nearbyPlaces ?? [],
+                'reply' => $output['reply'] ?? ($task->error_message ?? 'Error processing request'),
+                'data' => [
+                    'live_nearby' => $output['nearby'] ?? [],
+                    'live_alerts' => $output['alerts'] ?? [],
                 ],
+                'actions' => $output['actions'] ?? [],
+                'screen' => $output['screen'] ?? null,
+                'deep_link' => $output['deep_link'] ?? null,
             ],
         ]);
     }

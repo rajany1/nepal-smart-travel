@@ -22,7 +22,7 @@ class PushNotificationService
 
     public static function notifyNearbyUsers(
         string $title,
-        string $body,
+        string $message,
         float $latitude,
         float $longitude,
         float $radiusKm = 20,
@@ -32,15 +32,25 @@ class PushNotificationService
         $data['longitude'] = $longitude;
         $data['radius_km'] = $radiusKm;
 
-        $fcmTokens = PushToken::where('subscribed', true)
-            ->pluck('fcm_token')
-            ->toArray();
+        $query = PushToken::where('subscribed', true);
+
+        $latDelta = $radiusKm / 111.0;
+        $lngDelta = $radiusKm / (111.0 * cos(deg2rad($latitude)));
+        $query->where(function ($q) use ($latitude, $longitude, $latDelta, $lngDelta) {
+            $q->where(function ($geo) use ($latitude, $longitude, $latDelta, $lngDelta) {
+                $geo->whereBetween('latitude', [$latitude - $latDelta, $latitude + $latDelta])
+                    ->whereBetween('longitude', [$longitude - $lngDelta, $longitude + $lngDelta]);
+            })->orWhereNull('latitude')
+              ->orWhereNull('longitude');
+        });
+
+        $fcmTokens = $query->pluck('fcm_token')->toArray();
 
         if (empty($fcmTokens)) return;
 
         $chunks = array_chunk($fcmTokens, 500);
         foreach ($chunks as $chunk) {
-            self::sendFcm($chunk, $title, $body, $data);
+            self::sendFcm($chunk, $title, $message, $data);
         }
     }
 

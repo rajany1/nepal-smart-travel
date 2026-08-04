@@ -60,49 +60,52 @@ class ModeratorService
         $ip = Request::ip();
         $now = now();
 
-        $metadata = array_merge([
+        // Write first, then count so the current attempt is included (BE-26)
+        $entry = $this->log($user, $action, null, null, $description, array_merge([
             'ip' => $ip,
             'user_agent' => Request::userAgent(),
             'suspicious' => false,
-        ], $extra ?? []);
+        ], $extra ?? []));
 
-        // Suspicious: 5+ failed logins from same IP in 15 minutes
-        if ($action === 'security.login-failed') {
-            $recentCount = AuditLog::where('action', 'security.login-failed')
-                ->where('ip_address', $ip)
-                ->where('created_at', '>=', $now->copy()->subMinutes(15))
-                ->count();
-            if ($recentCount >= 5) {
-                $metadata['suspicious'] = true;
-                $metadata['suspicious_reason'] = "{$recentCount} failed logins from {$ip} in 15 minutes";
-            }
+        $threshold = match ($action) {
+            // Suspicious: 5+ failed logins from same IP in 15 minutes
+            'security.login-failed' => 5,
+            // Suspicious: 10+ unauthorized access attempts from same IP in 1 hour
+            'security.unauthorized-access' => 10,
+            // Suspicious: 10+ permission denials from same IP in 1 hour
+            'security.permission-denied' => 10,
+            default => null,
+        };
+
+        if ($threshold === null) {
+            return $entry;
         }
 
-        // Suspicious: 10+ unauthorized access attempts from same IP in 1 hour
-        if ($action === 'security.unauthorized-access') {
-            $recentCount = AuditLog::where('action', 'security.unauthorized-access')
-                ->where('ip_address', $ip)
-                ->where('created_at', '>=', $now->copy()->subHour())
-                ->count();
-            if ($recentCount >= 10) {
-                $metadata['suspicious'] = true;
-                $metadata['suspicious_reason'] = "{$recentCount} unauthorized access attempts from {$ip} in 1 hour";
-            }
+        $since = $action === 'security.login-failed'
+            ? $now->copy()->subMinutes(15)
+            : $now->copy()->subHour();
+
+        $recentCount = AuditLog::where('action', $action)
+            ->where('ip_address', $ip)
+            ->where('created_at', '>=', $since)
+            ->count();
+
+        if ($recentCount >= $threshold) {
+            $reason = match ($action) {
+                'security.login-failed' => "{$recentCount} failed logins from {$ip} in 15 minutes",
+                'security.unauthorized-access' => "{$recentCount} unauthorized access attempts from {$ip} in 1 hour",
+                default => "{$recentCount} permission denials from {$ip} in 1 hour",
+            };
+
+            $entry->update([
+                'metadata' => array_merge($entry->metadata ?? [], [
+                    'suspicious' => true,
+                    'suspicious_reason' => $reason,
+                ]),
+            ]);
         }
 
-        // Suspicious: 10+ permission denials from same IP in 1 hour
-        if ($action === 'security.permission-denied') {
-            $recentCount = AuditLog::where('action', 'security.permission-denied')
-                ->where('ip_address', $ip)
-                ->where('created_at', '>=', $now->copy()->subHour())
-                ->count();
-            if ($recentCount >= 10) {
-                $metadata['suspicious'] = true;
-                $metadata['suspicious_reason'] = "{$recentCount} permission denials from {$ip} in 1 hour";
-            }
-        }
-
-        return $this->log($user, $action, null, null, $description, $metadata);
+        return $entry;
     }
 
     public function addToModerationQueue(

@@ -17,7 +17,7 @@ class CheckUserStatus
             return $next($request);
         }
 
-        if (in_array($user->status, ['banned', 'suspended'])) {
+        if (in_array($user->status, ['banned', 'suspended', 'deleted'])) {
             $user->tokens()->delete();
 
             // Web response: logout session and redirect
@@ -35,11 +35,17 @@ class CheckUserStatus
             $reason = $user->status;
             return response()->json([
                 'success' => false,
-                'message' => $reason === 'banned'
-                    ? 'Your account has been permanently banned due to violation of our community guidelines.'
-                    : 'Your account has been temporarily suspended. Please contact support to regain access.',
+                'message' => match ($reason) {
+                    'banned' => 'Your account has been permanently banned due to violation of our community guidelines.',
+                    'suspended' => 'Your account has been temporarily suspended. Please contact support to regain access.',
+                    default => 'This account has been deleted.',
+                },
                 'reason' => $reason,
-                'code' => $reason === 'banned' ? 'ACCOUNT_BANNED' : 'ACCOUNT_SUSPENDED',
+                'code' => match ($reason) {
+                    'banned' => 'ACCOUNT_BANNED',
+                    'suspended' => 'ACCOUNT_SUSPENDED',
+                    default => 'ACCOUNT_DELETED',
+                },
                 'requires_logout' => true,
             ], 403);
         }

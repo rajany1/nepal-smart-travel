@@ -1,8 +1,9 @@
 import 'dart:async';
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
+import 'package:geolocator/geolocator.dart';
 import '../core/api/api_client.dart';
+import '../core/services/location_service.dart';
 import '../features/alerts/alerts_screen.dart';
 
 class PushNotificationService {
@@ -69,7 +70,12 @@ class PushNotificationService {
   Future<void> _registerToken() async {
     if (_fcmToken == null) return;
     try {
-      await ApiClient.instance.registerPushToken(_fcmToken!);
+      final Position? pos = await LocationService().getCurrentLocation();
+      await ApiClient.instance.registerPushToken(
+        _fcmToken!,
+        latitude: pos?.latitude,
+        longitude: pos?.longitude,
+      );
       debugPrint('FCM token registered: $_fcmToken');
     } catch (e) {
       debugPrint('Failed to register push token: $e');
@@ -81,7 +87,7 @@ class PushNotificationService {
     try {
       if (enabled) {
         if (_fcmToken != null) {
-          await ApiClient.instance.registerPushToken(_fcmToken!);
+          await _registerToken();
         }
       } else {
         if (_fcmToken != null) {

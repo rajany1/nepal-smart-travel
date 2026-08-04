@@ -195,6 +195,15 @@
                             <span class="inline-flex h-11 w-11 items-center justify-center rounded-2xl bg-emerald-600 text-white"><i class="fas fa-star"></i></span>
                         </div>
                     </div>
+                    <div class="rounded-3xl border border-slate-200 bg-slate-50 p-4">
+                        <div class="flex items-center justify-between gap-3">
+                            <div>
+                                <p class="text-sm text-slate-500">Place Submit XP</p>
+                                <p class="mt-1 text-xl font-semibold text-slate-900">{{ $stats['xp_rates']['place_submit_xp'] }} XP</p>
+                            </div>
+                            <span class="inline-flex h-11 w-11 items-center justify-center rounded-2xl bg-violet-600 text-white"><i class="fas fa-map-pin"></i></span>
+                        </div>
+                    </div>
                 </div>
             </div>
 

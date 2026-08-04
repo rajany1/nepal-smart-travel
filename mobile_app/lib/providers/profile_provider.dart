@@ -155,8 +155,9 @@ class ProfileStats {
         ) ?? {},
       ),
       xpBreakdown: Map<String, int>.from(
+        // IN-11: xp_breakdown nests a `rates` map — skip non-numeric values
         (json['xp_breakdown'] as Map?)?.map(
-          (k, v) => MapEntry(k.toString(), (v as num).toInt())
+          (k, v) => MapEntry(k.toString(), v is num ? v.toInt() : 0)
         ) ?? {},
       ),
       monthlyActivity: List<Map<String, dynamic>>.from(
@@ -242,7 +243,7 @@ class FullProfileData {
     this.totalAlerts = 0,
     this.totalComments = 0,
     this.totalReviews = 0,
-    this.verificationTick = 'none',
+    this.verificationTick = 'gray',
     this.badges = const [],
     this.expertiseRegions = const [],
     this.recentActivity = const [],
@@ -312,7 +313,7 @@ class FullProfileData {
       totalAlerts: parseIntValue(data['total_alerts']),
       totalComments: parseIntValue(data['total_comments']),
       totalReviews: parseIntValue(data['total_reviews']),
-      verificationTick: data['verification_tick'] ?? 'none',
+      verificationTick: data['verification_tick'] ?? 'gray',
       badges: (data['badges'] as List?)
           ?.map((b) => BadgeInfo.fromJson(b is Map ? Map<String, dynamic>.from(b) : <String, dynamic>{'id': b.toString(), 'name': b.toString(), 'description': '', 'icon': 'emoji_events', 'unlocked': true}))
           .toList() ?? [],

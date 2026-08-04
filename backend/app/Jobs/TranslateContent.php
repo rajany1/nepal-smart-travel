@@ -44,7 +44,7 @@ class TranslateContent implements ShouldQueue
         $text = $item->{$this->field};
         if (empty($text)) return;
 
-        $exists = ModelTranslation::where('translatable_type', $class)
+        $exists = ModelTranslation::where('translatable_type', $this->modelType)
             ->where('translatable_id', $item->id)
             ->where('field', $this->field)
             ->where('locale', 'ne')
@@ -57,11 +57,12 @@ class TranslateContent implements ShouldQueue
         );
 
         ModelTranslation::create([
-            'translatable_type' => $class,
+            'translatable_type' => $this->modelType,
             'translatable_id' => $item->id,
             'field' => $this->field,
             'locale' => 'ne',
-            'translated_value' => $translated,
+            'source' => 'ai',
+            'value' => $translated,
         ]);
     }
 }

@@ -10,7 +10,7 @@ class AppConstants {
 
   // API
   static const String devEmulator = 'http://10.0.2.2:8000/api/v1';
-  static const String devPhone = 'http://192.168.10.68:8000/api/v1';
+  static const String devPhone = 'http://192.168.10.65:8000/api/v1';
   static String get prod => const String.fromEnvironment(
     'API_BASE_URL',
     defaultValue: 'https://api.nepalsmarttravel.com/api/v1',
@@ -60,6 +60,7 @@ class AppConstants {
   static const int xpPerEmergencyAlert = 25;
   static const int xpPerHiddenPlace = 15;
   static const int xpPerImageUpload = 5;
+  static const int xpPerPlaceSubmitted = 1;
   static const int xpPerHighRatingReport = 5;
   static const int xpPerMostHelpful = 20;
   static const int xpPenaltyFakeReport = -20;

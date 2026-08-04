@@ -1,10 +1,8 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:flutter_map/flutter_map.dart';
-import 'package:latlong2/latlong.dart';
+import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:http/http.dart' as http;
 import 'package:url_launcher/url_launcher.dart';
@@ -18,6 +16,8 @@ import '../../providers/place_provider.dart';
 import '../../providers/ad_provider.dart';
 import '../../widgets/ad_cards.dart';
 import 'place_details_screen.dart';
+import 'add_place_screen.dart';
+import 'filter_places_sheet.dart';
 import '../../core/widgets/shimmer_loading.dart';
 
 class NearbyPlacesScreen extends StatefulWidget {
@@ -52,7 +52,8 @@ class NearbyPlacesScreen extends StatefulWidget {
 
 class _NearbyPlacesScreenState extends State<NearbyPlacesScreen> {
   final LocationService _locationService = LocationService();
-  final MapController _mapController = MapController();
+  GoogleMapController? _mapController;
+  final Completer<GoogleMapController> _mapControllerCompleter = Completer();
   final DraggableScrollableController _sheetController = DraggableScrollableController();
   final TextEditingController _searchController = TextEditingController();
 
@@ -84,11 +85,7 @@ class _NearbyPlacesScreenState extends State<NearbyPlacesScreen> {
   double? _destinationLng;
   String? _destinationName;
 
-  // Label positioning state
-  final Map<String, double> _labelWidthCache = {};
-  String _lastLabelStateKey = '';
-  int _lastPlacesHash = 0;
-  List<_LabelAssignment> _lastLabelAssignments = [];
+  
 
   @override
   void initState() {
@@ -126,20 +123,22 @@ class _NearbyPlacesScreenState extends State<NearbyPlacesScreen> {
       });
     }
 
-    if (mounted && _lat != null && _lng != null) {
-      provider.fetchNearbyPlaces(lat: _lat!, lng: _lng!, radiusKm: _searchRadiusKm);
-      provider.fetchFeaturedPlaces(lat: _lat, lng: _lng);
-      unawaited(context.read<AdProvider>().fetchActiveAds());
-      WidgetsBinding.instance.addPostFrameCallback((_) async {
-        await Future.delayed(const Duration(milliseconds: 200));
-        if (mounted && _lat != null && _lng != null) {
-          try {
-            _mapController.move(LatLng(_lat!, _lng!), 14.0);
-          } catch (e) {
-            debugPrint('Failed to move map: $e');
+if (mounted && _lat != null && _lng != null) {
+        provider.fetchNearbyPlaces(lat: _lat!, lng: _lng!, radiusKm: _searchRadiusKm);
+        provider.fetchFeaturedPlaces(lat: _lat, lng: _lng);
+        unawaited(context.read<AdProvider>().fetchActiveAds());
+        WidgetsBinding.instance.addPostFrameCallback((_) async {
+          await Future.delayed(const Duration(milliseconds: 200));
+          if (mounted && _lat != null && _lng != null) {
+            try {
+              _mapController?.animateCamera(
+                CameraUpdate.newLatLngZoom(LatLng(_lat!, _lng!), 14.0),
+              );
+            } catch (e) {
+              debugPrint('Failed to move map: $e');
+            }
           }
-        }
-      });
+        });
       // Auto-fetch route to destination if set
       if (_destinationLat != null && _destinationLng != null) {
         WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -166,7 +165,9 @@ class _NearbyPlacesScreenState extends State<NearbyPlacesScreen> {
       _selectedPlace = place;
     });
     try {
-      _mapController.move(LatLng(place.latitude, place.longitude), 15.0);
+      _mapController?.animateCamera(
+        CameraUpdate.newLatLngZoom(LatLng(place.latitude, place.longitude), 15.0),
+      );
       _sheetController.animateTo(
         0.28,
         duration: const Duration(milliseconds: 350),
@@ -234,9 +235,10 @@ class _NearbyPlacesScreenState extends State<NearbyPlacesScreen> {
           if (parsed.isNotEmpty) {
             setState(() => _routes = parsed);
             final allPoints = parsed.expand((r) => r['points'] as List<LatLng>).toList();
-            final bounds = LatLngBounds.fromPoints(allPoints);
-            final cameraFit = CameraFit.bounds(bounds: bounds, padding: const EdgeInsets.all(60));
-            _mapController.fitCamera(cameraFit);
+            final bounds = _latLngBoundsFromPoints(allPoints);
+            _mapController?.animateCamera(
+              CameraUpdate.newLatLngBounds(bounds, 60),
+            );
           } else {
             _showRouteError('No valid routes found');
           }
@@ -307,9 +309,10 @@ class _NearbyPlacesScreenState extends State<NearbyPlacesScreen> {
             final allPoints = parsed.expand((r) => r['points'] as List<LatLng>).toList()
               ..add(LatLng(_destinationLat!, _destinationLng!))
               ..add(LatLng(originLat, originLng));
-            final bounds = LatLngBounds.fromPoints(allPoints);
-            final cameraFit = CameraFit.bounds(bounds: bounds, padding: const EdgeInsets.all(80));
-            _mapController.fitCamera(cameraFit);
+            final bounds = _latLngBoundsFromPoints(allPoints);
+            _mapController?.animateCamera(
+              CameraUpdate.newLatLngBounds(bounds, 80),
+            );
           } else {
             _showRouteError('No valid routes found');
           }
@@ -336,6 +339,41 @@ class _NearbyPlacesScreenState extends State<NearbyPlacesScreen> {
       '&travelmode=driving',
     );
     await launchUrl(uri, mode: LaunchMode.externalApplication);
+  }
+
+  void _onFilterTap() {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (context) => FilterPlacesSheet(
+        onApply: (_) {
+          if (_lat != null && _lng != null) {
+            final provider = context.read<PlaceProvider>();
+            provider.fetchNearbyPlaces(
+              lat: _lat!,
+              lng: _lng!,
+              radiusKm: _searchRadiusKm,
+              search: _searchController.text.isNotEmpty ? _searchController.text : null,
+            );
+          }
+        },
+      ),
+    );
+  }
+
+  void _onAddPlaceTap() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => AddPlaceScreen(
+          initialLat: _lat,
+          initialLng: _lng,
+        ),
+      ),
+    );
   }
 
   IconData _getCategoryIcon(String? category) {
@@ -454,6 +492,29 @@ class _NearbyPlacesScreenState extends State<NearbyPlacesScreen> {
           ),
 
           Positioned(
+            left: 16,
+            bottom: 140,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                _mapControlButton(
+                  icon: Icons.filter_list,
+                  color: AppTheme.primaryColor,
+                  iconColor: Colors.white,
+                  onTap: _onFilterTap,
+                ),
+                const SizedBox(height: 4),
+                _mapControlButton(
+                  icon: Icons.add_location,
+                  color: AppTheme.secondaryColor,
+                  iconColor: Colors.white,
+                  onTap: _onAddPlaceTap,
+                ),
+                const SizedBox(height: 4),
+              ],
+            ),
+          ),
+          Positioned(
             right: 16,
             bottom: 140,
             child: Column(
@@ -469,16 +530,14 @@ class _NearbyPlacesScreenState extends State<NearbyPlacesScreen> {
                 _mapControlButton(
                   icon: Icons.add,
                   onTap: () {
-                    final z = _mapController.camera.zoom;
-                    _mapController.move(_mapController.camera.center, z + 1);
+                    _mapController?.animateCamera(CameraUpdate.zoomIn());
                   },
                 ),
                 const SizedBox(height: 4),
                 _mapControlButton(
                   icon: Icons.remove,
                   onTap: () {
-                    final z = _mapController.camera.zoom;
-                    _mapController.move(_mapController.camera.center, z - 1);
+                    _mapController?.animateCamera(CameraUpdate.zoomOut());
                   },
                 ),
                 const SizedBox(height: 4),
@@ -489,9 +548,13 @@ class _NearbyPlacesScreenState extends State<NearbyPlacesScreen> {
                   onTap: () {
                     final loc = _currentLocation;
                     if (loc != null) {
-                      _mapController.move(loc, 15.0);
+                      _mapController?.animateCamera(
+                        CameraUpdate.newLatLngZoom(loc, 15.0),
+                      );
                     } else if (_lat != null && _lng != null) {
-                      _mapController.move(LatLng(_lat!, _lng!), 15.0);
+                      _mapController?.animateCamera(
+                        CameraUpdate.newLatLngZoom(LatLng(_lat!, _lng!), 15.0),
+                      );
                     }
                   },
                 ),
@@ -544,78 +607,46 @@ class _NearbyPlacesScreenState extends State<NearbyPlacesScreen> {
   Widget _buildMap() {
     return Consumer<PlaceProvider>(
       builder: (context, provider, _) {
-        return FlutterMap(
-          mapController: _mapController,
-          options: MapOptions(
-            initialCenter: LatLng(_lat ?? 27.7172, _lng ?? 85.3240),
-            initialZoom: 14.0,
-            maxZoom: 18.0,
-            minZoom: 6.0,
-            cameraConstraint: CameraConstraint.contain(
-              bounds: LatLngBounds(
-                const LatLng(26.0, 79.5),
-                const LatLng(31.0, 89.0),
-              ),
-            ),
-            interactionOptions: const InteractionOptions(
-              flags: InteractiveFlag.all,
-            ),
-            onTap: (_, __) {
-              setState(() {
-                _selectedPlace = null;
-              });
-            },
-            onMapEvent: (event) {
-              if (event is MapEventMoveEnd) {
-                setState(() {
-                  _currentZoom = event.camera.zoom;
-                });
-              }
-            },
+        return GoogleMap(
+          onMapCreated: (controller) {
+            _mapController = controller;
+            _mapControllerCompleter.complete(controller);
+          },
+          initialCameraPosition: CameraPosition(
+            target: LatLng(_lat ?? 27.7172, _lng ?? 85.3240),
+            zoom: 14.0,
           ),
-          children: [
-            if (_isSatellite) ...[
-              TileLayer(
-                urlTemplate: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
-                userAgentPackageName: 'np.com.nepalsmarttravel',
-              ),
-              ColorFiltered(
-                colorFilter: const ColorFilter.matrix(<double>[
-                  1, 0, 0, 0, 0,
-                  0, 1, 0, 0, 0,
-                  0, 0, 1, 0, 0,
-                  -1.0/3.0, -1.0/3.0, -1.0/3.0, 1, 0,
-                ]),
-                child: TileLayer(
-                  urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-                  userAgentPackageName: 'np.com.nepalsmarttravel',
-                  maxZoom: 20,
-                ),
-              ),
-            ] else
-              TileLayer(
-                urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-                userAgentPackageName: 'np.com.nepalsmarttravel',
-              ),
-            if (_routes.isNotEmpty)
-              PolylineLayer(
-                polylines: [
+          minMaxZoomPreference: const MinMaxZoomPreference(6.0, 18.0),
+          mapType: _isSatellite ? MapType.hybrid : MapType.normal,
+          myLocationEnabled: true,
+          myLocationButtonEnabled: false,
+          zoomControlsEnabled: false,
+          compassEnabled: true,
+          mapToolbarEnabled: false,
+          onTap: (latLng) {
+            setState(() {
+              _selectedPlace = null;
+            });
+          },
+          onCameraMove: (position) {
+            _currentZoom = position.zoom;
+          },
+          polylines: _routes.isNotEmpty
+              ? {
                   for (int i = 0; i < _routes.length; i++)
                     Polyline(
+                      polylineId: PolylineId('route_$i'),
                       points: _routes[i]['points'] as List<LatLng>,
                       color: i == 0
                           ? const Color(0xFF4285F4).withOpacity(0.85)
                           : Colors.grey.withOpacity(0.5),
-                      strokeWidth: i == 0 ? 5 : 3,
+                      width: i == 0 ? 5 : 3,
                     ),
-                ],
-              ),
-            MarkerLayer(
-              markers: _buildMarkers(_showFeaturedOnly
-                  ? provider.places.where((p) => p.isFeatured).toList()
-                  : provider.places),
-            ),
-          ],
+                }
+              : {},
+          markers: _buildMarkers(_showFeaturedOnly
+              ? provider.places.where((p) => p.isFeatured).toList()
+              : provider.places),
         );
       },
     );
@@ -1041,7 +1072,7 @@ class _NearbyPlacesScreenState extends State<NearbyPlacesScreen> {
                 ),
                 Expanded(
                   child: provider.isLoading
-                      ? const _PlacesListShimmer()
+                      ? _PlacesListShimmer()
                       : displayPlaces.isEmpty
                           ? Center(
                               child: Column(
@@ -1591,456 +1622,89 @@ Text(
     );
   }
 
-  List<Marker> _buildMarkers(List<PlaceModel> places) {
-    final markers = <Marker>[];
-    final showAddress = _currentZoom >= 16;
-    final highZoom = _currentZoom >= 16;
-    final midZoom = _currentZoom >= 14;
+  Set<Marker> _buildMarkers(List<PlaceModel> places) {
+    final markers = <Marker>{};
 
     if (_currentLocation != null) {
       markers.add(Marker(
-        point: _currentLocation!,
-        width: 24, height: 24,
-        alignment: Alignment.center,
-        child: Container(
-          decoration: BoxDecoration(
-            color: Colors.blue.withOpacity(0.25), shape: BoxShape.circle,
-          ),
-          child: Center(
-            child: Container(
-              width: 14, height: 14,
-              decoration: const BoxDecoration(
-                color: Colors.blue, shape: BoxShape.circle,
-                boxShadow: [BoxShadow(color: Colors.black26, blurRadius: 4, spreadRadius: 1)],
-              ),
-            ),
-          ),
-        ),
+        markerId: const MarkerId('current_location'),
+        position: _currentLocation!,
+        icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueAzure),
+        zIndex: 999,
       ));
     }
 
-    // Destination marker
     if (_destinationLat != null && _destinationLng != null) {
       markers.add(Marker(
-        point: LatLng(_destinationLat!, _destinationLng!),
-        width: 40, height: 40,
-        alignment: Alignment.center,
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            if (_destinationName != null)
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(6),
-                  boxShadow: [BoxShadow(color: Colors.black26, blurRadius: 4)],
-                ),
-                child: Text(_destinationName!, style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w600)),
-              ),
-            const Icon(Icons.flag, color: Color(0xFFE91E63), size: 28),
-          ],
-        ),
+        markerId: const MarkerId('destination'),
+        position: LatLng(_destinationLat!, _destinationLng!),
+        icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueRose),
+        zIndex: 998,
+        infoWindow: InfoWindow(title: _destinationName ?? 'Destination'),
       ));
     }
 
-    if (places.isEmpty) return markers;
-
-    // Phase 0: Check if label assignment needs recomputation
-    final camera = _mapController.camera;
-    final viewport = MediaQuery.of(context).size;
-    final stateKey = '${_currentZoom}|${camera.center.latitude}|${camera.center.longitude}|${camera.rotation}|${_selectedPlace?.id}';
-    final placesHash = Object.hashAll(places.map((p) => p.id));
-
-    if (stateKey != _lastLabelStateKey || placesHash != _lastPlacesHash) {
-      _lastLabelAssignments = _computeLabelAssignments(places, showAddress, highZoom, midZoom, camera, viewport);
-      _lastLabelStateKey = stateKey;
-      _lastPlacesHash = placesHash;
-    }
-
-    // Phase 1: Build marker widgets
-    for (int i = 0; i < places.length; i++) {
-      final place = places[i];
-      final assignment = _lastLabelAssignments[i];
+    for (final place in places) {
       final markerColor = _getCategoryColor(place.category);
-      final isSelected = _selectedPlace?.id == place.id;
-      final isFeatured = place.isFeatured;
-      final isOsm = place.source == 'osm';
-      final iconSize = isFeatured ? 24.0 : (isSelected ? 22.0 : (isOsm ? 18.0 : 18.0));
-      final markerSize = isFeatured ? 42.0 : (isSelected ? 44.0 : (isOsm ? 30.0 : 32.0));
-
-      final icon = Icon(
-        _getCategoryIcon(place.category),
-        color: Colors.white,
-        size: iconSize,
-      );
-
-      final markerChild = GestureDetector(
-        onTap: () => _onPlaceTap(place),
-        onDoubleTap: () => _navigateToDetails(place),
-        child: Stack(
-          clipBehavior: Clip.none,
-          children: [
-            AnimatedContainer(
-              duration: const Duration(milliseconds: 250),
-              width: markerSize, height: markerSize,
-              decoration: BoxDecoration(
-                gradient: isFeatured
-                    ? const LinearGradient(
-                        colors: [AppTheme.goldTick, AppTheme.warningColor],
-                        begin: Alignment.topLeft, end: Alignment.bottomRight,
-                      )
-                    : null,
-                color: isFeatured ? null : markerColor,
-                shape: BoxShape.circle,
-                border: Border.all(
-                  color: isSelected ? Colors.white : (isOsm ? Colors.transparent : AppTheme.surfaceColor),
-                  width: isSelected ? 3 : (isFeatured ? 2.5 : 1.5),
-                ),
-                boxShadow: [
-                  BoxShadow(
-                    color: isSelected ? markerColor.withOpacity(0.6)
-                        : (isFeatured ? const Color(0xFFFFD700).withOpacity(0.5) : Colors.black.withOpacity(0.2)),
-                    blurRadius: isSelected ? 10 : (isFeatured ? 8 : 3),
-                    spreadRadius: isSelected ? 3 : (isFeatured ? 3 : 0.5),
-                  ),
-                ],
-              ),
-              child: Stack(
-                alignment: Alignment.center,
-                children: [
-                  icon,
-                  if (isFeatured || isSelected)
-                    Positioned(
-                      top: 0, right: 0,
-                      child: Container(
-                        width: 14, height: 14,
-                        decoration: const BoxDecoration(color: Colors.white, shape: BoxShape.circle),
-                        child: Icon(
-                          isFeatured ? Icons.star : Icons.check_circle,
-                          size: 9,
-                          color: isFeatured ? AppTheme.warningColor : AppTheme.successColor,
-                        ),
-                      ),
-                    ),
-                  if (isOsm && !isFeatured && !isSelected)
-                    Positioned(
-                      bottom: 0, right: 0,
-                      child: Container(
-                        width: 11, height: 11,
-                        decoration: const BoxDecoration(color: Colors.white, shape: BoxShape.circle),
-                        child: const Icon(Icons.public, size: 7, color: AppTheme.infoColor),
-                      ),
-                    ),
-                ],
-              ),
-            ),
-            if (assignment.side != null)
-              _buildLabel(place, assignment.side!, assignment.labelWidth, markerSize, showAddress),
-          ],
-        ),
-      );
-
+      final hue = _colorToHue(markerColor);
       markers.add(Marker(
-        point: LatLng(place.latitude, place.longitude),
-        width: markerSize,
-        height: markerSize,
-        alignment: Alignment.center,
-        child: markerChild,
+        markerId: MarkerId(place.id.toString()),
+        position: LatLng(place.latitude, place.longitude),
+        icon: BitmapDescriptor.defaultMarkerWithHue(hue),
+        zIndex: place.isFeatured ? 100 : 0,
+        onTap: () => _onPlaceTap(place),
+        infoWindow: InfoWindow(
+          title: place.name,
+          snippet: place.distanceKm != null
+              ? '${place.distanceKm!.toStringAsFixed(1)} km${place.averageRating != null ? '  ★ ${place.averageRating!.toStringAsFixed(1)}' : ''}'
+              : (place.category ?? ''),
+        ),
       ));
     }
 
     return markers;
   }
 
-  Widget _buildLabel(PlaceModel place, _LabelSide side, double labelWidth, double markerSize, bool showAddress) {
-    final labelH = showAddress && place.address != null ? 42.0 : 24.0;
-    final m2 = markerSize / 2;
+  double _colorToHue(Color color) {
+    if (color == AppTheme.markerHotel) return 0.0;
+    if (color == AppTheme.markerFood) return 30.0;
+    if (color == AppTheme.markerEmergency) return 0.0;
+    if (color == AppTheme.markerTransport) return 240.0;
+    if (color == AppTheme.markerTourist) return 300.0;
+    if (color == AppTheme.markerActivity) return 120.0;
+    if (color == AppTheme.markerUtility) return 200.0;
+    return 0.0;
+  }
 
-    double left, right, top, bottom;
-    switch (side) {
-      case _LabelSide.right:
-        left = markerSize + 4;
-        top = m2 - labelH / 2;
-        right = double.infinity;
-        bottom = double.infinity;
-      case _LabelSide.left:
-        right = markerSize + 4;
-        top = m2 - labelH / 2;
-        left = double.infinity;
-        bottom = double.infinity;
-      case _LabelSide.top:
-        left = m2 - labelWidth / 2;
-        bottom = markerSize + 4;
-        top = double.infinity;
-        right = double.infinity;
-      case _LabelSide.bottom:
-        left = m2 - labelWidth / 2;
-        top = markerSize + 4;
-        right = double.infinity;
-        bottom = double.infinity;
+  LatLngBounds _latLngBoundsFromPoints(List<LatLng> points) {
+    if (points.isEmpty) return LatLngBounds(southwest: const LatLng(0, 0), northeast: const LatLng(0, 0));
+    double minLat = points.first.latitude;
+    double maxLat = points.first.latitude;
+    double minLng = points.first.longitude;
+    double maxLng = points.first.longitude;
+    for (final p in points) {
+      if (p.latitude < minLat) minLat = p.latitude;
+      if (p.latitude > maxLat) maxLat = p.latitude;
+      if (p.longitude < minLng) minLng = p.longitude;
+      if (p.longitude > maxLng) maxLng = p.longitude;
     }
-
-    return Positioned(
-      left: left.isFinite ? left : null,
-      right: right.isFinite ? right : null,
-      top: top.isFinite ? top : null,
-      bottom: bottom.isFinite ? bottom : null,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
-        decoration: BoxDecoration(
-          color: Colors.white.withOpacity(0.92),
-          borderRadius: BorderRadius.circular(6),
-          boxShadow: [
-            BoxShadow(color: Colors.black.withOpacity(0.1), blurRadius: 3, offset: const Offset(0, 1)),
-          ],
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(
-              place.name,
-              style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Colors.black87),
-              maxLines: 1, overflow: TextOverflow.ellipsis,
-            ),
-            if (showAddress && place.address != null)
-              Text(
-                place.address!,
-                style: const TextStyle(fontSize: 9, color: Colors.black54),
-                maxLines: 1, overflow: TextOverflow.ellipsis,
-              ),
-          ],
-        ),
-      ),
+    return LatLngBounds(
+      southwest: LatLng(minLat, minLng),
+      northeast: LatLng(maxLat, maxLng),
     );
   }
-
-  double _measureLabelWidth(PlaceModel place) {
-    final key = '${place.id}|${place.name}';
-    return _labelWidthCache.putIfAbsent(key, () {
-      final tp = TextPainter(
-        text: TextSpan(text: place.name, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600)),
-        maxLines: 1, textDirection: TextDirection.ltr,
-      )..layout(maxWidth: 140);
-      return tp.width + 12;
-    });
-  }
-
-  double _getMarkerSize(PlaceModel place) {
-    if (_selectedPlace?.id == place.id) return 44.0;
-    if (place.isFeatured) return 42.0;
-    if (place.source == 'osm') return 30.0;
-    return 32.0;
-  }
-
-  List<_LabelAssignment> _computeLabelAssignments(
-    List<PlaceModel> places, bool showAddress, bool highZoom, bool midZoom,
-    MapCamera camera, Size viewport,
-  ) {
-    final infos = <_LabelInfo>[];
-    for (final place in places) {
-      final isSelected = _selectedPlace?.id == place.id;
-      final isFeatured = place.isFeatured;
-      final showName = highZoom || (midZoom && (isFeatured || isSelected));
-      final markerSize = _getMarkerSize(place);
-
-      if (!showName) {
-        infos.add(_LabelInfo(placeId: place.id, showLabel: false, markerSize: markerSize));
-        continue;
-      }
-
-      final pt = camera.latLngToScreenPoint(LatLng(place.latitude, place.longitude));
-      final labelW = _measureLabelWidth(place);
-      infos.add(_LabelInfo(placeId: place.id, showLabel: true, markerSize: markerSize, screenPt: Offset(pt.x, pt.y), labelWidth: labelW));
-    }
-
-    // Sort: selected first, featured, then regular
-    final sortedInfos = List<_LabelInfo>.from(infos);
-    sortedInfos.sort((a, b) {
-      final aSelected = _selectedPlace?.id == a.placeId;
-      final bSelected = _selectedPlace?.id == b.placeId;
-      if (aSelected != bSelected) return aSelected ? -1 : 1;
-      final aF = places.firstWhere((p) => p.id == a.placeId).isFeatured;
-      final bF = places.firstWhere((p) => p.id == b.placeId).isFeatured;
-      if (aF != bF) return aF ? -1 : 1;
-      return 0;
-    });
-
-    final placedRects = <Rect>[];
-    final allPts = infos.where((i) => i.showLabel).map((i) => i.screenPt).toList();
-
-    for (final info in sortedInfos) {
-      if (!info.showLabel) {
-        info.side = null;
-        continue;
-      }
-
-      final pt = info.screenPt;
-      final r = info.markerSize / 2;
-      final lw = info.labelWidth;
-      final lh = (showAddress && places.firstWhere((p) => p.id == info.placeId).address != null) ? 42.0 : 24.0;
-      info.labelHeight = lh;
-
-      // 4 candidate positions in screen coordinates
-      final candidates = <_LabelSide, Rect>{
-        _LabelSide.right: Rect.fromLTWH(pt.dx + r + 4, pt.dy - lh / 2, lw, lh),
-        _LabelSide.left: Rect.fromLTWH(pt.dx - r - 4 - lw, pt.dy - lh / 2, lw, lh),
-        _LabelSide.top: Rect.fromLTWH(pt.dx - lw / 2, pt.dy - r - 4 - lh, lw, lh),
-        _LabelSide.bottom: Rect.fromLTWH(pt.dx - lw / 2, pt.dy + r + 4, lw, lh),
-      };
-
-      // Stability: keep previous side if still valid
-      final prev = _lastLabelAssignments.where((a) => a.placeId == info.placeId).firstOrNull;
-      if (prev?.side != null) {
-        final prevRect = candidates[prev!.side!]!;
-        final clampedPrev = _clampToViewport(prevRect, viewport);
-        bool stable = true;
-        for (final placed in placedRects) {
-          if (clampedPrev.overlaps(placed.inflate(6))) { stable = false; break; }
-        }
-        if (stable) {
-          for (final otherPt in allPts) {
-            if (otherPt == pt) continue;
-            final markerRect = Rect.fromCenter(center: otherPt, width: info.markerSize + 8, height: info.markerSize + 8);
-            if (clampedPrev.overlaps(markerRect.inflate(4))) { stable = false; break; }
-          }
-        }
-        if (stable) {
-          info.side = prev.side;
-          placedRects.add(clampedPrev);
-          continue;
-        }
-      }
-
-      // Score all 4 positions
-      _LabelSide? bestSide;
-      double bestScore = double.infinity;
-      Rect? bestClamped;
-
-      for (final entry in candidates.entries) {
-        final side = entry.key;
-        final clamped = _clampToViewport(entry.value, viewport);
-        double score = _sideRank(side);
-
-        for (final placed in placedRects) {
-          if (clamped.overlaps(placed.inflate(6))) score += 100;
-        }
-
-        for (final otherPt in allPts) {
-          if (otherPt == pt) continue;
-          final markerRect = Rect.fromCenter(center: otherPt, width: info.markerSize + 8, height: info.markerSize + 8);
-          if (clamped.overlaps(markerRect.inflate(4))) score += 150;
-        }
-
-        if (clamped.left < 0 || clamped.right > viewport.width ||
-            clamped.top < 0 || clamped.bottom > viewport.height) {
-          score += 500;
-        }
-
-        if (score < bestScore) {
-          bestScore = score;
-          bestSide = side;
-          bestClamped = clamped;
-        }
-      }
-
-      if (bestSide != null) {
-        info.side = bestSide;
-        placedRects.add(bestClamped!);
-      } else {
-        info.side = null;
-      }
-    }
-
-    // Map assignments back to original order
-    final assignmentMap = <Object, _LabelAssignment>{};
-    for (final info in infos) {
-      assignmentMap[info.placeId] = _LabelAssignment(
-        placeId: info.placeId,
-        side: info.side,
-        labelWidth: info.labelWidth,
-      );
-    }
-    return places.map((p) => assignmentMap[p.id] ?? _LabelAssignment(placeId: p.id)).toList();
-  }
-
-  Rect _clampToViewport(Rect r, Size vp) {
-    final w = r.width > vp.width ? vp.width : r.width;
-    final h = r.height > vp.height ? vp.height : r.height;
-    return Rect.fromLTWH(
-      r.left.clamp(0, (vp.width - w).toDouble()),
-      r.top.clamp(0, (vp.height - h).toDouble()),
-      w, h,
-    );
-  }
-
-  double _sideRank(_LabelSide side) {
-    switch (side) {
-      case _LabelSide.right: return 0;
-      case _LabelSide.left: return 1;
-      case _LabelSide.top: return 2;
-      case _LabelSide.bottom: return 3;
-    }
-  }
-
 }
 
 // ============ PLACES LIST SHIMMER ============
 class _PlacesListShimmer extends StatelessWidget {
-  const _PlacesListShimmer();
-
   @override
   Widget build(BuildContext context) {
-    return ListView.builder(
-      padding: const EdgeInsets.only(left: 12, right: 12, top: 4, bottom: 8),
-      itemCount: 4,
-      itemBuilder: (_, __) => const PlaceCardShimmer(),
+    return const SliverToBoxAdapter(
+      child: Center(
+        child: CircularProgressIndicator(),
+      ),
     );
   }
-}
-
-class _PinTipClipper extends CustomClipper<ui.Path> {
-  @override
-  ui.Path getClip(Size size) {
-    final path = ui.Path()
-      ..moveTo(0, 0)
-      ..lineTo(size.width / 2, size.height)
-      ..lineTo(size.width, 0)
-      ..close();
-    return path;
-  }
-
-  @override
-  bool shouldReclip(covariant CustomClipper<ui.Path> oldClipper) => false;
-}
-
-enum _LabelSide { right, left, top, bottom }
-
-class _LabelAssignment {
-  final dynamic placeId;
-  _LabelSide? side;
-  final double labelWidth;
-
-  _LabelAssignment({required this.placeId, this.side, this.labelWidth = 0});
-}
-
-class _LabelInfo {
-  final dynamic placeId;
-  bool showLabel;
-  _LabelSide? side;
-  double markerSize;
-  Offset screenPt;
-  double labelWidth;
-  double labelHeight = 0;
-
-  _LabelInfo({
-    required this.placeId,
-    required this.showLabel,
-    required this.markerSize,
-    this.screenPt = Offset.zero,
-    this.labelWidth = 0,
-  });
 }
 
 // ============ AD-ENABLED PLACES LIST ============

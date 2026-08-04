@@ -1,4 +1,4 @@
-import 'dart:async';
+﻿import 'dart:async';
 import 'dart:convert';
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
@@ -38,6 +38,7 @@ class NearbyMapScreen extends StatefulWidget {
 class _NearbyMapScreenState extends State<NearbyMapScreen> {
   final LocationService _locationService = LocationService();
   final MapController _mapController = MapController();
+  final MapController _satelliteMapController = MapController();
   final DraggableScrollableController _sheetController =
       DraggableScrollableController();
   final TextEditingController _searchController = TextEditingController();
@@ -48,6 +49,7 @@ class _NearbyMapScreenState extends State<NearbyMapScreen> {
   double _currentZoom = AppConstants.defaultMapZoom;
   bool _isTracking = true;
   bool _isLoadingPlaces = false;
+  bool _isFetchingPlaces = false;
   PlaceModel? _selectedPlace;
   Timer? _debounceTimer;
   StreamSubscription? _positionStream;
@@ -60,9 +62,11 @@ class _NearbyMapScreenState extends State<NearbyMapScreen> {
   List<Map<String, dynamic>> _routes = [];
   bool _isLoadingRoute = false;
   bool _showFeaturedOnly = false;
+  PlaceFilter? _activeFilter;
   double? _lastFetchLat;
   double? _lastFetchLng;
   double _lastFetchRadius = -1;
+  double? _cachedBoundsNorth, _cachedBoundsSouth, _cachedBoundsEast, _cachedBoundsWest;
 
   // Weather overlay state
   List<_WeatherGridPoint> _weatherGrid = [];
@@ -74,6 +78,14 @@ class _NearbyMapScreenState extends State<NearbyMapScreen> {
   int _lastPlacesHash = 0;
   List<_LabelAssignment> _lastLabelAssignments = [];
 
+  // OSM submission tracking
+
+  MapController get _activeMapController =>
+      context.read<MapViewProvider>().isSatellite
+          ? _satelliteMapController
+          : _mapController;
+  Map<String, String> _osmSubmissionStatuses = {}; // osmId -> none/pending/approved
+
   // Nepal bounding box
   static const double _nepalMinLat = 26.347;
   static const double _nepalMaxLat = 30.447;
@@ -83,6 +95,8 @@ class _NearbyMapScreenState extends State<NearbyMapScreen> {
   @override
   void initState() {
     super.initState();
+    _syncStreamController = StreamController<int>.broadcast();
+    _pollSyncCount();
     WidgetsBinding.instance.addPostFrameCallback((_) => _initMap());
   }
 
@@ -154,7 +168,7 @@ class _NearbyMapScreenState extends State<NearbyMapScreen> {
         _lat = position.latitude;
         _lng = position.longitude;
       });
-      _mapController.move(
+      _activeMapController.move(
           LatLng(position.latitude, position.longitude), _currentZoom);
     });
   }
@@ -162,7 +176,7 @@ class _NearbyMapScreenState extends State<NearbyMapScreen> {
   void _recenterMap() {
     if (_lat != null && _lng != null) {
       try {
-        _mapController.move(LatLng(_lat!, _lng!), _currentZoom);
+        _activeMapController.move(LatLng(_lat!, _lng!), _currentZoom);
       } catch (e) {
         debugPrint('MapController move failed: $e');
       }
@@ -221,15 +235,15 @@ class _NearbyMapScreenState extends State<NearbyMapScreen> {
       _lng = camera.center.longitude;
     });
 
-    // Debounce place fetching on map move
+    // Throttle place fetching on map move - 300ms delay after movement stops
     _debounceTimer?.cancel();
-    _debounceTimer = Timer(const Duration(milliseconds: 1000), () {
+    _debounceTimer = Timer(const Duration(milliseconds: 300), () {
       _fetchPlacesForViewport();
     });
 
-    // Debounce weather fetch on map move
+    // Throttle weather fetch on map move
     _weatherDebounceTimer?.cancel();
-    _weatherDebounceTimer = Timer(const Duration(milliseconds: 1000), () {
+    _weatherDebounceTimer = Timer(const Duration(milliseconds: 300), () {
       _fetchWeatherForViewport();
     });
   }
@@ -237,37 +251,47 @@ class _NearbyMapScreenState extends State<NearbyMapScreen> {
   Future<void> _fetchPlacesForViewport({String? search}) async {
     if (_lat == null || _lng == null) return;
     if (_currentZoom < 10) return;
+    if (_isFetchingPlaces) return;
 
     final radius = _zoomToRadius(_currentZoom);
 
-    // Skip if position hasn't changed meaningfully (unless search is active)
+    // BBox cache check: if current viewport is inside cached area, skip API call
     if (search == null &&
-        _lastFetchLat != null &&
-        _lastFetchLng != null &&
-        _lastFetchRadius > 0) {
-      final latDiff = (_lat! - _lastFetchLat!).abs();
-      final lngDiff = (_lng! - _lastFetchLng!).abs();
-      final radiusDiff = (radius - _lastFetchRadius).abs();
-      if (latDiff < 0.005 && lngDiff < 0.005 && radiusDiff < 0.5) {
-        return;
-      }
+        _cachedBoundsNorth != null &&
+        _lat! <= _cachedBoundsNorth! &&
+        _lat! >= _cachedBoundsSouth! &&
+        _lng! <= _cachedBoundsEast! &&
+        _lng! >= _cachedBoundsWest!) {
+      return;
     }
 
+    _isFetchingPlaces = true;
     setState(() => _isLoadingPlaces = true);
 
     try {
       final provider = context.read<PlaceProvider>();
 
+      // Fetch 2x the visible radius so panning within cached area is instant
+      final fetchRadius = radius * 2;
       await provider.fetchNearbyPlaces(
         lat: _lat!,
         lng: _lng!,
-        radiusKm: radius,
-        search: search,
+        radiusKm: fetchRadius,
+        categoryId: _activeFilter?.categoryId,
+        search: search ?? _activeFilter?.search,
       );
 
       _lastFetchLat = _lat;
       _lastFetchLng = _lng;
       _lastFetchRadius = radius;
+
+      // Save BBox for cache check
+      final latKm = 111.32;
+      final lngKm = 111.32 * math.cos(_lat! * math.pi / 180);
+      _cachedBoundsNorth = _lat! + (fetchRadius / latKm);
+      _cachedBoundsSouth = _lat! - (fetchRadius / latKm);
+      _cachedBoundsEast = _lng! + (fetchRadius / lngKm);
+      _cachedBoundsWest = _lng! - (fetchRadius / lngKm);
 
       // Cache the fetched places offline
       final placesJson = provider.places.map((p) => {
@@ -291,7 +315,11 @@ class _NearbyMapScreenState extends State<NearbyMapScreen> {
       debugPrint('Failed to fetch places for viewport: $e');
     }
 
-    if (mounted) setState(() => _isLoadingPlaces = false);
+    _isFetchingPlaces = false;
+    if (mounted) {
+      setState(() => _isLoadingPlaces = false);
+      _checkOsmSubmissionStatuses();
+    }
   }
 
   double _zoomToRadius(double zoom) {
@@ -302,10 +330,125 @@ class _NearbyMapScreenState extends State<NearbyMapScreen> {
     return 50.0;
   }
 
+  double _distanceFromUser(PlaceModel place) {
+    if (_currentLocation == null) return (place.distanceKm ?? 0);
+    const double earthRadius = 6371;
+    final double dLat = (place.latitude - _currentLocation!.latitude) * math.pi / 180;
+    final double dLng = (place.longitude - _currentLocation!.longitude) * math.pi / 180;
+    final double a = math.sin(dLat / 2) * math.sin(dLat / 2) +
+        math.cos(_currentLocation!.latitude * math.pi / 180) *
+            math.cos(place.latitude * math.pi / 180) *
+            math.sin(dLng / 2) * math.sin(dLng / 2);
+    return earthRadius * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a));
+  }
+
+  Future<void> _checkOsmSubmissionStatuses() async {
+    if (context == null || !mounted) return;
+    final provider = context.read<PlaceProvider>();
+    final osmIds = provider.places
+        .where((p) => p.source == 'osm')
+        .map((p) => p.id.toString())
+        .where((id) => id.isNotEmpty)
+        .toSet()
+        .toList();
+
+    if (osmIds.isEmpty) return;
+
+    try {
+      final response = await ApiClient.instance.dio.post(
+        '/places/osm-status',
+        data: {'osm_ids': osmIds},
+      );
+      if (response.data?['success'] == true && response.data?['data'] != null) {
+        final data = Map<String, String>.from(
+          (response.data['data'] as Map).map((k, v) => MapEntry(k.toString(), v.toString())),
+        );
+        if (mounted) {
+          setState(() => _osmSubmissionStatuses = data);
+        }
+      }
+    } catch (_) {}
+  }
+
+  void _confirmSaveOsmPlace(PlaceModel place) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Save to Database'),
+        content: Text('Add "${place.name}" to our local database?'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          FilledButton.icon(
+            onPressed: () async {
+              Navigator.pop(ctx);
+              final result = await Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => AddPlaceScreen(
+                    initialLat: place.latitude,
+                    initialLng: place.longitude,
+                    initialName: place.name,
+                    initialDescription: place.description,
+                    initialAddress: place.address,
+                    initialCategory: place.category,
+                    osmId: place.id.toString(),
+                  ),
+                ),
+              );
+              if (result == true && mounted) {
+                setState(() {
+                  _osmSubmissionStatuses[place.id.toString()] = 'pending';
+                });
+              }
+            },
+            icon: const Icon(Icons.save, size: 18),
+            label: const Text('Save'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildOsmSaveButton(PlaceModel place) {
+    final osmId = place.id.toString();
+    final status = _osmSubmissionStatuses[osmId] ?? 'none';
+
+    if (status == 'approved') return const SizedBox.shrink();
+
+    final bool isPending = status == 'pending';
+    final String tooltip;
+    if (status == 'rejected') {
+      tooltip = 'Re-submit (was rejected)';
+    } else if (isPending) {
+      tooltip = 'Pending review';
+    } else {
+      tooltip = 'Save to database';
+    }
+    return Tooltip(
+      message: tooltip,
+      child: GestureDetector(
+        onTap: isPending ? null : () => _confirmSaveOsmPlace(place),
+        child: Container(
+          padding: const EdgeInsets.all(6),
+          margin: const EdgeInsets.only(right: 4),
+          decoration: BoxDecoration(
+            color: isPending ? Colors.grey.shade200 : Colors.green.shade50,
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Icon(
+            isPending ? Icons.hourglass_empty : Icons.save_outlined,
+            size: 16,
+            color: isPending ? Colors.grey.shade400 : Colors.green.shade700,
+          ),
+        ),
+      ),
+    );
+  }
+
   void _onPlaceTap(PlaceModel place) async {
     setState(() => _selectedPlace = place);
     try {
-      _mapController.move(LatLng(place.latitude, place.longitude), 15.0);
+      _activeMapController.move(LatLng(place.latitude, place.longitude), 15.0);
       _sheetController.animateTo(
         0.25,
         duration: const Duration(milliseconds: 300),
@@ -352,10 +495,16 @@ class _NearbyMapScreenState extends State<NearbyMapScreen> {
                 .map((c) => LatLng(c[1], c[0]))
                 .toList();
             if (coords.length > 1) {
+              final distKm = (r['distance'] as num) / 1000;
+              final osrmDuration = (r['duration'] as num?)?.toDouble();
               parsed.add({
                 'points': coords,
-                'distance': (r['distance'] as num) / 1000,
-                'duration': (r['duration'] as num) / 60,
+                'distance': distKm,
+                // FL-21: prefer OSRM's real duration (seconds); fall back to a
+                // 30 km/h estimate when absent
+                'duration': osrmDuration != null && osrmDuration > 0
+                    ? osrmDuration / 60
+                    : distKm / 30 * 60,
               });
             }
           }
@@ -364,7 +513,7 @@ class _NearbyMapScreenState extends State<NearbyMapScreen> {
             final allPoints = parsed.expand((r) => r['points'] as List<LatLng>).toList();
             final bounds = LatLngBounds.fromPoints(allPoints);
             final cameraFit = CameraFit.bounds(bounds: bounds, padding: const EdgeInsets.all(60));
-            _mapController.fitCamera(cameraFit);
+            _activeMapController.fitCamera(cameraFit);
           } else {
             _showRouteError('No valid routes found');
           }
@@ -405,31 +554,14 @@ class _NearbyMapScreenState extends State<NearbyMapScreen> {
           // Map with dual layers for smooth toggle
           Consumer<MapViewProvider>(
             builder: (context, mapView, _) {
-              return Stack(
-                children: [
-                  // Standard map layer
-                  AnimatedOpacity(
-                    duration: const Duration(milliseconds: 300),
-                    opacity: mapView.isSatellite ? 0.0 : 1.0,
-                    child: _buildFlutterMap(
-                      key: const ValueKey('standard'),
-                      isSatellite: false,
-                      placesVisible: mapView.showPlaces,
-                      showWeather: mapView.showWeather,
-                    ),
-                  ),
-                  // Satellite map layer
-                  AnimatedOpacity(
-                    duration: const Duration(milliseconds: 300),
-                    opacity: mapView.isSatellite ? 1.0 : 0.0,
-                    child: _buildFlutterMap(
-                      key: const ValueKey('satellite'),
-                      isSatellite: true,
-                      placesVisible: mapView.showPlaces,
-                      showWeather: mapView.showWeather,
-                    ),
-                  ),
-                ],
+              return AnimatedSwitcher(
+                duration: const Duration(milliseconds: 300),
+                child: _buildFlutterMap(
+                  key: ValueKey(mapView.isSatellite ? 'satellite' : 'standard'),
+                  isSatellite: mapView.isSatellite,
+                  placesVisible: mapView.showPlaces,
+                  showWeather: mapView.showWeather,
+                ),
               );
             },
           ),
@@ -540,7 +672,7 @@ class _NearbyMapScreenState extends State<NearbyMapScreen> {
   }) {
     return FlutterMap(
       key: key,
-      mapController: _mapController,
+      mapController: isSatellite ? _satelliteMapController : _mapController,
       options: MapOptions(
         initialCenter: LatLng(
             _lat ?? AppConstants.defaultLatitude,
@@ -611,9 +743,7 @@ class _NearbyMapScreenState extends State<NearbyMapScreen> {
           Consumer<PlaceProvider>(
             builder: (context, provider, _) {
               return MarkerLayer(
-                markers: _buildMarkers(_showFeaturedOnly
-                    ? provider.places.where((p) => p.isFeatured).toList()
-                    : provider.places),
+                markers: _buildMarkers(_applyPlaceFilters(provider.places)),
               );
             },
           ),
@@ -682,9 +812,9 @@ class _NearbyMapScreenState extends State<NearbyMapScreen> {
         _mapFAB(
           icon: Icons.add,
           onTap: () {
-            final z = _mapController.camera.zoom;
-            _mapController.move(
-              _mapController.camera.center,
+            final z = _activeMapController.camera.zoom;
+            _activeMapController.move(
+              _activeMapController.camera.center,
               (z + 1)
                   .clamp(AppConstants.minMapZoom, AppConstants.maxMapZoom),
             );
@@ -694,9 +824,9 @@ class _NearbyMapScreenState extends State<NearbyMapScreen> {
         _mapFAB(
           icon: Icons.remove,
           onTap: () {
-            final z = _mapController.camera.zoom;
-            _mapController.move(
-              _mapController.camera.center,
+            final z = _activeMapController.camera.zoom;
+            _activeMapController.move(
+              _activeMapController.camera.center,
               (z - 1)
                   .clamp(AppConstants.minMapZoom, AppConstants.maxMapZoom),
             );
@@ -769,20 +899,25 @@ class _NearbyMapScreenState extends State<NearbyMapScreen> {
     );
   }
 
-  void _onMyLocationTap() async {
+  void _onMyLocationTap() {
+    // FL-27: button toggles follow-mode on/off; a second tap stops following
+    if (_isTracking) {
+      setState(() => _isTracking = false);
+      return;
+    }
     if (_lat != null && _lng != null) {
       setState(() => _isTracking = true);
-      _mapController.move(LatLng(_lat!, _lng!), 15.0);
+      _activeMapController.move(LatLng(_lat!, _lng!), 15.0);
     } else {
-      final loc = await _locationService.getCurrentLocation();
-      if (loc != null && mounted) {
+      _locationService.getCurrentLocation().then((loc) {
+        if (loc == null || !mounted) return;
         setState(() {
           _lat = loc.latitude;
           _lng = loc.longitude;
           _isTracking = true;
         });
-        _mapController.move(LatLng(_lat!, _lng!), 15.0);
-      }
+        _activeMapController.move(LatLng(_lat!, _lng!), 15.0);
+      });
     }
   }
 
@@ -795,7 +930,10 @@ class _NearbyMapScreenState extends State<NearbyMapScreen> {
       ),
       builder: (context) => FilterPlacesSheet(
         onApply: (filters) {
+          setState(() => _activeFilter = filters);
           _debounceTimer?.cancel();
+          _lastFetchLat = null; // Force re-fetch with the new filter
+          _lastFetchLng = null;
           _fetchPlacesForViewport();
         },
       ),
@@ -857,12 +995,7 @@ class _NearbyMapScreenState extends State<NearbyMapScreen> {
   }
 
   Stream<int> _syncCountStream() {
-    _syncStreamController?.close();
-    final ctrl = StreamController<int>.broadcast();
-    _syncStreamController = ctrl;
-
-    _pollSyncCount();
-    return ctrl.stream;
+    return _syncStreamController!.stream;
   }
 
   Future<void> _pollSyncCount() async {
@@ -940,10 +1073,44 @@ class _NearbyMapScreenState extends State<NearbyMapScreen> {
     );
   }
 
+  List<PlaceModel> _applyPlaceFilters(List<PlaceModel> places) {
+    var result = places;
+    final f = _activeFilter;
+
+    final showFeatured = _showFeaturedOnly || (f?.onlyFeatured ?? false);
+    if (showFeatured) {
+      result = result.where((p) => p.isFeatured).toList();
+    }
+    if (f?.onlyVerified == true) {
+      result = result.where((p) => p.isVerified).toList();
+    }
+    if (f?.categoryId != null) {
+      String? categoryName;
+      for (final c in context.read<PlaceProvider>().categories) {
+        if (c.id == f!.categoryId) {
+          categoryName = c.name;
+          break;
+        }
+      }
+      if (categoryName != null && categoryName.toLowerCase() != 'all') {
+        final match = categoryName.toLowerCase();
+        result = result
+            .where((p) => (p.category ?? '').toLowerCase() == match)
+            .toList();
+      }
+    }
+    final q = f?.search;
+    if (q != null && q.isNotEmpty) {
+      final query = q.toLowerCase();
+      result = result
+          .where((p) => p.name.toLowerCase().contains(query))
+          .toList();
+    }
+    return result;
+  }
+
   Widget _buildBottomSheetContent(PlaceProvider provider) {
-    final displayPlaces = _showFeaturedOnly
-        ? provider.places.where((p) => p.isFeatured).toList()
-        : provider.places;
+    final displayPlaces = _applyPlaceFilters(provider.places);
     return DraggableScrollableSheet(
       controller: _sheetController,
       initialChildSize: 0.22,
@@ -966,92 +1133,103 @@ class _NearbyMapScreenState extends State<NearbyMapScreen> {
                 ),
               ],
             ),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Padding(
-                  padding: const EdgeInsets.only(top: 12, bottom: 6),
-                  child: Container(
-                    width: 48,
-                    height: 6,
-                    decoration: BoxDecoration(
-                      color: Colors.grey.shade300,
-                      borderRadius: BorderRadius.circular(3),
-                    ),
-                  ),
-                ),
-                if (_selectedPlace != null)
-                  _buildSheetSelectedPreview(_selectedPlace!, () {
-                    _navigateToDetails(_selectedPlace!);
-                  }),
-                Padding(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            child: CustomScrollView(
+              controller: scrollController,
+              slivers: [
+                SliverToBoxAdapter(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
                     children: [
-                      Text(
-                        'Nearby Places',
-                        style: TextStyle(
-                          fontSize: 17,
-                          fontWeight: FontWeight.w600,
-                          color: AppTheme.textPrimary,
+                      Padding(
+                        padding: const EdgeInsets.only(top: 12, bottom: 6),
+                        child: Container(
+                          width: 48,
+                          height: 6,
+                          decoration: BoxDecoration(
+                            color: Colors.grey.shade300,
+                            borderRadius: BorderRadius.circular(3),
+                          ),
                         ),
                       ),
-                      Row(
-                        children: [
-                          if (displayPlaces.isNotEmpty)
+                      if (_selectedPlace != null)
+                        _buildSheetSelectedPreview(_selectedPlace!, () {
+                          _navigateToDetails(_selectedPlace!);
+                        }),
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
                             Text(
-                              '${displayPlaces.length} found',
+                              'Nearby Places',
                               style: TextStyle(
-                                  fontSize: 13, color: Colors.grey.shade500),
+                                fontSize: 17,
+                                fontWeight: FontWeight.w600,
+                                color: AppTheme.textPrimary,
+                              ),
                             ),
-                        ],
+                            Row(
+                              children: [
+                                if (displayPlaces.isNotEmpty)
+                                  Text(
+                                    '${displayPlaces.length} found',
+                                    style: TextStyle(
+                                        fontSize: 13, color: Colors.grey.shade500),
+                                  ),
+                              ],
+                            ),
+                          ],
+                        ),
                       ),
+                      const Divider(height: 1, thickness: 1),
                     ],
                   ),
                 ),
-                const Divider(height: 1, thickness: 1),
-                Expanded(
-                  child: provider.isLoading
-                      ? const Center(child: CircularProgressIndicator())
-                      : displayPlaces.isEmpty
-                          ? Center(
-                              child: Column(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  Icon(Icons.map_outlined,
-                                      size: 48,
-                                      color: Colors.grey.shade300),
-                                  const SizedBox(height: 8),
-                                  Text(
-                                    _showFeaturedOnly ? 'No featured places' : 'No places found',
-                                    style: TextStyle(
-                                        color: Colors.grey.shade500,
-                                        fontSize: AppTheme.textBase),
-                                  ),
-                                  const SizedBox(height: 4),
-                                  if (!_showFeaturedOnly)
-                                    Text(
-                                      'Try zooming in or moving the map',
-                                      style: TextStyle(
-                                          color: Colors.grey.shade400,
-                                          fontSize: AppTheme.textSm),
-                                    ),
-                                ],
-                              ),
-                            )
-                          : ListView.builder(
-                              controller: scrollController,
-                              padding: const EdgeInsets.only(
-                                  left: 12, right: 12, top: 4, bottom: 8),
-                              itemCount: displayPlaces.length,
-                              itemBuilder: (context, index) {
-                                final place = displayPlaces[index];
-                                return _buildPlaceItem(place);
-                              },
+                if (provider.isLoading)
+                  const SliverFillRemaining(
+                    child: Center(child: CircularProgressIndicator()),
+                  )
+                else if (displayPlaces.isEmpty)
+                  SliverFillRemaining(
+                    child: Center(
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.map_outlined,
+                              size: 48,
+                              color: Colors.grey.shade300),
+                          const SizedBox(height: 8),
+                          Text(
+                            _showFeaturedOnly ? 'No featured places' : 'No places found',
+                            style: TextStyle(
+                                color: Colors.grey.shade500,
+                                fontSize: AppTheme.textBase),
+                          ),
+                          const SizedBox(height: 4),
+                          if (!_showFeaturedOnly)
+                            Text(
+                              'Try zooming in or moving the map',
+                              style: TextStyle(
+                                  color: Colors.grey.shade400,
+                                  fontSize: AppTheme.textSm),
                             ),
-                ),
+                        ],
+                      ),
+                    ),
+                  )
+                else
+                  SliverPadding(
+                    padding: const EdgeInsets.only(left: 12, right: 12, top: 4, bottom: 8),
+                    sliver: SliverList(
+                      delegate: SliverChildBuilderDelegate(
+                        (context, index) {
+                          final place = displayPlaces[index];
+                          return _buildPlaceItem(place);
+                        },
+                        childCount: displayPlaces.length,
+                      ),
+                    ),
+                  ),
               ],
             ),
           ),
@@ -1061,7 +1239,7 @@ class _NearbyMapScreenState extends State<NearbyMapScreen> {
   }
 
   Widget _buildPlaceItem(PlaceModel place) {
-    final isSelected = _selectedPlace?.id == place.id;
+    final isSelected = _selectedPlace?.id.toString() == place.id.toString();
     return Padding(
       padding: const EdgeInsets.only(bottom: 8),
       child: Material(
@@ -1157,9 +1335,9 @@ class _NearbyMapScreenState extends State<NearbyMapScreen> {
                             ),
                             const SizedBox(width: 8),
                           ],
-                          if (place.distanceKm != null)
+                          if (_distanceFromUser(place) != null)
                             Text(
-                              '${place.distanceKm!.toStringAsFixed(1)} km',
+                              '${_distanceFromUser(place)!.toStringAsFixed(1)} km',
                               style: TextStyle(
                                   fontSize: AppTheme.textSm, color: Colors.grey.shade500),
                             ),
@@ -1185,6 +1363,8 @@ class _NearbyMapScreenState extends State<NearbyMapScreen> {
                     ],
                   ),
                 ),
+                if (place.source == 'osm')
+                  _buildOsmSaveButton(place),
                 Icon(Icons.chevron_right,
                     size: 18, color: Colors.grey.shade400),
               ],
@@ -1294,8 +1474,8 @@ class _NearbyMapScreenState extends State<NearbyMapScreen> {
                                 ),
                                 child: Text(place.category!, style: TextStyle(fontSize: 10, color: markerColor, fontWeight: FontWeight.w600)),
                               ),
-                            if (place.distanceKm != null)
-                              Text('${place.distanceKm!.toStringAsFixed(1)} km', style: const TextStyle(fontSize: 12, color: AppTheme.textSecondary)),
+                            if (_distanceFromUser(place) != null)
+                              Text('${_distanceFromUser(place)!.toStringAsFixed(1)} km', style: const TextStyle(fontSize: 12, color: AppTheme.textSecondary)),
                           ],
                         ),
                       ],
@@ -1377,7 +1557,7 @@ class _NearbyMapScreenState extends State<NearbyMapScreen> {
                               ),
                               const SizedBox(width: 4),
                               Text(
-                                '· $dur min ($dist km)',
+                                'Â· $dur min ($dist km)',
                                 style: TextStyle(
                                   fontSize: 10,
                                   color: isFirst ? Colors.white70 : AppTheme.textSecondary,
@@ -1457,8 +1637,8 @@ class _NearbyMapScreenState extends State<NearbyMapScreen> {
                                 ),
                                 child: Text(place.category!, style: TextStyle(fontSize: 10, color: markerColor, fontWeight: FontWeight.w600)),
                               ),
-                            if (place.distanceKm != null)
-                              Text('${place.distanceKm!.toStringAsFixed(1)} km', style: const TextStyle(fontSize: 12, color: AppTheme.textSecondary)),
+                            if (_distanceFromUser(place) != null)
+                              Text('${_distanceFromUser(place)!.toStringAsFixed(1)} km', style: const TextStyle(fontSize: 12, color: AppTheme.textSecondary)),
                           ],
                         ),
                       ],
@@ -1537,7 +1717,7 @@ class _NearbyMapScreenState extends State<NearbyMapScreen> {
                                 ),
                                 const SizedBox(width: 4),
                                 Text(
-                                  '· $dur min ($dist km)',
+                                  'Â· $dur min ($dist km)',
                                   style: TextStyle(
                                     fontSize: 10,
                                     color: isFirst ? Colors.white70 : AppTheme.textSecondary,
@@ -1602,7 +1782,7 @@ class _NearbyMapScreenState extends State<NearbyMapScreen> {
     if (places.isEmpty) return markers;
 
     // Phase 0: Check if label assignment needs recomputation
-    final camera = _mapController.camera;
+    final camera = _activeMapController.camera;
     final viewport = MediaQuery.of(context).size;
     final stateKey = '${_currentZoom}|${camera.center.latitude}|${camera.center.longitude}|${camera.rotation}|${_selectedPlace?.id}';
     final placesHash = Object.hashAll(places.map((p) => p.id));
@@ -1618,7 +1798,7 @@ class _NearbyMapScreenState extends State<NearbyMapScreen> {
       final place = places[i];
       final assignment = _lastLabelAssignments[i];
       final markerColor = _getCategoryColor(place.category);
-      final isSelected = _selectedPlace?.id == place.id;
+      final isSelected = _selectedPlace?.id.toString() == place.id.toString();
       final markerSize = isSelected ? 44.0 : 32.0;
 
       final markerChild = GestureDetector(
@@ -1755,7 +1935,7 @@ class _NearbyMapScreenState extends State<NearbyMapScreen> {
   ) {
     final infos = <_LabelInfo>[];
     for (final place in places) {
-      final isSelected = _selectedPlace?.id == place.id;
+      final isSelected = _selectedPlace?.id.toString() == place.id.toString();
       final isFeatured = place.isFeatured;
       final showName = highZoom || (midZoom && (isFeatured || isSelected));
       final markerSize = isSelected ? 44.0 : 32.0;
@@ -1773,11 +1953,11 @@ class _NearbyMapScreenState extends State<NearbyMapScreen> {
     // Sort: selected first, featured, then regular
     final sortedInfos = List<_LabelInfo>.from(infos);
     sortedInfos.sort((a, b) {
-      final aSelected = _selectedPlace?.id == a.placeId;
-      final bSelected = _selectedPlace?.id == b.placeId;
+      final aSelected = _selectedPlace?.id.toString() == a.placeId.toString();
+      final bSelected = _selectedPlace?.id.toString() == b.placeId.toString();
       if (aSelected != bSelected) return aSelected ? -1 : 1;
-      final aF = places.firstWhere((p) => p.id == a.placeId).isFeatured;
-      final bF = places.firstWhere((p) => p.id == b.placeId).isFeatured;
+      final aF = places.firstWhere((p) => p.id.toString() == a.placeId.toString()).isFeatured;
+      final bF = places.firstWhere((p) => p.id.toString() == b.placeId.toString()).isFeatured;
       if (aF != bF) return aF ? -1 : 1;
       return 0;
     });
@@ -1794,7 +1974,7 @@ class _NearbyMapScreenState extends State<NearbyMapScreen> {
       final pt = info.screenPt;
       final r = info.markerSize / 2;
       final lw = info.labelWidth;
-      final lh = (showAddress && places.firstWhere((p) => p.id == info.placeId).address != null) ? 42.0 : 24.0;
+      final lh = (showAddress && places.firstWhere((p) => p.id.toString() == info.placeId.toString()).address != null) ? 42.0 : 24.0;
       info.labelHeight = lh;
 
       // 4 candidate positions in screen coordinates
@@ -2001,7 +2181,7 @@ class _NearbyMapScreenState extends State<NearbyMapScreen> {
 
   void _fetchWeatherForViewport() {
     try {
-      final bounds = _mapController.camera.visibleBounds;
+      final bounds = _activeMapController.camera.visibleBounds;
       _fetchWeatherGrid(
         minLat: bounds.south,
         maxLat: bounds.north,

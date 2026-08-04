@@ -7,17 +7,38 @@ use App\Models\AiAgent;
 use App\Models\AiAgentTask;
 use App\Services\Ai\AgentOrchestrator;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Auth;
 
 class AiAgentController extends Controller
 {
-    public function index()
+    private function requireAdmin(Request $request): void
     {
+        $user = Auth::user();
+        if (!$user || !$user->isAdmin() && !$user->isModerator()) {
+            abort(403, 'Unauthorized');
+        }
+
+        $routeName = $request->route()?->getName();
+        if ($routeName) {
+            $routePerms = \App\Models\Permission::where('route_name', $routeName)->get();
+            if ($routePerms->isNotEmpty() && !$routePerms->contains(fn($p) => $user->hasPermission($p->name))) {
+                abort(403, 'You do not have permission for this page.');
+            }
+        }
+    }
+
+    public function index(Request $request)
+    {
+        $this->requireAdmin($request);
+
         $agents = AiAgent::withCount(['tasks' => fn($q) => $q->where('status', 'pending')])->get();
         return view('admin.ai_agents', compact('agents'));
     }
 
     public function store(Request $request)
     {
+        $this->requireAdmin($request);
+
         $data = $request->validate([
             'name' => 'required|string|max:255',
             'agent_type' => 'required|string|max:100|unique:ai_agents,agent_type',
@@ -43,6 +64,8 @@ class AiAgentController extends Controller
 
     public function update(Request $request, AiAgent $agent)
     {
+        $this->requireAdmin($request);
+
         $data = $request->validate([
             'name' => 'required|string|max:255',
             'description' => 'nullable|string',
@@ -57,8 +80,10 @@ class AiAgentController extends Controller
         return redirect()->route('admin.ai.agents')->with('success', 'AI Agent updated.');
     }
 
-    public function run(AiAgent $agent, AgentOrchestrator $orchestrator)
+    public function run(Request $request, AiAgent $agent, AgentOrchestrator $orchestrator)
     {
+        $this->requireAdmin($request);
+
         $task = AiAgentTask::create([
             'ai_agent_id' => $agent->id,
             'type' => 'manual-run',

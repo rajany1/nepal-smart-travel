@@ -2,6 +2,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
+import 'package:dio/dio.dart';
 import '../../config/themes/app_theme.dart';
 import '../../core/api/api_client.dart';
 import '../../core/services/offline_db_service.dart';
@@ -11,8 +12,24 @@ import '../../providers/auth_provider.dart';
 class AddPlaceScreen extends StatefulWidget {
   final double? initialLat;
   final double? initialLng;
+  final String? initialName;
+  final String? initialDescription;
+  final String? initialAddress;
+  final String? initialPhone;
+  final String? initialCategory;
+  final String? osmId;
 
-  const AddPlaceScreen({super.key, this.initialLat, this.initialLng});
+  const AddPlaceScreen({
+    super.key,
+    this.initialLat,
+    this.initialLng,
+    this.initialName,
+    this.initialDescription,
+    this.initialAddress,
+    this.initialPhone,
+    this.initialCategory,
+    this.osmId,
+  });
 
   @override
   State<AddPlaceScreen> createState() => _AddPlaceScreenState();
@@ -46,6 +63,13 @@ class _AddPlaceScreenState extends State<AddPlaceScreen> {
     super.initState();
     _lat = widget.initialLat;
     _lng = widget.initialLng;
+    _nameController.text = widget.initialName ?? '';
+    _descriptionController.text = widget.initialDescription ?? '';
+    _addressController.text = widget.initialAddress ?? '';
+    _phoneController.text = widget.initialPhone ?? '';
+    if (widget.initialCategory != null && _categories.contains(widget.initialCategory)) {
+      _selectedCategory = widget.initialCategory;
+    }
   }
 
   @override
@@ -85,28 +109,44 @@ class _AddPlaceScreenState extends State<AddPlaceScreen> {
 
     setState(() => _isSubmitting = true);
 
+    final name = _nameController.text.trim();
+    final description = _descriptionController.text.trim();
+    final address = _addressController.text.trim();
+    final phone = _phoneController.text.trim();
+    final website = _websiteController.text.trim();
+
     final placeData = {
-      'name': _nameController.text.trim(),
-      'description': _descriptionController.text.trim(),
-      'address': _addressController.text.trim(),
-      'phone': _phoneController.text.trim(),
-      'website': _websiteController.text.trim(),
+      'name': name,
+      'description': description,
+      'address': address,
+      // FL-31: omit empty fields so backend validation never sees blank values
+      if (phone.isNotEmpty) 'phone': phone,
+      if (website.isNotEmpty) 'website': website,
       'latitude': _lat,
       'longitude': _lng,
       'category': _selectedCategory ?? 'Other',
-      'source': 'user_submitted',
+      if (widget.osmId != null) 'osm_id': widget.osmId,
     };
 
     try {
-      // Try to sync via API first
-      await OfflineDbService.instance.addToSyncQueue(
-        operation: 'create',
-        entityType: 'place',
-        payload: placeData,
-        mediaPaths: _selectedImages.isNotEmpty
-            ? _selectedImages.map((f) => f.path).toList()
-            : null,
-      );
+      if (_isOnline) {
+        final formData = FormData.fromMap({
+          ...placeData,
+          if (_selectedImages.isNotEmpty)
+            for (final f in _selectedImages)
+              'images[]': await MultipartFile.fromFile(f.path),
+        });
+        await ApiClient.instance.dio.post('/places', data: formData);
+      } else {
+        await OfflineDbService.instance.addToSyncQueue(
+          operation: 'create',
+          entityType: 'place',
+          payload: placeData,
+          mediaPaths: _selectedImages.isNotEmpty
+              ? _selectedImages.map((f) => f.path).toList()
+              : null,
+        );
+      }
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(

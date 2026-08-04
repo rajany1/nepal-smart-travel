@@ -10,8 +10,8 @@ class ReportModel {
   final String? categoryIcon;
   final String priority;
   final String status;
-  final double latitude;
-  final double longitude;
+  final double? latitude;
+  final double? longitude;
   final String? district;
   final int helpfulCount;
   final int unhelpfulCount;
@@ -35,8 +35,8 @@ class ReportModel {
     this.categoryIcon,
     this.priority = 'medium',
     this.status = 'pending',
-    required this.latitude,
-    required this.longitude,
+    this.latitude,
+    this.longitude,
     this.district,
     this.helpfulCount = 0,
     this.unhelpfulCount = 0,
@@ -63,8 +63,18 @@ class ReportModel {
       categoryIcon: json['category_icon'],
       priority: json['priority'] ?? 'medium',
       status: json['status'] ?? 'pending',
-      latitude: double.tryParse((json['latitude'] ?? 0).toString()) ?? 0.0,
-      longitude: double.tryParse((json['longitude'] ?? 0).toString()) ?? 0.0,
+      latitude: (() {
+        final raw = json['latitude'];
+        if (raw == null) return null;
+        final parsed = double.tryParse(raw.toString());
+        return (parsed != null && parsed != 0.0) ? parsed : null;
+      })(),
+      longitude: (() {
+        final raw = json['longitude'];
+        if (raw == null) return null;
+        final parsed = double.tryParse(raw.toString());
+        return (parsed != null && parsed != 0.0) ? parsed : null;
+      })(),
       district: json['district'],
       helpfulCount: json['helpful_count'] ?? 0,
       unhelpfulCount: json['unhelpful_count'] ?? 0,

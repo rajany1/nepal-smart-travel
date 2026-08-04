@@ -16,6 +16,8 @@ class AlertsScreen extends StatefulWidget {
 class _AlertsScreenState extends State<AlertsScreen> {
   Timer? _pollTimer;
   final LocationService _locationService = LocationService();
+  // FL-32: keys seen before — only genuinely new items trigger a notification
+  final Set<String> _seenItemKeys = {};
 
   @override
   void initState() {
@@ -28,6 +30,8 @@ class _AlertsScreenState extends State<AlertsScreen> {
         provider.setLocation(loc.latitude, loc.longitude);
       }
       provider.fetchNearby();
+      // Seed seen-keys so the first poll doesn't re-notify existing items
+      _seenItemKeys.addAll(provider.items.map((i) => '${i.source}:${i.id}'));
     });
     _pollTimer = Timer.periodic(const Duration(seconds: 30), (_) {
       _pollNearby();
@@ -37,11 +41,10 @@ class _AlertsScreenState extends State<AlertsScreen> {
   Future<void> _pollNearby() async {
     if (!mounted) return;
     final provider = context.read<AlertProvider>();
-    final oldItems = List<NearbyItem>.from(provider.items);
     await provider.fetchNearby();
     if (!mounted) return;
     final newItems = provider.items
-        .where((i) => !oldItems.any((o) => o.id == i.id && o.source == i.source))
+        .where((i) => _seenItemKeys.add('${i.source}:${i.id}'))
         .toList();
     if (newItems.isNotEmpty) {
       _showNewItemAlert(newItems.first);

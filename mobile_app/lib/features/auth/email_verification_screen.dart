@@ -22,7 +22,16 @@ class _EmailVerificationScreenState extends State<EmailVerificationScreen> {
     super.initState();
     _otpControllers = List.generate(_otpLength, (i) => TextEditingController());
     _firstFocusNode = FocusNode();
-    WidgetsBinding.instance.addPostFrameCallback((_) => FocusScope.of(context).requestFocus(_firstFocusNode));
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      // Dev bridge: prefill OTP returned by the backend when no mail server is configured
+      final otp = context.read<AuthProvider>().lastOtp;
+      if (otp != null && otp.length == _otpLength) {
+        for (var i = 0; i < _otpLength; i++) {
+          _otpControllers[i].text = otp[i];
+        }
+      }
+      if (mounted) FocusScope.of(context).requestFocus(_firstFocusNode);
+    });
   }
 
   @override
@@ -47,7 +56,7 @@ class _EmailVerificationScreenState extends State<EmailVerificationScreen> {
     if (otp.length != _otpLength) { ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Please enter complete OTP'))); return; }
     final provider = context.read<AuthProvider>();
     final success = await provider.verifyEmail(otp);
-    if (success && mounted) Navigator.of(context).pushReplacementNamed('/profile-setup');
+    if (success && mounted) Navigator.of(context).pushReplacementNamed('/profile-completion');
   }
 
   Future<void> _handleResendOTP() async {

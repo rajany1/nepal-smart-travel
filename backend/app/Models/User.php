@@ -83,7 +83,14 @@ class User extends Authenticatable
 
     public function isPremium(): bool
     {
-        return $this->subscription?->isActive() ?? false;
+        $sub = $this->subscription;
+        if (!$sub || !$sub->isActive()) return false;
+
+        // The auto-assigned free plan is not premium
+        $slug = $sub->plan?->slug;
+        if ($slug === 'free' || $slug === null) return false;
+
+        return true;
     }
 
     public function achievements(): \Illuminate\Database\Eloquent\Relations\BelongsToMany
@@ -130,6 +137,8 @@ class User extends Authenticatable
         'uuid',
         'avatar',
         'bio',
+        'gender',
+        'interest',
         'total_xp',
         'current_level',
         'verification_tick',

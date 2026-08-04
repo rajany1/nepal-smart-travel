@@ -10,6 +10,7 @@ use App\Models\GameSetting;
 use App\Services\AchievementService;
 use App\Services\PushNotificationService;
 use App\Services\TranslationService;
+use Illuminate\Support\Facades\Log;
 
 class AlertController extends Controller
 {
@@ -104,7 +105,8 @@ class AlertController extends Controller
             'created_at' => $a->created_at,
         ]);
 
-        $emergencyReports = Report::whereIn('status', ['approved', 'pending'])
+        // BE-23: only approved reports may surface as emergency alerts
+        $emergencyReports = Report::where('status', 'approved')
             ->whereIn('priority', ['high', 'critical'])
             ->whereBetween('latitude', [$lat - $latDelta, $lat + $latDelta])
             ->whereBetween('longitude', [$lng - $lngDelta, $lng + $lngDelta])
@@ -187,14 +189,18 @@ class AlertController extends Controller
         );
 
         if ($alert->latitude && $alert->longitude) {
-            PushNotificationService::notifyNearbyUsers(
-                title: $alert->title,
-                message: $alert->description,
-                latitude: (float) $alert->latitude,
-                longitude: (float) $alert->longitude,
-                radiusKm: 20,
-                data: ['type' => 'alert', 'id' => $alert->id],
-            );
+            try {
+                PushNotificationService::notifyNearbyUsers(
+                    title: $alert->title,
+                    message: $alert->description,
+                    latitude: (float) $alert->latitude,
+                    longitude: (float) $alert->longitude,
+                    radiusKm: 20,
+                    data: ['type' => 'alert', 'id' => $alert->id],
+                );
+            } catch (\Throwable $e) {
+                Log::warning('Alert push notification failed: ' . $e->getMessage());
+            }
         }
 
         return response()->json([

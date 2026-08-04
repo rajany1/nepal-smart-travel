@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../../core/api/api_client.dart';
 import '../places/nearby_places_screen.dart';
 import '../store/store_screen.dart';
@@ -50,6 +51,30 @@ class _SponsorsScreenState extends State<SponsorsScreen> {
     );
   }
 
+  Future<void> _launchWebsite(String url) async {
+    var target = url.trim();
+    if (target.isEmpty) return;
+    if (!target.startsWith('http://') && !target.startsWith('https://')) {
+      target = 'https://$target';
+    }
+    final uri = Uri.tryParse(target);
+    if (uri == null || !uri.hasScheme) return;
+    try {
+      final launched = await launchUrl(uri, mode: LaunchMode.externalApplication);
+      if (!launched && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not open website')),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not open website')),
+        );
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -97,7 +122,7 @@ class _SponsorsScreenState extends State<SponsorsScreen> {
                     CircleAvatar(
                       radius: 30,
                       backgroundColor: Colors.purple.shade50,
-                      child: Text(s['name']?[0]?.toUpperCase() ?? '?', style: TextStyle(fontSize: 26, color: Colors.purple.shade700, fontWeight: FontWeight.bold)),
+                      child: Text((s['name'] as String? ?? '').isEmpty ? '?' : (s['name'] as String)[0].toUpperCase(), style: TextStyle(fontSize: 26, color: Colors.purple.shade700, fontWeight: FontWeight.bold)),
                     ),
                     const SizedBox(width: 14),
                     Expanded(child: Text(s['name'] as String? ?? '', style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w600))),
@@ -112,7 +137,7 @@ class _SponsorsScreenState extends State<SponsorsScreen> {
                       ActionChip(
                         avatar: const Icon(Icons.language, size: 16),
                         label: const Text('Website'),
-                        onPressed: () {/* launch URL */},
+                        onPressed: () => _launchWebsite(s['website'] as String? ?? ''),
                       ),
                     if (hasLocation)
                       ActionChip(

@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+﻿import 'package:flutter/material.dart';
 import 'package:dio/dio.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import '../config/constants/app_constants.dart';
@@ -20,6 +20,7 @@ class AuthProvider extends ChangeNotifier {
   bool _isEmailVerified = false;
   bool _requiresProfileCompletion = false;
   DateTime? _lastProfileRefresh;
+  String? _lastOtp;
 
   UserModel? get user => _user;
   bool get isLoading => _isLoading;
@@ -28,14 +29,15 @@ class AuthProvider extends ChangeNotifier {
   String? get errorMessage => _errorMessage;
   bool get isEmailVerified => _isEmailVerified;
   bool get requiresProfileCompletion => _requiresProfileCompletion;
+  String? get lastOtp => _lastOtp;
   
-  // ✅ Profile completion check
+  // âœ… Profile completion check
   bool get isProfileCompletionRequired => _isAuthenticated && _user != null && !_user!.profileCompleted;
   
-  // ✅ User display name getter
+  // âœ… User display name getter
   String get userDisplayName => _user?.name ?? 'User';
   
-  // ✅ User level info getter
+  // âœ… User level info getter
   String get userLevelName => _user?.levelName ?? 'Explorer';
 
   bool canUseFeature(String featureName) {
@@ -61,7 +63,7 @@ class AuthProvider extends ChangeNotifier {
         if (user != null) {
           _user = user;
           _isAuthenticated = true;
-          _isEmailVerified = user.status == 'active';
+          _isEmailVerified = user.emailVerifiedAt != null;
           _requiresProfileCompletion = !user.profileCompleted;
           _errorMessage = null;
         }
@@ -70,7 +72,7 @@ class AuthProvider extends ChangeNotifier {
         _isAuthenticated = false;
       }
     } catch (e) {
-      print('❌ Auth initialization failed: $e');
+      print('âŒ Auth initialization failed: $e');
       _user = null;
       _isAuthenticated = false;
       _errorMessage = 'Failed to restore session';
@@ -99,10 +101,10 @@ class AuthProvider extends ChangeNotifier {
       }
 
       final response = await _api.getProfile();
-      // ✅ /users/me returns data at ROOT level, not nested in 'data'
+      // âœ… /users/me returns data at ROOT level, not nested in 'data'
       _user = UserModel.fromJson(response.data);
       _isAuthenticated = true;
-      _isEmailVerified = _user!.status == 'active';
+      _isEmailVerified = _user!.emailVerifiedAt != null;
       _requiresProfileCompletion = !_user!.profileCompleted;
       _lastProfileRefresh = DateTime.now();
       
@@ -114,10 +116,10 @@ class AuthProvider extends ChangeNotifier {
         _user = null;
         _isAuthenticated = false;
       } else {
-        print('⚠️ Transient error in auth check (keeping session): $e');
+        print('âš ï¸ Transient error in auth check (keeping session): $e');
       }
     } catch (e) {
-      print('⚠️ Transient error in auth check (keeping session): $e');
+      print('âš ï¸ Transient error in auth check (keeping session): $e');
     }
 
     _isLoading = false;
@@ -131,7 +133,7 @@ class AuthProvider extends ChangeNotifier {
     }
 
     try {
-      // ✅ Set token with expiration in session
+      // âœ… Set token with expiration in session
       await _session.setAccessToken(
         authResponse.accessToken!,
         expiresInSeconds: authResponse.expiresIn,
@@ -144,26 +146,26 @@ class AuthProvider extends ChangeNotifier {
       // Track login time
       await _session.setLastLogin();
 
-      // ✅ Always set authenticated if we have a valid token
+      // âœ… Always set authenticated if we have a valid token
       _isAuthenticated = true;
       
-      // ✅ Parse user data from auth response if available
+      // âœ… Parse user data from auth response if available
       if (authResponse.userData != null) {
         try {
           _user = UserModel.fromJson(authResponse.userData!);
-          _isEmailVerified = _user!.status == 'active';
+          _isEmailVerified = _user!.emailVerifiedAt != null;
           _requiresProfileCompletion = !_user!.profileCompleted;
           
           // Persist user data
           await _session.setUser(_user!);
         } catch (e) {
-          print('❌ Error parsing user data from auth response: $e');
+          print('âŒ Error parsing user data from auth response: $e');
           // Don't reset auth state - token is already valid
           // User data will be fetched in background
         }
       }
 
-      // ✅ Fetch profile in background (non-blocking)
+      // âœ… Fetch profile in background (non-blocking)
       if (fetchProfile && _user != null) {
         _fetchProfileAsync();
       }
@@ -171,7 +173,7 @@ class AuthProvider extends ChangeNotifier {
       _errorMessage = null;
       return true;
     } catch (e) {
-      print('❌ Error handling auth success: $e');
+      print('âŒ Error handling auth success: $e');
       _errorMessage = _parseError(e);
       return false;
     }
@@ -183,7 +185,7 @@ class AuthProvider extends ChangeNotifier {
       final profileResponse = await _api.getProfile();
       // /users/me returns data at root level
       _user = UserModel.fromJson(profileResponse.data);
-      _isEmailVerified = _user!.status == 'active';
+      _isEmailVerified = _user!.emailVerifiedAt != null;
       _requiresProfileCompletion = !_user!.profileCompleted;
       _lastProfileRefresh = DateTime.now();
       
@@ -191,7 +193,7 @@ class AuthProvider extends ChangeNotifier {
       await _session.setUser(_user!);
       notifyListeners();
     } catch (e) {
-      print('⚠️ Profile fetch failed (non-blocking): $e');
+      print('âš ï¸ Profile fetch failed (non-blocking): $e');
       // Don't set error - user is already authenticated
     }
   }
@@ -205,7 +207,7 @@ class AuthProvider extends ChangeNotifier {
       final response = await _api.login(email: email, password: password);
       final authResponse = AuthResponse.fromJson(response.data);
 
-      // ✅ Handle auth success (profile fetch is non-blocking)
+      // âœ… Handle auth success (profile fetch is non-blocking)
       final success = await _handleAuthSuccess(authResponse, fetchProfile: true);
 
       // Store login preference if rememberMe is enabled
@@ -213,17 +215,17 @@ class AuthProvider extends ChangeNotifier {
         await _session.setPreference('rememberEmail', email);
       }
 
-      // ✅ Ensure user data is available after login
+      // âœ… Ensure user data is available after login
       // If userData wasn't in the auth response, fetch profile synchronously
       if (success && _user == null && _isAuthenticated) {
         try {
           final profileResponse = await _api.getProfile();
           _user = UserModel.fromJson(profileResponse.data);
-          _isEmailVerified = _user!.status == 'active';
+          _isEmailVerified = _user!.emailVerifiedAt != null;
           _requiresProfileCompletion = !_user!.profileCompleted;
           await _session.setUser(_user!);
         } catch (e) {
-          print('⚠️ Post-login profile fetch failed: $e');
+          print('âš ï¸ Post-login profile fetch failed: $e');
           // User is still authenticated with valid token
         }
       }
@@ -233,7 +235,7 @@ class AuthProvider extends ChangeNotifier {
       return success;
     } catch (e) {
       _errorMessage = _parseError(e);
-      print('❌ Login error: $e');
+      print('âŒ Login error: $e');
       _isLoading = false;
       notifyListeners();
       return false;
@@ -277,11 +279,11 @@ class AuthProvider extends ChangeNotifier {
         try {
           final profileResponse = await _api.getProfile();
           _user = UserModel.fromJson(profileResponse.data);
-          _isEmailVerified = _user!.status == 'active';
+          _isEmailVerified = _user!.emailVerifiedAt != null;
           _requiresProfileCompletion = !_user!.profileCompleted;
           await _session.setUser(_user!);
         } catch (e) {
-          print('⚠️ Post-Google-login profile fetch failed: $e');
+          print('âš ï¸ Post-Google-login profile fetch failed: $e');
         }
       }
 
@@ -290,7 +292,7 @@ class AuthProvider extends ChangeNotifier {
       return success;
     } catch (e) {
       _errorMessage = _parseError(e);
-      print('❌ Google login error: $e');
+      print('âŒ Google login error: $e');
       _isLoading = false;
       notifyListeners();
       return false;
@@ -317,9 +319,12 @@ class AuthProvider extends ChangeNotifier {
         passwordConfirmation: passwordConfirmation,
       );
 
+      // Dev bridge: backend returns the OTP when no mail server is configured
+      _lastOtp = response.data['otp']?.toString();
+
       final authResponse = AuthResponse.fromJson(response.data);
 
-      // ✅ Don't block on profile fetch - register success is immediate
+      // âœ… Don't block on profile fetch - register success is immediate
       final success = await _handleAuthSuccess(authResponse, fetchProfile: true);
 
       _isLoading = false;
@@ -327,7 +332,7 @@ class AuthProvider extends ChangeNotifier {
       return success;
     } catch (e) {
       _errorMessage = _parseError(e);
-      print('❌ Registration error: $e');
+      print('âŒ Registration error: $e');
       _isLoading = false;
       notifyListeners();
       return false;
@@ -341,7 +346,7 @@ class AuthProvider extends ChangeNotifier {
       // Call logout API endpoint
       await _api.logout();
     } catch (e) {
-      print('⚠️ Logout API call failed: $e');
+      print('âš ï¸ Logout API call failed: $e');
       // Continue with local logout anyway
     }
     
@@ -357,6 +362,29 @@ class AuthProvider extends ChangeNotifier {
     _lastProfileRefresh = null;
     
     notifyListeners();
+  }
+
+  /// Permanently delete the account (backend anonymizes + revokes tokens),
+  /// then clears the local session.
+  Future<bool> deleteAccount() async {
+    _session.onSessionCleared = null;
+
+    try {
+      await _api.deleteAccount();
+    } catch (e) {
+      print('âŒ Delete account API call failed: $e');
+      return false;
+    }
+
+    await _session.clearSession();
+    _user = null;
+    _isAuthenticated = false;
+    _isEmailVerified = false;
+    _requiresProfileCompletion = false;
+    _errorMessage = null;
+    _lastProfileRefresh = null;
+    notifyListeners();
+    return true;
   }
 
   void _handleForceLogout() {
@@ -375,7 +403,7 @@ class AuthProvider extends ChangeNotifier {
 
     try {
       final response = await _api.updateProfile(data);
-      // ✅ Handle multiple response structures:
+      // âœ… Handle multiple response structures:
       // - AuthController@update returns: { success, message, user: {...} }
       // - ProfileController@update returns: { success, message, data: {...} }
       Map<String, dynamic> userData;
@@ -399,7 +427,7 @@ class AuthProvider extends ChangeNotifier {
       notifyListeners(); // Notify immediately after update
     } catch (e) {
       _errorMessage = _parseError(e);
-      print('❌ Profile update error: $e');
+      print('âŒ Profile update error: $e');
     }
 
     _isLoading = false;
@@ -411,7 +439,7 @@ class AuthProvider extends ChangeNotifier {
     try {
       final response = await _api.getProfile();
       _user = UserModel.fromJson(response.data);
-      _isEmailVerified = _user!.status == 'active';
+      _isEmailVerified = _user!.emailVerifiedAt != null;
       _requiresProfileCompletion = !_user!.profileCompleted;
       _lastProfileRefresh = DateTime.now();
       
@@ -419,7 +447,7 @@ class AuthProvider extends ChangeNotifier {
       await _session.setUser(_user!);
       notifyListeners();
     } catch (e) {
-      print('❌ Profile refresh failed: $e');
+      print('âŒ Profile refresh failed: $e');
       _errorMessage = _parseError(e);
       notifyListeners();
     }
@@ -461,6 +489,7 @@ class AuthProvider extends ChangeNotifier {
     try {
       final response = await _api.resendVerificationEmail(email);
       if (response.data['success'] ?? false) {
+        _lastOtp = response.data['otp']?.toString();
         _isLoading = false;
         notifyListeners();
         return true;
@@ -533,7 +562,7 @@ class AuthProvider extends ChangeNotifier {
   }
 
   String _parseError(dynamic error) {
-    print('🔍 Parsing error: $error');
+    print('ðŸ” Parsing error: $error');
 
     if (error is DioException) {
       final statusCode = error.response?.statusCode;
@@ -544,10 +573,10 @@ class AuthProvider extends ChangeNotifier {
         final reason = responseData['reason'] as String?;
         if (statusCode == 403) {
           if (reason == 'banned') {
-            return '🚫 Account Banned\n\n$serverMsg';
+            return 'ðŸš« Account Banned\n\n$serverMsg';
           }
           if (reason == 'suspended') {
-            return '⏸️ Account Suspended\n\n$serverMsg';
+            return 'â¸ï¸ Account Suspended\n\n$serverMsg';
           }
           return serverMsg;
         }

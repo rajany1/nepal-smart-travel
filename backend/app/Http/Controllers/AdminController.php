@@ -16,6 +16,7 @@ use App\Services\AchievementService;
 use App\Services\PushNotificationService;
 use App\Services\ModeratorService;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 use Carbon\Carbon;
 use App\Models\GameSetting;
@@ -245,6 +246,7 @@ class AdminController extends Controller
                 'report_approval_xp' => GameSetting::getValue('report_approval_xp', 10),
                 'alert_post_xp' => GameSetting::getValue('alert_post_xp', 5),
                 'review_xp' => GameSetting::getValue('review_xp', 3),
+                'place_submit_xp' => GameSetting::getValue('place_submit_xp', 1),
             ],
             'recent_reports' => Report::with('user', 'category')->latest()->take(5)->get(),
             'recent_users' => User::latest()->take(5)->get(),
@@ -364,6 +366,16 @@ class AdminController extends Controller
         $this->requireAdmin($request);
         $query = Place::with('images', 'category');
 
+        // Status filter (pending = not verified and not active)
+        $status = $request->input('status', 'all');
+        if ($status === 'pending') {
+            $query->where('is_verified', false)->where('is_active', false);
+        } elseif ($status === 'active') {
+            $query->where('is_active', true);
+        } elseif ($status === 'inactive') {
+            $query->where('is_active', false);
+        }
+
         // Category filter
         $categoryId = $request->input('category_id', 'all');
         if ($categoryId !== 'all') {
@@ -398,7 +410,7 @@ class AdminController extends Controller
 
         $places = $query->paginate(15)->withQueryString();
         $categories = PlaceCategories::all();
-        return view('admin.places', compact('places', 'categories', 'categoryId', 'search', 'sort', 'direction'));
+        return view('admin.places', compact('places', 'categories', 'categoryId', 'search', 'sort', 'direction', 'status'));
     }
 
     /**
@@ -553,6 +565,10 @@ class AdminController extends Controller
         $this->requirePermission('approve_reports');
 
         $report = Report::findOrFail($id);
+        if ($report->status === 'approved') {
+            return back()->with('info', 'Report is already approved');
+        }
+
         $report->update([
             'status' => 'approved',
             'verified_by' => Auth::id(),
@@ -584,6 +600,7 @@ class AdminController extends Controller
                     data: ['type' => 'report', 'id' => $report->id],
                 );
             } catch (\Throwable $e) {
+                Log::warning('Report approval push notification failed: ' . $e->getMessage());
             }
         }
 
@@ -598,11 +615,19 @@ class AdminController extends Controller
         $this->requirePermission('approve_reports');
 
         $report = Report::findOrFail($id);
+        if ($report->status === 'rejected') {
+            return back()->with('info', 'Report is already rejected');
+        }
+
         $report->update(['status' => 'rejected']);
 
         ModerationQueue::where('content_type', 'report')
             ->where('content_id', $report->id)
             ->update(['status' => 'rejected', 'reviewed_by' => Auth::id(), 'reviewed_at' => now()]);
+
+        if ($report->user) {
+            $report->user->increment('rejected_reports');
+        }
 
         $this->logAction('report.rejected', 'report', $report->id, "Rejected report #{$report->id}: {$report->title}");
 
@@ -822,6 +847,63 @@ class AdminController extends Controller
         return back()->with('success', "Place {$status}");
     }
 
+    public function approvePlace(Request $request, $id)
+    {
+        $this->requireAdmin($request);
+        $this->requirePermission('manage_places');
+
+        $place = Place::findOrFail($id);
+        $place->update(['is_verified' => true, 'is_active' => true]);
+
+        // Award XP only for user-submitted places
+        if ($place->created_by && $place->source === 'user_submitted') {
+            $xpAmount = GameSetting::getValue('place_submit_xp', 1);
+            $user = \App\Models\User::find($place->created_by);
+            if ($user) {
+                app(AchievementService::class)->awardXp(
+                    $user,
+                    $xpAmount,
+                    'place_approved',
+                    'Place approved: ' . $place->name,
+                    $place
+                );
+            }
+        }
+
+        $this->logAction('place.approved', 'place', $place->id, "Approved place #{$place->id}: {$place->name}");
+
+        return back()->with('success', 'Place approved and published.');
+    }
+
+    public function rejectPlace(Request $request, $id)
+    {
+        $this->requireAdmin($request);
+        $this->requirePermission('manage_places');
+
+        $place = Place::findOrFail($id);
+
+        // Mark moderation queue entry as rejected
+        \App\Models\ModerationQueue::updateOrCreate(
+            [
+                'content_type' => 'place',
+                'content_id' => $place->id,
+            ],
+            [
+                'submitted_by' => $place->created_by,
+                'status' => 'rejected',
+                'reviewed_by' => $request->user()?->id,
+                'reviewed_at' => now(),
+                'rejection_reason' => $request->input('reason', ''),
+            ]
+        );
+
+        $place->delete();
+
+        $this->logAction('place.rejected', 'place', $place->id, "Rejected and deleted place #{$place->id}: {$place->name}");
+
+        return back()->with('success', 'Place rejected and removed.');
+    }
+
     public function createAlert(Request $request)
     {
         $this->requireAdmin($request);
@@ -854,6 +936,7 @@ class AdminController extends Controller
             'report_approval_xp' => GameSetting::getValue('report_approval_xp', 10),
             'alert_post_xp' => GameSetting::getValue('alert_post_xp', 5),
             'review_xp' => GameSetting::getValue('review_xp', 3),
+            'place_submit_xp' => GameSetting::getValue('place_submit_xp', 1),
         ];
 
         return view('admin.settings', compact('settings'));
@@ -870,11 +953,13 @@ class AdminController extends Controller
             'report_approval_xp' => 'required|integer|min:0|max:1000',
             'alert_post_xp' => 'required|integer|min:0|max:1000',
             'review_xp' => 'required|integer|min:0|max:1000',
+            'place_submit_xp' => 'required|integer|min:0|max:1000',
         ]);
 
         GameSetting::setValue('report_approval_xp', $validated['report_approval_xp']);
         GameSetting::setValue('alert_post_xp', $validated['alert_post_xp']);
         GameSetting::setValue('review_xp', $validated['review_xp']);
+        GameSetting::setValue('place_submit_xp', $validated['place_submit_xp']);
 
         $this->logAction('settings.updated', 'settings', null, 'Updated XP rates');
 
@@ -1130,7 +1215,10 @@ class AdminController extends Controller
                 ];
             });
 
-        $alerts = Alert::where('expires_at', '>=', now())
+        // BE-25: permanent alerts (expires_at NULL) must appear on the live map too
+        $alerts = Alert::where(function ($q) {
+            $q->whereNull('expires_at')->orWhere('expires_at', '>', now());
+        })
             ->whereNotNull('latitude')
             ->whereNotNull('longitude')
             ->get()

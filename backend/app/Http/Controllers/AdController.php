@@ -42,9 +42,30 @@ class AdController extends Controller
 
         $campaign = AdCampaign::findOrFail($request->ad_campaign_id);
 
+        // BE-12: reject inactive/expired/budget-exhausted campaigns
+        if ($campaign->status !== 'active'
+            || ($campaign->starts_at && $campaign->starts_at > now())
+            || ($campaign->ends_at && $campaign->ends_at <= now())
+            || !$campaign->hasBudget()
+        ) {
+            return response()->json(['success' => false, 'error' => 'Campaign is not active'], 422);
+        }
+
+        $userId = Auth::id();
+
+        // BE-12: dedupe — one impression per user per campaign per 10 minutes
+        $recent = AdImpression::where('ad_campaign_id', $campaign->id)
+            ->when($userId, fn($q) => $q->where('user_id', $userId))
+            ->where('viewed_at', '>=', now()->subMinutes(10))
+            ->exists();
+
+        if ($recent) {
+            return response()->json(['success' => false, 'error' => 'Impression already recorded'], 422);
+        }
+
         AdImpression::create([
             'ad_campaign_id' => $campaign->id,
-            'user_id' => Auth::id(),
+            'user_id' => $userId,
             'ip_address' => $request->ip(),
             'user_agent' => $request->userAgent(),
             'viewed_at' => now(),

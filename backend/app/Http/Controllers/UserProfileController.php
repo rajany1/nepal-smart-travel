@@ -60,7 +60,7 @@ class UserProfileController extends Controller
                 'avatar_url' => $user->avatar,
                 'bio' => $user->bio,
                 'role' => $user->roleName ?? 'user',
-                'verification_tick' => $user->verification_tick ?? 'none',
+                'verification_tick' => ($user->verification_tick && $user->verification_tick !== 'none') ? $user->verification_tick : 'gray',
                 'member_since_days' => $user->created_at ? $user->created_at->diffInDays(now()) : 0,
 
                 'total_xp' => (int) ($user->total_xp ?? 0),

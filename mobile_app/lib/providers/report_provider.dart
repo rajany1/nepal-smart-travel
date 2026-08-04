@@ -14,10 +14,12 @@ class ReportProvider extends ChangeNotifier {
   // State for reports list
   List<ReportModel> _reports = [];
   List<ReportModel> _myReports = [];
+  List<ReportModel> _emergencyReports = [];
   List<ReportCategory> _categories = [];
   ReportFormConfig? _formConfig;
   bool _isLoading = false;
   bool _isLoadingMore = false;
+  bool _isLoadingMoreEmergency = false;
   String? _errorMessage;
   String? _submissionErrorMessage;
   String _activeTab = 'recent';
@@ -26,26 +28,36 @@ class ReportProvider extends ChangeNotifier {
   // Pagination
   int _currentOffset = 0;
   bool _hasMore = true;
+  int _emergencyOffset = 0;
+  bool _emergencyHasMore = true;
   static const int _pageSize = 10;
 
   // Auto-refresh
   Timer? _pollTimer;
   double? _lastLat;
   double? _lastLng;
+  String? _searchQuery;
   bool _isFetching = false;
 
   // Getters
   List<ReportModel> get reports => _reports;
   List<ReportModel> get myReports => _myReports;
+  List<ReportModel> get emergencyReports => _emergencyReports;
   List<ReportCategory> get categories => _categories;
   ReportFormConfig? get formConfig => _formConfig;
   bool get isLoading => _isLoading;
   bool get isLoadingMore => _isLoadingMore;
+  bool get isLoadingMoreEmergency => _isLoadingMoreEmergency;
   String? get errorMessage => _errorMessage;
   String? get submissionErrorMessage => _submissionErrorMessage;
   String get activeTab => _activeTab;
   int? get selectedCategoryId => _selectedCategoryId;
   bool get hasMore => _hasMore;
+  bool get emergencyHasMore => _emergencyHasMore;
+
+  /// Location of the most recent feed fetch (used to scope refresh calls)
+  double? get lastFetchLat => _lastLat;
+  double? get lastFetchLng => _lastLng;
 
   /// Get filtered reports for the current tab
   List<ReportModel> get filteredReports {
@@ -62,7 +74,7 @@ class ReportProvider extends ChangeNotifier {
   }
 
   int get totalCount => _reports.length;
-  int get emergencyCount => _reports.where((r) => r.isEmergency).length;
+  int get emergencyCount => _emergencyReports.length;
   int get myReportsCount => _myReports.length;
 
   // ============ Data Fetching ============
@@ -110,6 +122,7 @@ class ReportProvider extends ChangeNotifier {
     String? status,
     int? categoryId,
     String? district,
+    String? search,
     double? lat,
     double? lng,
     double? radiusKm,
@@ -119,6 +132,8 @@ class ReportProvider extends ChangeNotifier {
     // Prevent concurrent fetches (race condition guard)
     if (_isFetching) return;
     _isFetching = true;
+
+    if (search != null) _searchQuery = search;
 
     if (refresh) {
       _isLoading = true;
@@ -139,6 +154,7 @@ class ReportProvider extends ChangeNotifier {
         if (status != null) 'status': status,
         if (categoryId != null) 'category_id': categoryId,
         if (district != null) 'district': district,
+        if (search != null && search.isNotEmpty) 'search': search,
         if (lat != null) 'lat': lat,
         if (lng != null) 'lng': lng,
         if (radiusKm != null) 'radius_km': radiusKm,
@@ -187,9 +203,74 @@ class ReportProvider extends ChangeNotifier {
     _isLoadingMore = true;
     notifyListeners();
 
-    await fetchReports(refresh: false);
+    await fetchReports(refresh: false, search: _searchQuery);
 
     _isLoadingMore = false;
+    notifyListeners();
+  }
+
+  /// Fetch emergency (high/critical) reports with their own pagination
+  Future<void> fetchEmergencyReports({
+    double? lat,
+    double? lng,
+    double? radiusKm,
+    String? search,
+    bool refresh = true,
+  }) async {
+    if (refresh) {
+      _emergencyOffset = 0;
+      _emergencyHasMore = true;
+    }
+    try {
+      final response = await _api.dio.get('/reports', queryParameters: {
+        'limit': _pageSize,
+        'offset': _emergencyOffset,
+        'is_emergency': true,
+        if (search != null && search.isNotEmpty) 'search': search,
+        if (lat != null) 'lat': lat,
+        if (lng != null) 'lng': lng,
+        if (radiusKm != null) 'radius_km': radiusKm,
+      });
+
+      final data = response.data['data'] as List? ?? [];
+      final meta = response.data['meta'] as Map<String, dynamic>? ?? {};
+      _emergencyHasMore = meta['has_more'] ?? false;
+
+      final newReports = data.map((j) => ReportModel.fromJson(j)).toList();
+
+      if (refresh) {
+        final seenIds = <String>{};
+        _emergencyReports = newReports.where((r) {
+          if (seenIds.contains(r.id)) return false;
+          seenIds.add(r.id);
+          return true;
+        }).toList();
+      } else {
+        final existingIds = _emergencyReports.map((r) => r.id).toSet();
+        for (final r in newReports) {
+          if (!existingIds.contains(r.id)) {
+            _emergencyReports.add(r);
+            existingIds.add(r.id);
+          }
+        }
+      }
+      _emergencyOffset = _emergencyReports.length;
+    } catch (e) {
+      print('❌ Failed to fetch emergency reports: $e');
+    }
+    notifyListeners();
+  }
+
+  /// Fetch the next page of emergency reports
+  Future<void> fetchMoreEmergencyReports() async {
+    if (_isLoadingMoreEmergency || !_emergencyHasMore) return;
+
+    _isLoadingMoreEmergency = true;
+    notifyListeners();
+
+    await fetchEmergencyReports(refresh: false);
+
+    _isLoadingMoreEmergency = false;
     notifyListeners();
   }
 
@@ -261,6 +342,10 @@ class ReportProvider extends ChangeNotifier {
         if (priority != null) 'priority': priority,
         'is_live_capture': true, // Layer 1: Only in-app camera accept
         'photo_captured_at': DateTime.now().toIso8601String(),
+        if (captureLatitude != null && captureLongitude != null) ...{
+          'capture_latitude': captureLatitude,
+          'capture_longitude': captureLongitude,
+        },
       };
 
       formData['image'] = await MultipartFile.fromFile(
@@ -336,9 +421,37 @@ class ReportProvider extends ChangeNotifier {
     _pollTimer?.cancel();
     _pollTimer = Timer.periodic(const Duration(seconds: 60), (_) async {
       if (_isFetching) return; // skip if a fetch is already in flight
-      await fetchReports(lat: _lastLat, lng: _lastLng, radiusKm: 20.0);
+      await _pollFetchReports();
+      await fetchEmergencyReports(lat: _lastLat, lng: _lastLng, radiusKm: 20.0, refresh: true);
       await fetchMyReports();
     });
+  }
+
+  /// Poll: fetch page 1 and merge with loaded pages instead of replacing them,
+  /// so items loaded via fetchMoreReports are not wiped on every poll.
+  Future<void> _pollFetchReports() async {
+    _isFetching = true;
+    try {
+      final response = await _api.dio.get('/reports', queryParameters: {
+        'limit': _pageSize,
+        'offset': 0,
+        if (_lastLat != null) 'lat': _lastLat,
+        if (_lastLng != null) 'lng': _lastLng,
+        'radius_km': 20.0,
+        if (_searchQuery != null && _searchQuery!.isNotEmpty)
+          'search': _searchQuery,
+      });
+      final data = response.data['data'] as List? ?? [];
+      final fresh = data.map((j) => ReportModel.fromJson(j)).toList();
+      final freshIds = fresh.map((r) => r.id).toSet();
+      final older = _reports.where((r) => !freshIds.contains(r.id)).toList();
+      _reports = [...fresh, ...older];
+      _currentOffset = _reports.length;
+      notifyListeners();
+    } catch (e) {
+      print('⚠️ Poll refresh failed: $e');
+    }
+    _isFetching = false;
   }
 
   /// Stop auto-refresh timer

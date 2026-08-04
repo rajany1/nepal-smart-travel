@@ -41,7 +41,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
           _pushNotifications = settings['push_notifications'] ?? true;
           _selectedLanguage = settings['language'] == 'ne' ? 'नेपाली' :
                               settings['language'] == 'hi' ? 'हिन्दी' : 'English';
-          _selectedTheme = settings['theme'] == 'dark' ? 'Dark' : 'Light';
+          _selectedTheme = settings['theme'] == 'dark' ? 'Dark' :
+                          settings['theme'] == 'system' ? 'System' : 'Light';
           _showOnMap = settings['show_on_map'] ?? true;
         });
       }
@@ -320,9 +321,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           TextButton(
             onPressed: () {
               Navigator.of(ctx).pop();
-              // Logout and delete
-              context.read<AuthProvider>().logout();
-              Navigator.of(context).pushReplacementNamed('/login');
+              _deleteAccount(context);
             },
             style: TextButton.styleFrom(foregroundColor: AppTheme.errorColor),
             child: const Text('Delete'),
@@ -330,5 +329,24 @@ class _SettingsScreenState extends State<SettingsScreen> {
         ],
       ),
     );
+  }
+
+  Future<void> _deleteAccount(BuildContext context) async {
+    final authProvider = context.read<AuthProvider>();
+    final messenger = ScaffoldMessenger.of(context);
+    final navigator = Navigator.of(context);
+
+    final deleted = await authProvider.deleteAccount();
+    if (deleted) {
+      messenger.showSnackBar(const SnackBar(content: Text('Your account has been deleted.')));
+      navigator.pushReplacementNamed('/login');
+    } else {
+      messenger.showSnackBar(
+        const SnackBar(
+          content: Text('Could not delete your account. Please try again.'),
+          backgroundColor: AppTheme.errorColor,
+        ),
+      );
+    }
   }
 }

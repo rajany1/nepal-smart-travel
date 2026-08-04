@@ -164,13 +164,20 @@ class TravelPartnerController extends Controller
         if (!empty($data['shop_code_id'])) {
             $shopCode = ShopCode::with('shopItem')->find($data['shop_code_id']);
             if ($shopCode && $shopCode->shopItem) {
+                if ($shopCode->booking_id || $shopCode->consumed_at) {
+                    return back()->with('error', 'Shop code is already applied or consumed.')
+                        ->withInput();
+                }
                 $item = $shopCode->shopItem;
-                if ($item->discount_type === 'fixed') {
-                    $discount = (float)$item->discount_value;
-                } elseif ($item->discount_type === 'percentage') {
-                    $discount = $finalAmount * (float)$item->discount_value / 100;
-                } else {
-                    $discount = (float)$item->value_npr;
+                // BE-17: unify discount resolution with ShopService::applyToBooking
+                if ($item->discount_type && $item->discount_value) {
+                    if ($item->discount_type === 'percentage') {
+                        $discount = $finalAmount * (float)$item->discount_value / 100;
+                    } elseif ($item->discount_type === 'fixed') {
+                        $discount = (float)$item->discount_value;
+                    } else {
+                        $discount = (float)$item->value_npr;
+                    }
                 }
             }
         }

@@ -12,9 +12,20 @@ use Illuminate\Support\Facades\Password;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Auth\Events\PasswordReset;
 use Illuminate\Support\Str;
+use Laravel\Sanctum\PersonalAccessToken;
 
 class AuthController extends Controller
 {
+    /**
+     * Issue an access token + a long-lived refresh token pair.
+     */
+    private function issueTokenPair(User $user): array
+    {
+        return [
+            'access_token' => $user->createToken('app')->plainTextToken,
+            'refresh_token' => $user->createToken('refresh', ['*'], now()->addDays(30))->plainTextToken,
+        ];
+    }
     // REGISTER
     public function register(Request $request)
     {
@@ -39,13 +50,17 @@ class AuthController extends Controller
 
         $user = User::create($data);
 
-        $token = $user->createToken('app')->plainTextToken;
+        $tokens = $this->issueTokenPair($user);
+
+        $otp = $this->sendVerificationOtp($user);
 
         return response()->json([
             'success' => true,
             'message' => 'User registered successfully',
-            'access_token' => $token,
-            'data' => $user
+            ...$tokens,
+            'data' => $user,
+            // Dev bridge: lets the app continue to the OTP screen without a mail server.
+            'otp' => $otp,
         ]);
     }
 
@@ -84,11 +99,11 @@ class AuthController extends Controller
             ], 403);
         }
 
-        $token = $user->createToken('app')->plainTextToken;
+        $tokens = $this->issueTokenPair($user);
 
         return response()->json([
             'success' => true,
-            'access_token' => $token,
+            ...$tokens,
             'data' => $user
         ]);
     }
@@ -116,6 +131,7 @@ class AuthController extends Controller
             'role_display' => $user->role?->display_name ?? 'User',
             'permissions' => $user->role?->permissions->pluck('name') ?? [],
             'status' => $user->status ?? 'active',
+            'email_verified_at' => $user->email_verified_at,
             'profile_completed' => (bool)($user->profile_completed ?? false),
             'total_xp' => (int)($user->total_xp ?? 0),
             'current_level' => (int)($user->current_level ?? 1),
@@ -135,14 +151,58 @@ class AuthController extends Controller
             'avatar' => 'nullable|string',
             'gender' => 'nullable|string',
             'interest' => 'nullable|string',
+            'expertise_regions' => 'nullable|array',
+            'expertise_regions.*' => 'string',
         ]);
 
         $user->update($validated);
+
+        // If the user was still profile-incomplete, a completed bio unlocks them
+        if (!($user->profile_completed ?? false)
+            && !empty($validated['bio'])
+            && mb_strlen($validated['bio']) >= 10) {
+            $user->update(['profile_completed' => true]);
+        }
 
         return response()->json([
             'success' => true,
             'message' => 'Profile updated successfully',
             'user' => $user->fresh()
+        ]);
+    }
+
+    // DELETE ACCOUNT (anonymize + revoke + purge cascading data)
+    public function destroy(Request $request)
+    {
+        $user = $request->user();
+
+        // Purge per-user data that would otherwise remain
+        $user->socialAccounts()->delete();
+        $user->pushTokens()->delete();
+        $user->xpTransactions()->delete();
+        $user->achievements()->detach();
+        $user->subscription()->delete();
+        $user->purchases()->delete();
+
+        $user->tokens()->delete();
+
+        // Anonymize the account so reports/comments/reviews keep valid refs
+        $user->update([
+            'name' => 'Deleted User',
+            'email' => 'deleted_' . $user->id . '@deleted.local',
+            'phone' => null,
+            'avatar' => null,
+            'bio' => null,
+            'gender' => null,
+            'interest' => null,
+            'password' => null,
+            'profile_completed' => false,
+            'status' => 'deleted',
+        ]);
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Your account has been deleted.',
         ]);
     }
 
@@ -236,12 +296,12 @@ class AuthController extends Controller
                 ], 403);
             }
 
-            $token = $user->createToken('app')->plainTextToken;
+            $tokens = $this->issueTokenPair($user);
 
             return response()->json([
                 'success' => true,
                 'message' => 'Logged in with Google successfully',
-                'access_token' => $token,
+                ...$tokens,
                 'data' => $user,
             ]);
         } catch (\Exception $e) {
@@ -362,6 +422,9 @@ class AuthController extends Controller
         return response()->json([
             'success' => true,
             'message' => 'Password reset link sent to your email.',
+            // Returned so the app can continue to the reset screen directly.
+            // In production, ship this via deep link/email code instead.
+            'reset_token' => $token,
         ]);
     }
 
@@ -397,13 +460,47 @@ class AuthController extends Controller
 
     public function refreshToken(Request $request)
     {
-        $user = $request->user();
-        $user->tokens()->delete();
-        $token = $user->createToken('app')->plainTextToken;
+        $plain = $request->input('refresh_token') ?? $request->bearerToken();
+        if (!$plain) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Refresh token is required.',
+            ], 401);
+        }
+
+        $token = PersonalAccessToken::findToken($plain);
+        if (!$token || $token->name !== 'refresh') {
+            return response()->json([
+                'success' => false,
+                'message' => 'Invalid refresh token.',
+            ], 401);
+        }
+
+        if ($token->expires_at && $token->expires_at->isPast()) {
+            $token->delete();
+            return response()->json([
+                'success' => false,
+                'message' => 'Refresh token expired. Please log in again.',
+            ], 401);
+        }
+
+        $user = $token->tokenable;
+        if (!$user || in_array($user->status, ['banned', 'suspended'])) {
+            $token->delete();
+            return response()->json([
+                'success' => false,
+                'message' => 'Account is not active.',
+                'code' => $user?->status === 'banned' ? 'ACCOUNT_BANNED' : 'ACCOUNT_SUSPENDED',
+            ], 403);
+        }
+
+        // Rotate: revoke the used refresh token and issue a fresh pair
+        $token->delete();
+        $tokens = $this->issueTokenPair($user);
 
         return response()->json([
             'success' => true,
-            'access_token' => $token,
+            ...$tokens,
             'data' => $user,
         ]);
     }
@@ -450,16 +547,37 @@ class AuthController extends Controller
             ]);
         }
 
-        $otp = str_pad(random_int(0, 999999), 6, '0', STR_PAD_LEFT);
-        cache(['email_otp_' . $user->id => $otp], now()->addMinutes(10));
-
-        // TODO: Send OTP via email using Mail facade
-        // Mail::to($user->email)->send(new EmailVerificationOtp($otp));
+        $otp = $this->sendVerificationOtp($user);
 
         return response()->json([
             'success' => true,
             'message' => 'Verification code sent to your email.',
+            'otp' => $otp,
         ]);
+    }
+
+    /**
+     * Generate, cache and (best-effort) email a 6-digit verification OTP.
+     * Returns the OTP so clients can proceed without a mail server in dev.
+     */
+    private function sendVerificationOtp($user): string
+    {
+        $otp = str_pad(random_int(0, 999999), 6, '0', STR_PAD_LEFT);
+        cache(['email_otp_' . $user->id => $otp], now()->addMinutes(10));
+
+        try {
+            \Illuminate\Support\Facades\Mail::raw(
+                "Your Nepal Smart Travel verification code is: {$otp}\n\nIt expires in 10 minutes.",
+                function ($message) use ($user) {
+                    $message->to($user->email)
+                        ->subject('Verify your email — Nepal Smart Travel');
+                }
+            );
+        } catch (\Throwable $e) {
+            \Illuminate\Support\Facades\Log::warning('OTP email send failed: ' . $e->getMessage());
+        }
+
+        return $otp;
     }
 
     private function getMissingProfileFields($user)

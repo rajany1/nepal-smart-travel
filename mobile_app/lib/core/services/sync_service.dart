@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
 import 'package:connectivity_plus/connectivity_plus.dart';
-import '../../config/constants/app_constants.dart';
 import '../api/api_client.dart';
 import 'offline_db_service.dart';
 
@@ -74,6 +73,11 @@ class SyncService {
     final operation = item['operation'] as String;
     final entityType = item['entity_type'] as String;
     final payloadStr = item['payload'] as String;
+    final mediaPaths = item['media_paths'] is String
+        ? (jsonDecode(item['media_paths'] as String) as List<dynamic>)
+            .map((e) => e.toString())
+            .toList()
+        : null;
 
     try {
       if (entityType == 'place' && operation == 'create') {
@@ -81,9 +85,17 @@ class SyncService {
         final payload = Map<String, dynamic>.from(
           decoded is Map ? (decoded['data'] ?? decoded) : {},
         );
-        // TODO: Implement actual API call for place creation
-        // await _api.createPlace(payload);
+        payload.removeWhere((k, v) => v == null);
+        if (payload['phone'] is String && (payload['phone'] as String).isEmpty) {
+          payload.remove('phone');
+        }
+        if (payload['website'] is String && (payload['website'] as String).isEmpty) {
+          payload.remove('website');
+        }
+        await _api.createPlace(payload, mediaPaths: mediaPaths);
         await _offlineDb.markSyncCompleted(id);
+      } else {
+        await _offlineDb.markSyncFailed(id, 'Unsupported sync operation: $entityType/$operation');
       }
     } catch (e) {
       await _offlineDb.markSyncFailed(id, e.toString());

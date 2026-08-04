@@ -153,7 +153,7 @@ class AchievementController extends Controller
         $xpHistory = $this->achievementService->getXpHistory($user, 30);
         $stats = $this->achievementService->getUserStats($user);
         $nextLevelXp = $this->achievementService->getNextLevelXp($user->current_level ?? 1);
-        $levelProgress = $nextLevelXp > 0 ? min($user->total_xp / $nextLevelXp, 1.0) : 1.0;
+        $levelProgress = $this->achievementService->getLevelProgress($user);
 
         return view('admin.user_progress', compact(
             'user', 'achievements', 'xpHistory', 'stats',

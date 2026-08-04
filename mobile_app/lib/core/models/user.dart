@@ -16,6 +16,7 @@ class UserModel {
   final int rank;
   final DateTime? lastContributionAt;
   final String status;
+  final DateTime? emailVerifiedAt;
   final String role;
   final String roleDisplay;
   final List<String> permissions;
@@ -31,7 +32,7 @@ class UserModel {
     this.bio,
     this.totalXp = 0,
     this.currentLevel = 1,
-    this.verificationTick = 'none',
+    this.verificationTick = 'gray',
     this.badges = const [],
     this.expertiseRegions = const [],
     this.totalReports = 0,
@@ -40,6 +41,7 @@ class UserModel {
     this.rank = 0,
     this.lastContributionAt,
     this.status = 'active',
+    this.emailVerifiedAt,
     this.role = 'user',
     this.roleDisplay = 'User',
     this.permissions = const [],
@@ -83,6 +85,9 @@ class UserModel {
           ? DateTime.parse(json['last_contribution_at'])
           : null,
       status: json['status'] ?? 'active',
+      emailVerifiedAt: json['email_verified_at'] != null
+          ? DateTime.tryParse(json['email_verified_at'].toString())
+          : null,
       role: json['role'] ?? 'user',
       roleDisplay: json['role_display'] as String? ?? 'User',
       permissions: json['permissions'] is List
@@ -117,6 +122,7 @@ class UserModel {
       'role_display': roleDisplay,
       'permissions': permissions,
       'status': status,
+      'email_verified_at': emailVerifiedAt?.toIso8601String(),
       'profile_completed': profileCompleted,
       'created_at': createdAt.toIso8601String(),
     };

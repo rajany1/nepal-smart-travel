@@ -29,7 +29,7 @@ import 'features/profile/settings_screen.dart';
 import 'features/profile/policies_screen.dart';
 
 import 'features/map/home_screen.dart';
-import 'features/places/nearby_places_screen.dart';
+import 'features/places/nearby_map_screen.dart';
 import 'features/reporting/reports_list_screen.dart';
 import 'features/emergency/emergency_screen.dart';
 import 'features/assistant/assistant_screen.dart';
@@ -45,6 +45,7 @@ import 'features/subscriptions/subscription_plans_screen.dart';
 import 'features/store/store_screen.dart';
 
 import 'services/push_notification_service.dart';
+import 'core/services/sync_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -54,21 +55,29 @@ void main() async {
     statusBarBrightness: Brightness.dark,
   ));
 
+  SyncService.instance.startMonitoring();
+
   final authProvider = AuthProvider();
   await authProvider.initializeAuth();
 
   final pushService = PushNotificationService();
   await pushService.initialize();
 
-  runApp(NepalSmartTravelApp(authProvider: authProvider));
+  // FL-32: give push taps a navigator so FCM deep links can open screens
+  final navigatorKey = GlobalKey<NavigatorState>();
+  pushService.setNavigatorKey(navigatorKey);
+
+  runApp(NepalSmartTravelApp(authProvider: authProvider, navigatorKey: navigatorKey));
 }
 
 class NepalSmartTravelApp extends StatelessWidget {
   final AuthProvider authProvider;
+  final GlobalKey<NavigatorState> navigatorKey;
 
   const NepalSmartTravelApp({
     super.key,
     required this.authProvider,
+    required this.navigatorKey,
   });
 
   @override
@@ -90,6 +99,7 @@ class NepalSmartTravelApp extends StatelessWidget {
       ],
       child: MaterialApp(
         debugShowCheckedModeBanner: false,
+        navigatorKey: navigatorKey,
         title: AppConstants.appName,
         theme: AppTheme.lightTheme,
         darkTheme: AppTheme.darkTheme,
@@ -114,8 +124,8 @@ class NepalSmartTravelApp extends StatelessWidget {
                 settings: settings,
               );
             case '/profile-edit':
-            case '/profile-setup':
               return MaterialPageRoute(builder: (_) => const ProfileEditScreen(), settings: settings);
+            case '/profile-setup':
             case '/profile-completion':
               return MaterialPageRoute(builder: (_) => const ProfileCompletionScreen(), settings: settings);
             case '/settings':
@@ -125,7 +135,7 @@ class NepalSmartTravelApp extends StatelessWidget {
             case '/home':
               return MaterialPageRoute(builder: (_) => const HomeScreen(), settings: settings);
             case '/nearby-places':
-              return MaterialPageRoute(builder: (_) => const NearbyPlacesScreen(), settings: settings);
+              return MaterialPageRoute(builder: (_) => const NearbyMapScreen(), settings: settings);
             case '/reports':
               return MaterialPageRoute(builder: (_) => const ReportsListScreen(), settings: settings);
             case '/emergency':

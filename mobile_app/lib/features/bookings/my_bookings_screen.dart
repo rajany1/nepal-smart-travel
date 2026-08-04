@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+﻿import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../config/themes/app_theme.dart';
@@ -116,7 +116,7 @@ class _MyBookingsScreenState extends State<MyBookingsScreen> {
   }
 }
 
-// ── Status Filter Bar ──
+// â”€â”€ Status Filter Bar â”€â”€
 
 class _StatusFilterBar extends StatelessWidget {
   final BookingProvider provider;
@@ -167,7 +167,7 @@ class _StatusFilterBar extends StatelessWidget {
   }
 }
 
-// ── Booking Card ──
+// â”€â”€ Booking Card â”€â”€
 
 class _BookingCard extends StatelessWidget {
   final BookingModel booking;
@@ -207,7 +207,7 @@ class _BookingCard extends StatelessWidget {
                   radius: 16,
                   backgroundColor: booking.statusColor.withOpacity(0.12),
                   child: Text(
-                    (partner?.name ?? '?')[0].toUpperCase(),
+                    ((partner?.name ?? '').isEmpty ? '?' : partner!.name![0]).toUpperCase(),
                     style: TextStyle(
                       fontSize: 14,
                       fontWeight: FontWeight.bold,
@@ -367,7 +367,7 @@ class _BookingCard extends StatelessWidget {
   }
 }
 
-// ── Detail Bottom Sheet ──
+// â”€â”€ Detail Bottom Sheet â”€â”€
 
 class _BookingDetailSheet extends StatelessWidget {
   final BookingModel booking;
@@ -404,7 +404,7 @@ class _BookingDetailSheet extends StatelessWidget {
                   radius: 22,
                   backgroundColor: booking.statusColor.withOpacity(0.12),
                   child: Text(
-                    (partner?.name ?? '?')[0].toUpperCase(),
+                    ((partner?.name ?? '').isEmpty ? '?' : partner!.name![0]).toUpperCase(),
                     style: TextStyle(
                       fontSize: 20,
                       fontWeight: FontWeight.bold,
@@ -492,7 +492,7 @@ class _BookingDetailSheet extends StatelessWidget {
                     Icon(Icons.card_giftcard, size: 16, color: Colors.amber[700]),
                     const SizedBox(width: 6),
                     Text(
-                      'Coupon: ${booking.shopCode!.code ?? '—'}',
+                      'Coupon: ${booking.shopCode!.code ?? 'â€”'}',
                       style: TextStyle(
                         color: Colors.amber[700],
                         fontWeight: FontWeight.w500,
@@ -591,7 +591,7 @@ class _BookingDetailSheet extends StatelessWidget {
   }
 }
 
-// ── Status Timeline ──
+// â”€â”€ Status Timeline â”€â”€
 
 class _StatusTimeline extends StatelessWidget {
   final BookingModel booking;
@@ -735,7 +735,7 @@ class _TimelineStep {
   });
 }
 
-// ── Partner Picker Sheet ──
+// â”€â”€ Partner Picker Sheet â”€â”€
 
 class _PartnerPickerSheet extends StatelessWidget {
   final List<Map<String, dynamic>> partners;
@@ -797,7 +797,7 @@ class _PartnerPickerSheet extends StatelessWidget {
                   title: Text(name, style: const TextStyle(fontWeight: FontWeight.w600)),
                   subtitle: Text(
                     [if (type != null) type, if (district != null) district]
-                        .join(' · '),
+                        .join(' Â· '),
                     style: const TextStyle(fontSize: AppTheme.textSm),
                   ),
                   trailing: phone != null
@@ -814,7 +814,7 @@ class _PartnerPickerSheet extends StatelessWidget {
   }
 }
 
-// ── Empty State ──
+// â”€â”€ Empty State â”€â”€
 
 class _EmptyState extends StatelessWidget {
   final VoidCallback onBook;
@@ -856,7 +856,7 @@ class _EmptyState extends StatelessWidget {
   }
 }
 
-// ── Error State ──
+// â”€â”€ Error State â”€â”€
 
 class _ErrorState extends StatelessWidget {
   final String message;
@@ -898,7 +898,7 @@ class _ErrorState extends StatelessWidget {
   }
 }
 
-// ── Shimmer Loading ──
+// â”€â”€ Shimmer Loading â”€â”€
 
 class _BookingShimmer extends StatelessWidget {
   const _BookingShimmer();
@@ -948,10 +948,10 @@ class _BookingShimmer extends StatelessWidget {
   }
 }
 
-// ── Helpers ──
+// â”€â”€ Helpers â”€â”€
 
 String _formatDate(DateTime? dt) {
-  if (dt == null) return '—';
+  if (dt == null) return 'â€”';
   return '${dt.day}/${dt.month}/${dt.year}';
 }
 

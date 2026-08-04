@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\TravelPartner;
 use App\Models\Sponsor;
 use App\Models\Booking;
+use App\Models\CommissionTransaction;
 use App\Models\ShopCode;
 use App\Services\ShopService;
 use Illuminate\Http\Request;
@@ -63,9 +64,7 @@ class ConsumerController extends Controller
 
         $data['user_id'] = $user->id;
         $data['status'] = 'pending';
-        $commission = ($data['amount'] ?? 0) * ($partner->commission_rate / 100) + ($partner->commission_fixed ?? 0);
-        $data['commission_earned'] = $commission;
-        $data['reward_pool_share'] = $commission * 0.5;
+        $data['booked_at'] = $data['booked_at'] ?? now();
 
         $booking = Booking::create($data);
 
@@ -78,6 +77,24 @@ class ConsumerController extends Controller
                 return response()->json(['message' => $e->getMessage()], 422);
             }
         }
+
+        // Commission on post-discount amount, canonical split: 25% reward pool
+        $commission = ($booking->amount * $partner->commission_rate / 100) + ($partner->commission_fixed ?? 0);
+        $rewardShare = $commission * 0.25;
+        $platformShare = $commission - $rewardShare;
+
+        $booking->update([
+            'commission_earned' => $commission,
+            'reward_pool_share' => $rewardShare,
+        ]);
+
+        CommissionTransaction::create([
+            'booking_id' => $booking->id,
+            'total_commission' => $commission,
+            'reward_pool_contribution' => $rewardShare,
+            'platform_revenue' => $platformShare,
+            'status' => 'pending',
+        ]);
 
         return response()->json(['success' => true, 'data' => $booking->load('travelPartner', 'shopCode')], 201);
     }

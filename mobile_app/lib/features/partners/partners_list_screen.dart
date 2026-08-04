@@ -31,12 +31,17 @@ class _PartnersListScreenState extends State<PartnersListScreen> {
   Future<void> _load() async {
     setState(() { _loading = true; _error = null; });
     try {
-      final params = <String, dynamic>{};
-      if (_searchCtl.text.isNotEmpty) {
-        params['district'] = _searchCtl.text;
+      final res = await _api.getPartners(
+        district: _searchCtl.text.isNotEmpty ? _searchCtl.text : null,
+      );
+      final data = res.data['data'];
+      if (data is List) {
+        _partners = data;
+      } else if (data is Map && data['data'] is List) {
+        _partners = data['data'] as List<dynamic>;
+      } else {
+        _partners = [];
       }
-      final res = await _api.getPartners();
-      _partners = res.data['data'] as List<dynamic>;
     } catch (e) {
       _error = e.toString();
     }

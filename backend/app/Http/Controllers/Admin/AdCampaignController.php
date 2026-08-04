@@ -19,6 +19,14 @@ class AdCampaignController extends Controller
     {
         $user = Auth::user();
         if (!$user || !$user->isAdmin() && !$user->isModerator()) abort(403, 'Unauthorized');
+
+        $routeName = $request->route()?->getName();
+        if ($routeName) {
+            $routePerms = \App\Models\Permission::where('route_name', $routeName)->get();
+            if ($routePerms->isNotEmpty() && !$routePerms->contains(fn($p) => $user->hasPermission($p->name))) {
+                abort(403, 'You do not have permission for this page.');
+            }
+        }
     }
 
     public function index(Request $request)

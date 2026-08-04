@@ -28,6 +28,12 @@
                     @error('review_xp')<p class="text-sm text-red-600 mt-1">{{ $message }}</p>@enderror
                 </div>
 
+                <div>
+                    <label class="block text-sm font-medium text-slate-700">Place Submit XP</label>
+                    <input type="number" name="place_submit_xp" value="{{ old('place_submit_xp', $settings['place_submit_xp']) }}" min="0" max="1000" class="mt-1 block w-full rounded-xl border-slate-300 shadow-sm focus:ring-primary-500 focus:border-primary-500" />
+                    @error('place_submit_xp')<p class="text-sm text-red-600 mt-1">{{ $message }}</p>@enderror
+                </div>
+
                 <div class="flex justify-end gap-3">
                     <a href="{{ route('admin.dashboard') }}" class="inline-flex items-center px-4 py-2 border border-slate-300 text-sm font-medium rounded-xl text-slate-700 bg-white hover:bg-slate-50">Cancel</a>
                     <button type="submit" class="inline-flex items-center px-4 py-2 bg-primary-600 text-sm font-medium text-white rounded-xl hover:bg-primary-700">Save settings</button>

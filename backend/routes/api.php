@@ -25,10 +25,8 @@ Route::prefix('v1')->group(function () {
     Route::post('/auth/forgot-password', [AuthController::class, 'forgotPassword'])->middleware('throttle:3,60');
     Route::post('/auth/reset-password', [AuthController::class, 'resetPassword'])->middleware('throttle:3,60');
     Route::post('/auth/social-login', [AuthController::class, 'socialLogin']);
-
-    Route::middleware('auth:sanctum')->group(function () {
-        Route::post('/auth/refresh', [AuthController::class, 'refreshToken']);
-    });
+    // Token rotation - public: validates the refresh token itself (not the access token)
+    Route::post('/auth/refresh', [AuthController::class, 'refreshToken'])->middleware('throttle:10,1');
 
     // Public routes
     Route::get('/alerts', [AlertController::class, 'index']);
@@ -40,6 +38,7 @@ Route::prefix('v1')->group(function () {
     Route::get('/places/featured', [PlaceController::class, 'featured']);
     Route::get('/places/{id}', [PlaceController::class, 'show']);
     Route::get('/places/{id}/reviews', [PlaceController::class, 'reviews']);
+    Route::post('/places/osm-status', [PlaceController::class, 'osmStatus']);
     
     Route::get('/profile/field-options', [ProfileController::class, 'fieldOptions']);
     Route::get('/profile/field-definitions', [ProfileController::class, 'fieldDefinitions']);
@@ -84,6 +83,7 @@ Route::prefix('v1')->group(function () {
     Route::middleware(['auth:sanctum', 'status'])->group(function () {
         Route::get('/users/me', [AuthController::class, 'me']);
         Route::put('/users/me', [AuthController::class, 'update']);
+        Route::delete('/users/me', [AuthController::class, 'destroy']);
         Route::post('/auth/logout', [AuthController::class, 'logout']);
 
         Route::post('/auth/verify-email', [AuthController::class, 'verifyEmail']);
@@ -107,6 +107,7 @@ Route::prefix('v1')->group(function () {
         Route::get('/xp-history', [ApiAchievementController::class, 'xpHistory']);
 
         // ✅ Places - auth required for write operations
+        Route::post('/places', [PlaceController::class, 'store']);
         Route::post('/places/{id}/reviews', [PlaceController::class, 'addReview']);
 
         // ✅ Reports - auth required for write operations

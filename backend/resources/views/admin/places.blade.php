@@ -14,11 +14,14 @@
         </div>
         <div class="px-6 py-4 border-b border-gray-100 flex flex-wrap items-center justify-between gap-4">
             <div class="flex items-center gap-3">
-                <h3 class="font-semibold text-gray-800">All Places</h3>
+                <h3 class="font-semibold text-gray-800">
+                    @if($status === 'pending') Pending Approval @else All Places @endif
+                </h3>
                 <span class="text-xs text-gray-400">({{ $places->total() }})</span>
             </div>
             <div class="flex flex-wrap items-center gap-2">
                 <form method="GET" action="{{ route('admin.places') }}" class="flex items-center gap-2">
+                    <input type="hidden" name="status" value="{{ $status }}">
                     <input type="hidden" name="category_id" value="{{ $categoryId }}">
                     <input type="hidden" name="sort" value="{{ $sort }}">
                     <input type="hidden" name="direction" value="{{ $direction }}">
@@ -28,13 +31,16 @@
                     </div>
                     <button type="submit" class="px-3 py-1.5 text-sm bg-primary-600 text-white rounded-lg hover:bg-primary-700">Search</button>
                     @if($search)
-                    <a href="{{ route('admin.places', ['category_id' => $categoryId]) }}" class="px-3 py-1.5 text-sm bg-gray-100 text-gray-600 rounded-lg hover:bg-gray-200">Clear</a>
+                    <a href="{{ route('admin.places', ['status' => $status, 'category_id' => $categoryId]) }}" class="px-3 py-1.5 text-sm bg-gray-100 text-gray-600 rounded-lg hover:bg-gray-200">Clear</a>
                     @endif
                 </form>
                 <div class="w-px h-6 bg-gray-200 mx-1"></div>
-                <a href="{{ route('admin.places', array_merge(request()->query(), ['category_id' => 'all'])) }}" class="px-3 py-1.5 text-sm rounded-lg {{ $categoryId === 'all' ? 'bg-primary-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200' }}">All</a>
+                <a href="{{ route('admin.places', array_merge(request()->query(), ['status' => 'all', 'category_id' => 'all'])) }}" class="px-3 py-1.5 text-sm rounded-lg {{ $status === 'all' ? 'bg-primary-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200' }}">All</a>
+                <a href="{{ route('admin.places', array_merge(request()->query(), ['status' => 'pending', 'category_id' => 'all'])) }}" class="px-3 py-1.5 text-sm rounded-lg {{ $status === 'pending' ? 'bg-yellow-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200' }}">
+                    <i class="fas fa-clock mr-1"></i> Pending
+                </a>
                 @foreach($categories as $cat)
-                <a href="{{ route('admin.places', array_merge(request()->query(), ['category_id' => $cat->id])) }}" class="px-3 py-1.5 text-sm rounded-lg {{ $categoryId == $cat->id ? 'bg-primary-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200' }}">{{ $cat->name }}</a>
+                <a href="{{ route('admin.places', array_merge(request()->query(), ['status' => $status, 'category_id' => $cat->id])) }}" class="px-3 py-1.5 text-sm rounded-lg {{ $categoryId == $cat->id ? 'bg-primary-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200' }}">{{ $cat->name }}</a>
                 @endforeach
                 <button onclick="openCategoryModal()" class="px-3 py-1.5 text-sm bg-gray-100 text-gray-600 rounded-lg hover:bg-gray-200" title="Manage Categories">
                     <i class="fas fa-cog"></i>
@@ -81,6 +87,7 @@
                         <th class="text-left px-6 py-3 text-xs font-medium text-gray-500 uppercase">
                             <a href="{{ $sortUrl('is_featured') }}" class="flex items-center gap-1 hover:text-primary-600">Featured {!! $sortIcon('is_featured') !!}</a>
                         </th>
+                        <th class="text-left px-6 py-3 text-xs font-medium text-gray-500 uppercase">Status</th>
                         <th class="text-right px-6 py-3 text-xs font-medium text-gray-500 uppercase">Actions</th>
                     </tr>
                 </thead>
@@ -115,7 +122,32 @@
                                 <span class="text-xs bg-gray-100 text-gray-500 px-2 py-1 rounded">No</span>
                             @endif
                         </td>
+                        <td class="px-6 py-4">
+                            @if(!$place->is_active && !$place->is_verified)
+                                <span class="text-xs bg-yellow-100 text-yellow-700 px-2 py-1 rounded font-medium"><i class="fas fa-clock mr-1"></i> Pending</span>
+                            @elseif($place->is_verified)
+                                <span class="text-xs bg-green-100 text-green-700 px-2 py-1 rounded font-medium"><i class="fas fa-check-circle mr-1"></i> Verified</span>
+                            @elseif($place->is_active)
+                                <span class="text-xs bg-blue-100 text-blue-700 px-2 py-1 rounded font-medium"><i class="fas fa-eye mr-1"></i> Active</span>
+                            @else
+                                <span class="text-xs bg-gray-100 text-gray-500 px-2 py-1 rounded">{{ $place->source ?? 'admin' }}</span>
+                            @endif
+                        </td>
                         <td class="px-6 py-4 text-right flex gap-2 justify-end">
+                            @if(!$place->is_active && !$place->is_verified)
+                                <form method="POST" action="{{ route('admin.places.approve', $place->id) }}" class="inline">
+                                    @csrf
+                                    <button type="submit" class="px-3 py-1.5 text-xs font-medium bg-green-50 text-green-600 rounded-lg hover:bg-green-100 transition" title="Approve & Publish">
+                                        <i class="fas fa-check"></i>
+                                    </button>
+                                </form>
+                                <form method="POST" action="{{ route('admin.places.reject', $place->id) }}" class="inline" onsubmit="return confirm('Reject and delete this place?');">
+                                    @csrf
+                                    <button type="submit" class="px-3 py-1.5 text-xs font-medium bg-red-50 text-red-600 rounded-lg hover:bg-red-100 transition" title="Reject & Remove">
+                                        <i class="fas fa-times"></i>
+                                    </button>
+                                </form>
+                            @endif
                             <button type="button" onclick="openEditModal({{ $place->id }})" class="px-3 py-1.5 text-xs font-medium bg-primary-50 text-primary-600 rounded-lg hover:bg-primary-100 transition">
                                 <i class="fas fa-edit"></i>
                             </button>
@@ -135,7 +167,7 @@
                     </tr>
                     @empty
                     <tr>
-                        <td colspan="9" class="px-6 py-12 text-center text-gray-500">
+                        <td colspan="10" class="px-6 py-12 text-center text-gray-500">
                             <i class="fas fa-map-marker-alt text-3xl text-gray-300 mb-3 block"></i>
                             No places found
                         </td>

@@ -115,6 +115,40 @@ class ExifGpsVerificationService
     }
 
     /**
+     * Verify capture-time coordinates (sent by the app immediately after the
+     * in-app photo was taken) against the reported location. Used as a fallback
+     * when the image has no EXIF GPS data (image_picker strips it).
+     *
+     * @return array ['verified' => bool, 'photo_lat' => float|null, 'photo_lng' => float|null, 'distance_km' => float|null, 'message' => string]
+     */
+    public function verifyCaptureCoordinates(
+        float $captureLat,
+        float $captureLng,
+        float $reportLat,
+        float $reportLng
+    ): array {
+        $distance = $this->calculateDistance($reportLat, $reportLng, $captureLat, $captureLng);
+
+        if ($distance <= self::MAX_DISTANCE_KM) {
+            return [
+                'verified' => true,
+                'photo_lat' => round($captureLat, 7),
+                'photo_lng' => round($captureLng, 7),
+                'distance_km' => round($distance, 3),
+                'message' => 'Capture-location GPS verified within ' . self::MAX_DISTANCE_KM . 'km tolerance.',
+            ];
+        }
+
+        return [
+            'verified' => false,
+            'photo_lat' => round($captureLat, 7),
+            'photo_lng' => round($captureLng, 7),
+            'distance_km' => round($distance, 3),
+            'message' => "Capture location ({$captureLat}, {$captureLng}) is {$distance}km from your reported location. Max allowed: " . self::MAX_DISTANCE_KM . "km.",
+        ];
+    }
+
+    /**
      * Parse a GPS coordinate from EXIF format (degrees/minutes/seconds) to decimal.
      */
     private function extractGpsCoordinate(?array $coordinate, string $ref): ?float

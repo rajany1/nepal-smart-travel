@@ -66,6 +66,8 @@ Route::prefix('admin')->name('admin.')->middleware(['auth', 'status'])->group(fu
     Route::post('/places/{id}/update', [AdminController::class, 'updatePlace'])->name('places.update');
     Route::post('/places/{id}/delete', [AdminController::class, 'deletePlace'])->name('places.delete');
     Route::post('/places/{id}/feature', [AdminController::class, 'featurePlace'])->name('places.feature');
+    Route::post('/places/{id}/approve', [AdminController::class, 'approvePlace'])->name('places.approve');
+    Route::post('/places/{id}/reject', [AdminController::class, 'rejectPlace'])->name('places.reject');
     Route::post('/places/{id}/images/delete', [AdminController::class, 'deletePlaceImage'])->name('places.images.delete');
     Route::post('/places/import-osm', [AdminController::class, 'importOsmPlaces'])->name('places.import-osm');
     Route::match(['post', 'put', 'delete'], '/places/categories', [AdminController::class, 'manageCategories'])->name('places.categories');

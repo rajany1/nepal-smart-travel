@@ -24,20 +24,23 @@ class ProfileScreen extends StatefulWidget {
 class _ProfileScreenState extends State<ProfileScreen> {
   bool _initialLoadDone = false;
   bool _reportsLoaded = false;
+  late final ProfileProvider _profileProvider;
 
   @override
   void initState() {
     super.initState();
     _initialLoadDone = false;
+    _profileProvider = context.read<ProfileProvider>();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _loadProfileData();
-      context.read<ProfileProvider>().startAutoRefresh();
+      _profileProvider.startAutoRefresh();
     });
   }
 
   @override
   void dispose() {
-    context.read<ProfileProvider>().stopAutoRefresh();
+    // FL-28: provider captured in initState — no context.read inside dispose()
+    _profileProvider.stopAutoRefresh();
     super.dispose();
   }
 
@@ -393,7 +396,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 right: -4,
                 child: GestureDetector(
                   onTap: () {
-                    Navigator.of(context).pushNamed('/profile-setup');
+                    Navigator.of(context).pushNamed('/profile-edit');
                   },
                   child: Container(
                     padding: const EdgeInsets.all(6),
@@ -986,7 +989,9 @@ class _ProfileReportDetailsSheet extends StatelessWidget {
                   const Icon(Icons.location_on, size: 14, color: AppTheme.textSecondary),
                   const SizedBox(width: 4),
                   Text(
-                    '${report.latitude.toStringAsFixed(4)}, ${report.longitude.toStringAsFixed(4)}',
+                    report.latitude != null && report.longitude != null
+                        ? '${report.latitude!.toStringAsFixed(4)}, ${report.longitude!.toStringAsFixed(4)}'
+                        : 'No location data',
                     style: const TextStyle(fontSize: AppTheme.textSm, color: AppTheme.textSecondary),
                   ),
                 ],

@@ -74,7 +74,7 @@ class LeaderboardController extends Controller
                 case 'alerts':
                     $alertsCount = $currentUser->alerts()->count();
                     $userRank = DB::table('users')
-                        ->join('alerts', 'users.id', '=', 'alerts.user_id')
+                        ->join('alerts', 'users.id', '=', 'alerts.created_by')
                         ->select('users.id', DB::raw('COUNT(alerts.id) as alert_count'))
                         ->groupBy('users.id')
                         ->having('alert_count', '>', $alertsCount)
@@ -117,7 +117,7 @@ class LeaderboardController extends Controller
                 'total_alerts' => (int) ($user->alerts_count ?? 0),
                 'total_reviews' => (int) ($user->reviews_count ?? 0),
                 'badge_count' => (int) ($badgeCounts[$user->id] ?? 0),
-                'verification_tick' => $user->verification_tick ?? 'none',
+                'verification_tick' => ($user->verification_tick && $user->verification_tick !== 'none') ? $user->verification_tick : 'gray',
             ]),
             'meta' => [
                 'total' => $total,
@@ -152,7 +152,7 @@ class LeaderboardController extends Controller
                 'current_level' => (int) ($user->current_level ?? 1),
                 'level_name' => app(AchievementService::class)->getLevelName($user->current_level ?? 1),
                 'approved_reports' => (int) ($user->approved_reports ?? 0),
-                'verification_tick' => $user->verification_tick ?? 'none',
+                'verification_tick' => ($user->verification_tick && $user->verification_tick !== 'none') ? $user->verification_tick : 'gray',
             ]),
         ]);
     }

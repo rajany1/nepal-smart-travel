@@ -63,7 +63,14 @@ class _RegisterScreenState extends State<RegisterScreen> {
       passwordConfirmation: _confirmPasswordController.text,
     );
     if (success && mounted) {
-      Navigator.of(context).pushReplacementNamed('/profile-completion');
+      final email = _emailController.text.trim();
+      final providerAfter = context.read<AuthProvider>();
+      final needsVerification = providerAfter.user?.emailVerifiedAt == null;
+      if (needsVerification) {
+        Navigator.of(context).pushReplacementNamed('/email-verification', arguments: email);
+      } else {
+        Navigator.of(context).pushReplacementNamed('/profile-completion');
+      }
     }
   }
 

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import '../../../config/themes/app_theme.dart';
 import '../../../providers/store_provider.dart';
@@ -546,7 +547,7 @@ class StoreItemCard extends StatelessWidget {
                       const SizedBox(height: 8),
                       GestureDetector(
                         onTap: () {
-                          // Copy to clipboard would use Clipboard.setData
+                          Clipboard.setData(ClipboardData(text: purchase.code!));
                           ScaffoldMessenger.of(context).showSnackBar(
                             const SnackBar(content: Text('Code copied!'), duration: Duration(seconds: 1)),
                           );

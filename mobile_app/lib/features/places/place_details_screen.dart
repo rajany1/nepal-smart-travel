@@ -23,18 +23,19 @@ class _PlaceDetailsScreenState extends State<PlaceDetailsScreen> {
   final _reviewTitleController = TextEditingController();
   final _reviewDescController = TextEditingController();
   bool _isSubmittingReview = false;
+  late final PlaceDetailsProvider _detailsProvider;
 
   bool get _isOsm => widget.place.id.startsWith('osm_');
 
   @override
   void initState() {
     super.initState();
+    _detailsProvider = context.read<PlaceDetailsProvider>();
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      final provider = context.read<PlaceDetailsProvider>();
       if (!_isOsm) {
-        provider.fetchPlaceDetails(widget.place.id);
+        _detailsProvider.fetchPlaceDetails(widget.place.id);
       }
-      provider.fetchPlaceReviews(widget.place.id);
+      _detailsProvider.fetchPlaceReviews(widget.place.id);
     });
   }
 
@@ -42,7 +43,8 @@ class _PlaceDetailsScreenState extends State<PlaceDetailsScreen> {
   void dispose() {
     _reviewTitleController.dispose();
     _reviewDescController.dispose();
-    context.read<PlaceDetailsProvider>().clearDetails();
+    // FL-28: provider captured in initState — no context.read inside dispose()
+    _detailsProvider.clearDetails();
     super.dispose();
   }
 

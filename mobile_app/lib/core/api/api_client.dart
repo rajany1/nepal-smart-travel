@@ -101,6 +101,10 @@ class ApiClient {
     return _dio.post('/auth/logout');
   }
 
+  Future<Response> deleteAccount() async {
+    return _dio.delete('/users/me');
+  }
+
   Future<Response> verifyEmail(String otp) async {
     return _dio.post('/auth/verify-email', data: {'otp': otp});
   }
@@ -131,10 +135,6 @@ class ApiClient {
     return _dio.put('/users/me', data: data);
   }
 
-  Future<Response> getUserReputation(String userId) async {
-    return _dio.get('/users/$userId/reputation');
-  }
-
   Future<Response> getUserProfile(String userId) async {
     return _dio.get('/users/$userId/profile');
   }
@@ -151,17 +151,14 @@ class ApiClient {
     return _dio.get('/alerts', queryParameters: queryParams);
   }
 
-  Future<Response> getNearbyAlerts({required double lat, required double lng, double radiusKm = 20}) async {
-    return _dio.get('/alerts/nearby', queryParameters: {'lat': lat, 'lng': lng, 'radius_km': radiusKm});
-  }
-
-  Future<Response> createAlert(Map<String, dynamic> data) async {
-    return _dio.post('/alerts', data: data);
-  }
-
   // Push token endpoints
-  Future<Response> registerPushToken(String fcmToken, {String? deviceType}) async {
-    return _dio.post('/push-tokens', data: {'fcm_token': fcmToken, 'device_type': deviceType ?? 'android'});
+  Future<Response> registerPushToken(String fcmToken, {String? deviceType, double? latitude, double? longitude}) async {
+    return _dio.post('/push-tokens', data: {
+      'fcm_token': fcmToken,
+      'device_type': deviceType ?? 'android',
+      if (latitude != null) 'latitude': latitude,
+      if (longitude != null) 'longitude': longitude,
+    });
   }
 
   Future<Response> unsubscribePushToken(String fcmToken) async {
@@ -236,6 +233,21 @@ class ApiClient {
     });
   }
 
+  /// Submit a place (used by offline sync queue).
+  /// [mediaPaths] are local image files uploaded as multipart.
+  Future<Response> createPlace(
+    Map<String, dynamic> payload, {
+    List<String>? mediaPaths,
+  }) async {
+    final formData = FormData.fromMap({
+      ...payload,
+      if (mediaPaths != null)
+        for (final path in mediaPaths)
+          'images[]': await MultipartFile.fromFile(path),
+    });
+    return _dio.post('/places', data: formData);
+  }
+
   Future<Response> getPlaceDetails(String placeId) async {
     return _dio.get('/places/$placeId');
   }
@@ -283,6 +295,7 @@ class ApiClient {
     String? status,
     int? categoryId,
     String? district,
+    String? search,
     double? lat,
     double? lng,
     double? radiusKm,
@@ -297,6 +310,7 @@ class ApiClient {
     if (status != null) queryParams['status'] = status;
     if (categoryId != null) queryParams['category_id'] = categoryId;
     if (district != null) queryParams['district'] = district;
+    if (search != null) queryParams['search'] = search;
     if (lat != null) queryParams['lat'] = lat;
     if (lng != null) queryParams['lng'] = lng;
     if (radiusKm != null) queryParams['radius_km'] = radiusKm;
@@ -340,11 +354,6 @@ class ApiClient {
     if (lng != null) queryParams['lng'] = lng;
     if (radiusKm != null) queryParams['radius_km'] = radiusKm;
     return _dio.get('/road-conditions', queryParameters: queryParams);
-  }
-
-  // Weather grid
-  Future<Response> getWeatherGrid() async {
-    return _dio.get('/weather/grid');
   }
 
   // Store
@@ -522,12 +531,18 @@ class AuthInterceptor extends Interceptor {
       if (storedRefreshToken != null) {
         try {
           print('🔄 Attempting to refresh token...');
+          // Send the refresh token in the body so the request interceptor
+          // (which attaches the access token header) cannot clobber it.
           final response = await dio.post('/auth/refresh',
-            options: Options(headers: {'Authorization': 'Bearer $storedRefreshToken'}),
+            data: {'refresh_token': storedRefreshToken},
           );
           final newToken = response.data['access_token'];
+          final newRefreshToken = response.data['refresh_token'];
           if (newToken != null) {
             await session.setAccessToken(newToken);
+            if (newRefreshToken != null) {
+              await session.setRefreshToken(newRefreshToken);
+            }
             print('✅ Token refreshed successfully');
 
             final retryOptions = err.requestOptions;
@@ -544,8 +559,16 @@ class AuthInterceptor extends Interceptor {
     }
 
     if (err.response?.statusCode == 403) {
-      print('🚫 Account banned or suspended — clearing session');
-      await session.clearSession();
+      final data = err.response?.data;
+      final code = data is Map ? data['code'] : null;
+      final requiresLogout = data is Map && data['requires_logout'] == true;
+      final isAccountProblem = code == 'ACCOUNT_BANNED' || code == 'ACCOUNT_SUSPENDED';
+      if (isAccountProblem || requiresLogout) {
+        print('🚫 Account banned or suspended — clearing session');
+        await session.clearSession();
+      } else {
+        print('🚫 Access denied (not a session issue) — keeping session');
+      }
       handler.next(err);
       return;
     }

@@ -12,6 +12,8 @@ class PushTokenController extends Controller
         $validated = $request->validate([
             'fcm_token' => 'required|string|max:255',
             'device_type' => 'nullable|string|max:50',
+            'latitude' => 'nullable|numeric|between:-90,90',
+            'longitude' => 'nullable|numeric|between:-180,180',
         ]);
 
         $existing = PushToken::where('fcm_token', $validated['fcm_token'])->first();
@@ -24,6 +26,8 @@ class PushTokenController extends Controller
             [
                 'user_id' => $request->user()->id,
                 'device_type' => $validated['device_type'] ?? null,
+                'latitude' => $validated['latitude'] ?? null,
+                'longitude' => $validated['longitude'] ?? null,
                 'subscribed' => true,
             ]
         );

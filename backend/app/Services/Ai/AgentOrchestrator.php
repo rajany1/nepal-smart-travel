@@ -167,6 +167,7 @@ class AgentOrchestrator
             'review_moderator' => \App\Services\Ai\Handlers\ReviewModeratorHandler::class,
             'report_manager' => \App\Services\Ai\Handlers\ReportManagerHandler::class,
             'manager' => \App\Services\Ai\Handlers\ManagerAiHandler::class,
+            'customer_support' => \App\Services\Ai\Handlers\CustomerSupportHandler::class,
             default => null,
         };
     }

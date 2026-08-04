@@ -2,8 +2,10 @@
 
 namespace App\Jobs;
 
+use App\Models\GameSetting;
 use App\Models\ModerationQueue;
 use App\Models\Report;
+use App\Services\AchievementService;
 use App\Services\Ai\GroqService;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
@@ -30,12 +32,18 @@ class AnalyzeReport implements ShouldQueue
         $text = "Title: {$report->title}\nDescription: {$report->description}\nPriority: {$report->priority}\nDistrict: {$report->district}";
 
         $result = $groq->generateJson(
-            "Analyze this community report. Return JSON: suggested_priority (low/medium/high/critical), is_legitimate (bool), is_duplicate (bool), summary (max 2 sentences in English), action (approve/reject).\n\nIf is_duplicate → reject. If is_legitimate → approve.\n\n{$text}"
+            "Analyze this community report. Return JSON: suggested_priority (low/medium/high/critical), is_legitimate (bool — true if report is real and useful), is_duplicate (bool — true if same issue already reported), summary (max 2 sentences in English), action (approve/reject).\n\nIf is_duplicate is true, action must be reject. If is_legitimate is true, action must be approve.\n\n{$text}"
         );
 
         $action = $result['action'] ?? 'approve';
-        $now = now();
+        $isDuplicate = $result['is_duplicate'] ?? false;
+        $isLegitimate = $result['is_legitimate'] ?? true;
 
+        if ($isDuplicate || !$isLegitimate) {
+            $action = 'reject';
+        }
+
+        $now = now();
         $report->update([
             'ai_analysis' => $result,
             'ai_analyzed_at' => $now,
@@ -53,5 +61,18 @@ class AnalyzeReport implements ShouldQueue
                 'status' => $action === 'approve' ? 'approved' : 'rejected',
                 'reviewed_at' => $now,
             ]);
+
+        // Award XP + stats on AI approval, mirroring manual approval
+        if ($action === 'approve') {
+            $reporter = $report->user;
+            if ($reporter) {
+                $rewardXp = GameSetting::getValue('report_approval_xp', 10);
+                app(AchievementService::class)->awardXp(
+                    $reporter, $rewardXp, 'report_approved',
+                    "Report approved: {$report->title}", $report
+                );
+                $reporter->increment('approved_reports');
+            }
+        }
     }
 }
