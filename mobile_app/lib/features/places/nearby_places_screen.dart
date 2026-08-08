@@ -1,8 +1,10 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:google_maps_flutter/google_maps_flutter.dart';
+import 'package:flutter_map/flutter_map.dart';
+import 'package:latlong2/latlong.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:http/http.dart' as http;
 import 'package:url_launcher/url_launcher.dart';
@@ -52,24 +54,20 @@ class NearbyPlacesScreen extends StatefulWidget {
 
 class _NearbyPlacesScreenState extends State<NearbyPlacesScreen> {
   final LocationService _locationService = LocationService();
-  GoogleMapController? _mapController;
-  final Completer<GoogleMapController> _mapControllerCompleter = Completer();
+  final MapController _mapController = MapController();
   final DraggableScrollableController _sheetController = DraggableScrollableController();
   final TextEditingController _searchController = TextEditingController();
-
-  // Nepal bounding box for camera constraint
-  static const double _nepalMinLat = 26.347;
-  static const double _nepalMaxLat = 30.447;
-  static const double _nepalMinLng = 80.058;
-  static const double _nepalMaxLng = 88.201;
 
   double? _lat;
   double? _lng;
   double _searchRadiusKm = AppConstants.defaultRadiusKm;
   bool _isSatellite = false;
-  double _currentZoom = 14.0;
+  double _currentZoom = AppConstants.defaultMapZoom;
   PlaceModel? _selectedPlace;
   bool _isSearching = false;
+
+  // Compass rotation (degrees, clockwise positive)
+  final ValueNotifier<double> _rotationNotifier = ValueNotifier<double>(0);
 
   // Current location tracking
   LatLng? _currentLocation;
@@ -79,13 +77,12 @@ class _NearbyPlacesScreenState extends State<NearbyPlacesScreen> {
   List<Map<String, dynamic>> _routes = [];
   bool _isLoadingRoute = false;
   bool _showFeaturedOnly = false;
+  PlaceFilter? _activeFilter;
 
   // Destination (from sponsors/store)
   double? _destinationLat;
   double? _destinationLng;
   String? _destinationName;
-
-  
 
   @override
   void initState() {
@@ -99,8 +96,10 @@ class _NearbyPlacesScreenState extends State<NearbyPlacesScreen> {
   @override
   void dispose() {
     _positionSub?.cancel();
+    _rotationNotifier.dispose();
     _sheetController.dispose();
     _searchController.dispose();
+    _mapController.dispose();
     super.dispose();
   }
 
@@ -131,9 +130,7 @@ if (mounted && _lat != null && _lng != null) {
           await Future.delayed(const Duration(milliseconds: 200));
           if (mounted && _lat != null && _lng != null) {
             try {
-              _mapController?.animateCamera(
-                CameraUpdate.newLatLngZoom(LatLng(_lat!, _lng!), 14.0),
-              );
+              _mapController.move(LatLng(_lat!, _lng!), 14.0);
             } catch (e) {
               debugPrint('Failed to move map: $e');
             }
@@ -165,9 +162,7 @@ if (mounted && _lat != null && _lng != null) {
       _selectedPlace = place;
     });
     try {
-      _mapController?.animateCamera(
-        CameraUpdate.newLatLngZoom(LatLng(place.latitude, place.longitude), 15.0),
-      );
+      _mapController.move(LatLng(place.latitude, place.longitude), 15.0);
       _sheetController.animateTo(
         0.28,
         duration: const Duration(milliseconds: 350),
@@ -236,8 +231,8 @@ if (mounted && _lat != null && _lng != null) {
             setState(() => _routes = parsed);
             final allPoints = parsed.expand((r) => r['points'] as List<LatLng>).toList();
             final bounds = _latLngBoundsFromPoints(allPoints);
-            _mapController?.animateCamera(
-              CameraUpdate.newLatLngBounds(bounds, 60),
+            _mapController.fitCamera(
+              CameraFit.bounds(bounds: bounds, padding: const EdgeInsets.all(60)),
             );
           } else {
             _showRouteError('No valid routes found');
@@ -310,8 +305,8 @@ if (mounted && _lat != null && _lng != null) {
               ..add(LatLng(_destinationLat!, _destinationLng!))
               ..add(LatLng(originLat, originLng));
             final bounds = _latLngBoundsFromPoints(allPoints);
-            _mapController?.animateCamera(
-              CameraUpdate.newLatLngBounds(bounds, 80),
+            _mapController.fitCamera(
+              CameraFit.bounds(bounds: bounds, padding: const EdgeInsets.all(80)),
             );
           } else {
             _showRouteError('No valid routes found');
@@ -349,19 +344,116 @@ if (mounted && _lat != null && _lng != null) {
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
       builder: (context) => FilterPlacesSheet(
-        onApply: (_) {
+        initialFilter: _activeFilter,
+        onApply: (filters) {
+          setState(() => _activeFilter = filters);
           if (_lat != null && _lng != null) {
             final provider = context.read<PlaceProvider>();
             provider.fetchNearbyPlaces(
               lat: _lat!,
               lng: _lng!,
-              radiusKm: _searchRadiusKm,
-              search: _searchController.text.isNotEmpty ? _searchController.text : null,
+              radiusKm: filters.radiusKm ?? _searchRadiusKm,
+              categoryId: filters.categoryId,
+              search: _searchController.text.isNotEmpty
+                  ? _searchController.text
+                  : null,
             );
           }
         },
       ),
     );
+  }
+
+  List<PlaceModel> _applyPlaceFilters(List<PlaceModel> places) {
+    var result = places;
+    final f = _activeFilter;
+    final showFeatured = _showFeaturedOnly || (f?.onlyFeatured ?? false);
+    if (showFeatured) {
+      result = result.where((p) => p.isFeatured).toList();
+    }
+    if (f?.onlyVerified == true) {
+      result = result.where((p) => p.isVerified).toList();
+    }
+    return result;
+  }
+
+  Future<void> _onMyLocationTap() async {
+    final loc = _currentLocation;
+    if (loc != null) {
+      try {
+        _mapController.move(loc, 15.0);
+      } catch (e) {
+        debugPrint('Map move failed: $e');
+      }
+      return;
+    }
+    if (_lat != null && _lng != null) {
+      try {
+        _mapController.move(LatLng(_lat!, _lng!), 15.0);
+      } catch (e) {
+        debugPrint('Map move failed: $e');
+      }
+      return;
+    }
+    final fresh = await _locationService.getCurrentLocation();
+    if (!mounted) return;
+    if (fresh == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+              'Could not get your location. Please enable GPS and allow location permission, then try again.'),
+          backgroundColor: AppTheme.errorColor,
+          behavior: SnackBarBehavior.floating,
+          duration: Duration(seconds: 4),
+        ),
+      );
+      return;
+    }
+    setState(() {
+      _lat = fresh.latitude;
+      _lng = fresh.longitude;
+      _currentLocation = LatLng(fresh.latitude, fresh.longitude);
+    });
+    _startTracking();
+    try {
+      _mapController.move(
+        LatLng(fresh.latitude, fresh.longitude),
+        15.0,
+      );
+    } catch (e) {
+      debugPrint('Map move failed: $e');
+    }
+  }
+
+  Future<void> _retryLocation() async {
+    final loc = await _locationService.getCurrentLocation();
+    if (!mounted) return;
+    if (loc == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+              'Could not get your location. Please enable GPS and allow location permission, then try again.'),
+          backgroundColor: AppTheme.errorColor,
+          behavior: SnackBarBehavior.floating,
+          duration: Duration(seconds: 4),
+        ),
+      );
+      return;
+    }
+    setState(() {
+      _lat = loc.latitude;
+      _lng = loc.longitude;
+      _currentLocation = LatLng(loc.latitude, loc.longitude);
+    });
+    _startTracking();
+    final provider = context.read<PlaceProvider>();
+    provider.fetchNearbyPlaces(lat: _lat!, lng: _lng!, radiusKm: _searchRadiusKm);
+    provider.fetchFeaturedPlaces(lat: _lat, lng: _lng);
+    try {
+      _mapController.move(LatLng(_lat!, _lng!), 14.0);
+    } catch (e) {
+      debugPrint('Map move failed: $e');
+    }
   }
 
   void _onAddPlaceTap() {
@@ -491,6 +583,13 @@ if (mounted && _lat != null && _lng != null) {
             ),
           ),
 
+          // Compass (N) indicator - top right, shows north direction
+          Positioned(
+            top: MediaQuery.of(context).padding.top + 62,
+            right: 16,
+            child: _buildCompass(),
+          ),
+
           Positioned(
             left: 16,
             bottom: 140,
@@ -530,14 +629,22 @@ if (mounted && _lat != null && _lng != null) {
                 _mapControlButton(
                   icon: Icons.add,
                   onTap: () {
-                    _mapController?.animateCamera(CameraUpdate.zoomIn());
+                    final z = _mapController.camera.zoom;
+                    _mapController.move(
+                      _mapController.camera.center,
+                      (z + 1).clamp(AppConstants.minMapZoom, AppConstants.maxMapZoom),
+                    );
                   },
                 ),
                 const SizedBox(height: 4),
                 _mapControlButton(
                   icon: Icons.remove,
                   onTap: () {
-                    _mapController?.animateCamera(CameraUpdate.zoomOut());
+                    final z = _mapController.camera.zoom;
+                    _mapController.move(
+                      _mapController.camera.center,
+                      (z - 1).clamp(AppConstants.minMapZoom, AppConstants.maxMapZoom),
+                    );
                   },
                 ),
                 const SizedBox(height: 4),
@@ -545,18 +652,7 @@ if (mounted && _lat != null && _lng != null) {
                   icon: Icons.my_location,
                   color: AppTheme.primaryColor,
                   iconColor: Colors.white,
-                  onTap: () {
-                    final loc = _currentLocation;
-                    if (loc != null) {
-                      _mapController?.animateCamera(
-                        CameraUpdate.newLatLngZoom(loc, 15.0),
-                      );
-                    } else if (_lat != null && _lng != null) {
-                      _mapController?.animateCamera(
-                        CameraUpdate.newLatLngZoom(LatLng(_lat!, _lng!), 15.0),
-                      );
-                    }
-                  },
+                  onTap: _onMyLocationTap,
                 ),
                 const SizedBox(height: 4),
                 _mapControlButton(
@@ -583,15 +679,29 @@ if (mounted && _lat != null && _lng != null) {
                   borderRadius: BorderRadius.circular(16),
                 ),
                 child: Padding(
-                  padding: const EdgeInsets.all(12),
-                  child: Row(
-                    children: const [
-                      Icon(Icons.my_location, color: AppTheme.errorColor),
-                      SizedBox(width: 10),
-                      Expanded(
-                        child: Text(
-                          'Waiting for your current location... Please enable GPS and allow location permission.',
-                          style: TextStyle(fontSize: 13, color: AppTheme.textSecondary),
+                  padding: const EdgeInsets.fromLTRB(12, 12, 12, 4),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: const [
+                          Icon(Icons.my_location, color: AppTheme.errorColor),
+                          SizedBox(width: 10),
+                          Expanded(
+                            child: Text(
+                              'Waiting for your current location... Please enable GPS and allow location permission.',
+                              style: TextStyle(fontSize: 13, color: AppTheme.textSecondary),
+                            ),
+                          ),
+                        ],
+                      ),
+                      Align(
+                        alignment: Alignment.centerRight,
+                        child: TextButton.icon(
+                          onPressed: _retryLocation,
+                          icon: const Icon(Icons.refresh, size: 16),
+                          label: const Text('Try Again'),
                         ),
                       ),
                     ],
@@ -607,48 +717,144 @@ if (mounted && _lat != null && _lng != null) {
   Widget _buildMap() {
     return Consumer<PlaceProvider>(
       builder: (context, provider, _) {
-        return GoogleMap(
-          onMapCreated: (controller) {
-            _mapController = controller;
-            _mapControllerCompleter.complete(controller);
-          },
-          initialCameraPosition: CameraPosition(
-            target: LatLng(_lat ?? 27.7172, _lng ?? 85.3240),
-            zoom: 14.0,
+        return FlutterMap(
+          mapController: _mapController,
+          options: MapOptions(
+            initialCenter: LatLng(
+              _lat ?? AppConstants.defaultLatitude,
+              _lng ?? AppConstants.defaultLongitude,
+            ),
+            initialZoom: AppConstants.defaultMapZoom,
+            minZoom: AppConstants.minMapZoom,
+            maxZoom: AppConstants.maxMapZoom,
+            cameraConstraint: CameraConstraint.contain(
+              bounds: LatLngBounds(
+                const LatLng(26.0, 79.5),
+                const LatLng(31.0, 89.0),
+              ),
+            ),
+            interactionOptions: const InteractionOptions(
+              flags: InteractiveFlag.all,
+            ),
+            onMapEvent: (event) {
+              if (event is MapEventMoveEnd) {
+                _currentZoom = event.camera.zoom;
+              }
+            },
+            onPositionChanged: (camera, hasGesture) {
+              _rotationNotifier.value = camera.rotation;
+            },
+            onTap: (_, __) {
+              setState(() {
+                _selectedPlace = null;
+              });
+            },
           ),
-          minMaxZoomPreference: const MinMaxZoomPreference(6.0, 18.0),
-          mapType: _isSatellite ? MapType.hybrid : MapType.normal,
-          myLocationEnabled: true,
-          myLocationButtonEnabled: false,
-          zoomControlsEnabled: false,
-          compassEnabled: true,
-          mapToolbarEnabled: false,
-          onTap: (latLng) {
-            setState(() {
-              _selectedPlace = null;
-            });
-          },
-          onCameraMove: (position) {
-            _currentZoom = position.zoom;
-          },
-          polylines: _routes.isNotEmpty
-              ? {
+          children: [
+            if (_isSatellite) ...[
+              TileLayer(
+                urlTemplate: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+                userAgentPackageName: 'np.com.nepalsmarttravel',
+                maxZoom: 19,
+              ),
+              ColorFiltered(
+                colorFilter: const ColorFilter.matrix(<double>[
+                  1, 0, 0, 0, 0,
+                  0, 1, 0, 0, 0,
+                  0, 0, 1, 0, 0,
+                  -1.0/3.0, -1.0/3.0, -1.0/3.0, 1, 0,
+                ]),
+                child: TileLayer(
+                  urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                  userAgentPackageName: 'np.com.nepalsmarttravel',
+                  maxZoom: 20,
+                ),
+              ),
+            ] else
+              TileLayer(
+                urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                userAgentPackageName: 'np.com.nepalsmarttravel',
+                maxZoom: 19,
+              ),
+            if (_currentLocation != null)
+              MarkerLayer(
+                markers: [
+                  _buildYouAreHereMarker(),
+                ],
+              ),
+            if (_destinationLat != null && _destinationLng != null)
+              MarkerLayer(
+                markers: [
+                  Marker(
+                    point: LatLng(_destinationLat!, _destinationLng!),
+                    width: 36,
+                    height: 36,
+                    alignment: Alignment.center,
+                    child: Container(
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFE91E63),
+                        shape: BoxShape.circle,
+                        border: Border.all(color: Colors.white, width: 2),
+                        boxShadow: [
+                          BoxShadow(
+                            color: const Color(0xFFE91E63).withOpacity(0.4),
+                            blurRadius: 6,
+                            spreadRadius: 1,
+                          ),
+                        ],
+                      ),
+                      child: const Icon(Icons.flag, color: Colors.white, size: 18),
+                    ),
+                  ),
+                ],
+              ),
+            if (_routes.isNotEmpty)
+              PolylineLayer(
+                polylines: [
                   for (int i = 0; i < _routes.length; i++)
                     Polyline(
-                      polylineId: PolylineId('route_$i'),
                       points: _routes[i]['points'] as List<LatLng>,
                       color: i == 0
                           ? const Color(0xFF4285F4).withOpacity(0.85)
                           : Colors.grey.withOpacity(0.5),
-                      width: i == 0 ? 5 : 3,
+                      strokeWidth: i == 0 ? 5 : 3,
                     ),
-                }
-              : {},
-          markers: _buildMarkers(_showFeaturedOnly
-              ? provider.places.where((p) => p.isFeatured).toList()
-              : provider.places),
+                ],
+              ),
+            MarkerLayer(
+              markers: _buildMarkers(_applyPlaceFilters(provider.places)),
+            ),
+          ],
         );
       },
+    );
+  }
+
+  Marker _buildYouAreHereMarker() {
+    return Marker(
+      point: _currentLocation!,
+      width: 24,
+      height: 24,
+      alignment: Alignment.center,
+      child: Container(
+        decoration: BoxDecoration(
+          color: Colors.blue.withOpacity(0.25),
+          shape: BoxShape.circle,
+        ),
+        child: Center(
+          child: Container(
+            width: 14,
+            height: 14,
+            decoration: const BoxDecoration(
+              color: Colors.blue,
+              shape: BoxShape.circle,
+              boxShadow: [
+                BoxShadow(color: Colors.black26, blurRadius: 4, spreadRadius: 1),
+              ],
+            ),
+          ),
+        ),
+      ),
     );
   }
 
@@ -804,6 +1010,56 @@ if (mounted && _lat != null && _lng != null) {
         );
       },
     );
+  }
+
+  Widget _buildCompass() {
+    return ValueListenableBuilder<double>(
+      valueListenable: _rotationNotifier,
+      builder: (context, rotation, _) {
+        final isNorthUp = rotation.abs() < 0.5;
+        return AnimatedOpacity(
+          opacity: isNorthUp ? 0.45 : 1.0,
+          duration: const Duration(milliseconds: 200),
+          child: Material(
+            elevation: 3,
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(12),
+            shadowColor: Colors.black26,
+            child: InkWell(
+              borderRadius: BorderRadius.circular(12),
+              onTap: _resetRotationToNorth,
+              child: SizedBox(
+                width: 44,
+                height: 44,
+                child: Transform.rotate(
+                  angle: rotation * math.pi / 180,
+                  child: const Column(
+                    mainAxisSize: MainAxisSize.min,
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(Icons.arrow_upward, size: 16, color: Colors.red),
+                      Text(
+                        'N',
+                        style: TextStyle(
+                          fontSize: 10,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.red,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  void _resetRotationToNorth() {
+    _rotationNotifier.value = 0;
+    _mapController.rotate(0);
   }
 
   Widget _buildLoadingOverlay() {
@@ -984,9 +1240,7 @@ if (mounted && _lat != null && _lng != null) {
   }
 
   Widget _buildBottomSheetContent(PlaceProvider provider) {
-    final displayPlaces = _showFeaturedOnly
-        ? provider.places.where((p) => p.isFeatured).toList()
-        : provider.places;
+    final displayPlaces = _applyPlaceFilters(provider.places);
     return DraggableScrollableSheet(
       controller: _sheetController,
       initialChildSize: 0.0,
@@ -1622,62 +1876,49 @@ Text(
     );
   }
 
-  Set<Marker> _buildMarkers(List<PlaceModel> places) {
-    final markers = <Marker>{};
-
-    if (_currentLocation != null) {
-      markers.add(Marker(
-        markerId: const MarkerId('current_location'),
-        position: _currentLocation!,
-        icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueAzure),
-        zIndex: 999,
-      ));
-    }
-
-    if (_destinationLat != null && _destinationLng != null) {
-      markers.add(Marker(
-        markerId: const MarkerId('destination'),
-        position: LatLng(_destinationLat!, _destinationLng!),
-        icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueRose),
-        zIndex: 998,
-        infoWindow: InfoWindow(title: _destinationName ?? 'Destination'),
-      ));
-    }
-
+  List<Marker> _buildMarkers(List<PlaceModel> places) {
+    final markers = <Marker>[];
     for (final place in places) {
       final markerColor = _getCategoryColor(place.category);
-      final hue = _colorToHue(markerColor);
+      final isSelected = _selectedPlace?.id.toString() == place.id.toString();
+      final markerSize = isSelected ? 40.0 : 30.0;
       markers.add(Marker(
-        markerId: MarkerId(place.id.toString()),
-        position: LatLng(place.latitude, place.longitude),
-        icon: BitmapDescriptor.defaultMarkerWithHue(hue),
-        zIndex: place.isFeatured ? 100 : 0,
-        onTap: () => _onPlaceTap(place),
-        infoWindow: InfoWindow(
-          title: place.name,
-          snippet: place.distanceKm != null
-              ? '${place.distanceKm!.toStringAsFixed(1)} km${place.averageRating != null ? '  ★ ${place.averageRating!.toStringAsFixed(1)}' : ''}'
-              : (place.category ?? ''),
+        point: LatLng(place.latitude, place.longitude),
+        width: markerSize,
+        height: markerSize,
+        alignment: Alignment.center,
+        child: GestureDetector(
+          onTap: () => _onPlaceTap(place),
+          child: Container(
+            decoration: BoxDecoration(
+              color: markerColor,
+              shape: BoxShape.circle,
+              border: Border.all(
+                color: Colors.white,
+                width: isSelected ? 3 : 1.5,
+              ),
+              boxShadow: [
+                BoxShadow(
+                  color: markerColor.withOpacity(isSelected ? 0.5 : 0.3),
+                  blurRadius: isSelected ? 8 : 3,
+                  spreadRadius: isSelected ? 2 : 0.5,
+                ),
+              ],
+            ),
+            child: Icon(
+              _getCategoryIcon(place.category),
+              color: Colors.white,
+              size: isSelected ? 20 : 15,
+            ),
+          ),
         ),
       ));
     }
-
     return markers;
   }
 
-  double _colorToHue(Color color) {
-    if (color == AppTheme.markerHotel) return 0.0;
-    if (color == AppTheme.markerFood) return 30.0;
-    if (color == AppTheme.markerEmergency) return 0.0;
-    if (color == AppTheme.markerTransport) return 240.0;
-    if (color == AppTheme.markerTourist) return 300.0;
-    if (color == AppTheme.markerActivity) return 120.0;
-    if (color == AppTheme.markerUtility) return 200.0;
-    return 0.0;
-  }
-
   LatLngBounds _latLngBoundsFromPoints(List<LatLng> points) {
-    if (points.isEmpty) return LatLngBounds(southwest: const LatLng(0, 0), northeast: const LatLng(0, 0));
+    if (points.isEmpty) return LatLngBounds(const LatLng(0, 0), const LatLng(0, 0));
     double minLat = points.first.latitude;
     double maxLat = points.first.latitude;
     double minLng = points.first.longitude;
@@ -1689,8 +1930,8 @@ Text(
       if (p.longitude > maxLng) maxLng = p.longitude;
     }
     return LatLngBounds(
-      southwest: LatLng(minLat, minLng),
-      northeast: LatLng(maxLat, maxLng),
+      LatLng(minLat, minLng),
+      LatLng(maxLat, maxLng),
     );
   }
 }

@@ -58,6 +58,9 @@ class _NearbyMapScreenState extends State<NearbyMapScreen> {
   // Current location
   LatLng? _currentLocation;
 
+  // Compass rotation (degrees, clockwise positive)
+  final ValueNotifier<double> _rotationNotifier = ValueNotifier<double>(0);
+
   // Route / Directions (multi-route)
   List<Map<String, dynamic>> _routes = [];
   bool _isLoadingRoute = false;
@@ -106,6 +109,7 @@ class _NearbyMapScreenState extends State<NearbyMapScreen> {
     _positionStream?.cancel();
     _syncStreamController?.close();
     _weatherDebounceTimer?.cancel();
+    _rotationNotifier.dispose();
     _sheetController.dispose();
     _searchController.dispose();
     super.dispose();
@@ -573,6 +577,13 @@ class _NearbyMapScreenState extends State<NearbyMapScreen> {
             child: _buildMapModeToggle(),
           ),
 
+          // Compass (N) indicator - top right, shows north direction
+          Positioned(
+            top: MediaQuery.of(context).padding.top + 62,
+            right: 16,
+            child: _buildCompass(),
+          ),
+
           // Search bar
           Positioned(
             top: MediaQuery.of(context).padding.top + 4,
@@ -641,15 +652,29 @@ class _NearbyMapScreenState extends State<NearbyMapScreen> {
                   borderRadius: BorderRadius.circular(16),
                 ),
                 child: Padding(
-                  padding: const EdgeInsets.all(12),
-                  child: Row(
-                    children: const [
-                      Icon(Icons.my_location, color: AppTheme.errorColor),
-                      SizedBox(width: 10),
-                      Expanded(
-                        child: Text(
-                          'Waiting for your current location... Please enable GPS and allow location permission.',
-                          style: TextStyle(fontSize: 13, color: AppTheme.textSecondary),
+                  padding: const EdgeInsets.fromLTRB(12, 12, 12, 4),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: const [
+                          Icon(Icons.my_location, color: AppTheme.errorColor),
+                          SizedBox(width: 10),
+                          Expanded(
+                            child: Text(
+                              'Waiting for your current location... Please enable GPS and allow location permission.',
+                              style: TextStyle(fontSize: 13, color: AppTheme.textSecondary),
+                            ),
+                          ),
+                        ],
+                      ),
+                      Align(
+                        alignment: Alignment.centerRight,
+                        child: TextButton.icon(
+                          onPressed: _retryLocation,
+                          icon: const Icon(Icons.refresh, size: 16),
+                          label: const Text('Try Again'),
                         ),
                       ),
                     ],
@@ -693,6 +718,9 @@ class _NearbyMapScreenState extends State<NearbyMapScreen> {
           if (event is MapEventMoveEnd) {
             _onMapMoved(event.camera);
           }
+        },
+        onPositionChanged: (camera, hasGesture) {
+          _rotationNotifier.value = camera.rotation;
         },
         onTap: (_, __) {
           setState(() => _selectedPlace = null);
@@ -739,6 +767,71 @@ class _NearbyMapScreenState extends State<NearbyMapScreen> {
                 ),
             ],
           ),
+        // "You are here" indicator - always visible regardless of places toggle
+        if (_currentLocation != null)
+          MarkerLayer(
+            markers: [
+              Marker(
+                point: _currentLocation!,
+                width: 90,
+                height: 38,
+                alignment: Alignment.center,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Container(
+                      width: 18,
+                      height: 18,
+                      decoration: BoxDecoration(
+                        color: Colors.blue.withOpacity(0.25),
+                        shape: BoxShape.circle,
+                      ),
+                      child: Center(
+                        child: Container(
+                          width: 12,
+                          height: 12,
+                          decoration: const BoxDecoration(
+                            color: Colors.blue,
+                            shape: BoxShape.circle,
+                            boxShadow: [
+                              BoxShadow(
+                                color: Colors.black26,
+                                blurRadius: 4,
+                                spreadRadius: 1,
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 6, vertical: 1),
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(8),
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.black.withOpacity(0.15),
+                            blurRadius: 3,
+                            offset: const Offset(0, 1),
+                          ),
+                        ],
+                      ),
+                      child: const Text(
+                        'You are here',
+                        style: TextStyle(
+                          fontSize: 9,
+                          fontWeight: FontWeight.w600,
+                          color: Colors.blue,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
         if (placesVisible)
           Consumer<PlaceProvider>(
             builder: (context, provider, _) {
@@ -749,6 +842,56 @@ class _NearbyMapScreenState extends State<NearbyMapScreen> {
           ),
       ],
     );
+  }
+
+  Widget _buildCompass() {
+    return ValueListenableBuilder<double>(
+      valueListenable: _rotationNotifier,
+      builder: (context, rotation, _) {
+        final isNorthUp = rotation.abs() < 0.5;
+        return AnimatedOpacity(
+          opacity: isNorthUp ? 0.45 : 1.0,
+          duration: const Duration(milliseconds: 200),
+          child: Material(
+            elevation: 3,
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(12),
+            shadowColor: Colors.black26,
+            child: InkWell(
+              borderRadius: BorderRadius.circular(12),
+              onTap: _resetRotationToNorth,
+              child: SizedBox(
+                width: 44,
+                height: 44,
+                child: Transform.rotate(
+                  angle: rotation * math.pi / 180,
+                  child: const Column(
+                    mainAxisSize: MainAxisSize.min,
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(Icons.arrow_upward, size: 16, color: Colors.red),
+                      Text(
+                        'N',
+                        style: TextStyle(
+                          fontSize: 10,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.red,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  void _resetRotationToNorth() {
+    _rotationNotifier.value = 0;
+    _activeMapController.rotate(0);
   }
 
   Widget _buildMapModeToggle() {
@@ -900,24 +1043,87 @@ class _NearbyMapScreenState extends State<NearbyMapScreen> {
   }
 
   void _onMyLocationTap() {
-    // FL-27: button toggles follow-mode on/off; a second tap stops following
-    if (_isTracking) {
-      setState(() => _isTracking = false);
+    // Always recenter to the user's exact location, no toggle confusion.
+    if (_currentLocation != null) {
+      setState(() => _isTracking = true);
+      _activeMapController.move(_currentLocation!, 15.0);
       return;
     }
     if (_lat != null && _lng != null) {
       setState(() => _isTracking = true);
       _activeMapController.move(LatLng(_lat!, _lng!), 15.0);
-    } else {
-      _locationService.getCurrentLocation().then((loc) {
-        if (loc == null || !mounted) return;
-        setState(() {
-          _lat = loc.latitude;
-          _lng = loc.longitude;
-          _isTracking = true;
-        });
-        _activeMapController.move(LatLng(_lat!, _lng!), 15.0);
-      });
+      return;
+    }
+    _requestLocationAndRecenter();
+  }
+
+  Future<void> _requestLocationAndRecenter() async {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Getting your exact location...'),
+        behavior: SnackBarBehavior.floating,
+        duration: Duration(seconds: 2),
+      ),
+    );
+    final loc = await _locationService.getCurrentLocation();
+    if (!mounted) return;
+    if (loc == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+              'Could not get your location. Please enable GPS and allow location permission, then try again.'),
+          backgroundColor: AppTheme.errorColor,
+          behavior: SnackBarBehavior.floating,
+          duration: Duration(seconds: 4),
+        ),
+      );
+      return;
+    }
+    setState(() {
+      _lat = loc.latitude;
+      _lng = loc.longitude;
+      _currentLocation = LatLng(loc.latitude, loc.longitude);
+      _isTracking = true;
+    });
+    _startPositionTracking();
+    _activeMapController.move(_currentLocation!, 15.0);
+  }
+
+  Future<void> _retryLocation() async {
+    final loc = await _locationService.getCurrentLocation();
+    if (!mounted) return;
+    if (loc == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+              'Could not get your location. Please enable GPS and allow location permission, then try again.'),
+          backgroundColor: AppTheme.errorColor,
+          behavior: SnackBarBehavior.floating,
+          duration: Duration(seconds: 4),
+        ),
+      );
+      return;
+    }
+    setState(() {
+      _lat = loc.latitude;
+      _lng = loc.longitude;
+      _currentLocation = LatLng(loc.latitude, loc.longitude);
+    });
+    _startPositionTracking();
+    final provider = context.read<PlaceProvider>();
+    await _loadCachedPlaces();
+    await provider.fetchNearbyPlaces(lat: _lat!, lng: _lng!, radiusKm: 10.0);
+    _lastFetchLat = _lat;
+    _lastFetchLng = _lng;
+    _lastFetchRadius = 10.0;
+    _cachedBoundsNorth = null;
+    _cachedBoundsSouth = null;
+    _cachedBoundsEast = null;
+    _cachedBoundsWest = null;
+    try {
+      _activeMapController.move(LatLng(_lat!, _lng!), 15.0);
+    } catch (e) {
+      debugPrint('Map move failed: $e');
     }
   }
 
@@ -929,11 +1135,16 @@ class _NearbyMapScreenState extends State<NearbyMapScreen> {
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
       builder: (context) => FilterPlacesSheet(
+        initialFilter: _activeFilter,
         onApply: (filters) {
           setState(() => _activeFilter = filters);
           _debounceTimer?.cancel();
           _lastFetchLat = null; // Force re-fetch with the new filter
           _lastFetchLng = null;
+          _cachedBoundsNorth = null; // Invalidate bbox cache so the filter is applied
+          _cachedBoundsSouth = null;
+          _cachedBoundsEast = null;
+          _cachedBoundsWest = null;
           _fetchPlacesForViewport();
         },
       ),
@@ -1753,33 +1964,12 @@ class _NearbyMapScreenState extends State<NearbyMapScreen> {
 
   List<Marker> _buildMarkers(List<PlaceModel> places) {
     final markers = <Marker>[];
+
+    if (places.isEmpty) return markers;
+
     final showAddress = _currentZoom >= 16;
     final highZoom = _currentZoom >= 16;
     final midZoom = _currentZoom >= 14;
-
-    if (_currentLocation != null) {
-      markers.add(Marker(
-        point: _currentLocation!,
-        width: 24, height: 24,
-        alignment: Alignment.center,
-        child: Container(
-          decoration: BoxDecoration(
-            color: Colors.blue.withOpacity(0.25), shape: BoxShape.circle,
-          ),
-          child: Center(
-            child: Container(
-              width: 14, height: 14,
-              decoration: const BoxDecoration(
-                color: Colors.blue, shape: BoxShape.circle,
-                boxShadow: [BoxShadow(color: Colors.black26, blurRadius: 4, spreadRadius: 1)],
-              ),
-            ),
-          ),
-        ),
-      ));
-    }
-
-    if (places.isEmpty) return markers;
 
     // Phase 0: Check if label assignment needs recomputation
     final camera = _activeMapController.camera;

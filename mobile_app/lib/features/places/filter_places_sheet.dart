@@ -21,18 +21,52 @@ class PlaceFilter {
 
 class FilterPlacesSheet extends StatefulWidget {
   final void Function(PlaceFilter filters)? onApply;
+  final PlaceFilter? initialFilter;
 
-  const FilterPlacesSheet({super.key, this.onApply});
+  const FilterPlacesSheet({super.key, this.onApply, this.initialFilter});
 
   @override
   State<FilterPlacesSheet> createState() => _FilterPlacesSheetState();
 }
 
 class _FilterPlacesSheetState extends State<FilterPlacesSheet> {
-  int? _selectedCategoryId;
-  double _radiusKm = 5.0;
-  bool _onlyVerified = false;
-  bool _onlyFeatured = false;
+  late int? _selectedCategoryId;
+  late double _radiusKm;
+  late bool _onlyVerified;
+  late bool _onlyFeatured;
+
+  @override
+  void initState() {
+    super.initState();
+    _selectedCategoryId = widget.initialFilter?.categoryId;
+    _radiusKm = widget.initialFilter?.radiusKm ?? 5.0;
+    _onlyVerified = widget.initialFilter?.onlyVerified ?? false;
+    _onlyFeatured = widget.initialFilter?.onlyFeatured ?? false;
+  }
+
+  Widget _buildCategoryChip(String label, bool selected, VoidCallback onTap) {
+    return FilterChip(
+      label: Text(
+        label,
+        style: TextStyle(
+          fontSize: 13,
+          fontWeight: FontWeight.w600,
+          color: selected ? Colors.white : AppTheme.textPrimary,
+        ),
+      ),
+      selected: selected,
+      onSelected: (_) => onTap(),
+      selectedColor: AppTheme.primaryColor,
+      checkmarkColor: Colors.white,
+      backgroundColor: Colors.white,
+      side: BorderSide(
+        color: selected ? AppTheme.primaryColor : AppTheme.dividerColor,
+        width: 1,
+      ),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+      visualDensity: VisualDensity.compact,
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -87,20 +121,14 @@ class _FilterPlacesSheetState extends State<FilterPlacesSheet> {
             spacing: 8,
             runSpacing: 8,
             children: [
-              FilterChip(
-                label: const Text('All'),
-                selected: _selectedCategoryId == null,
-                onSelected: (_) => setState(() => _selectedCategoryId = null),
-                selectedColor: AppTheme.primaryColor.withOpacity(0.2),
-                checkmarkColor: AppTheme.primaryColor,
-              ),
-              ...categories.where((c) => c.id != 0).map((cat) => FilterChip(
-                label: Text(cat.name),
-                selected: _selectedCategoryId == cat.id,
-                onSelected: (selected) => setState(() => _selectedCategoryId = selected ? cat.id : null),
-                selectedColor: AppTheme.primaryColor.withOpacity(0.2),
-                checkmarkColor: AppTheme.primaryColor,
-              )),
+              _buildCategoryChip('All', _selectedCategoryId == null,
+                  () => setState(() => _selectedCategoryId = null)),
+              ...categories.where((c) => c.id != 0).map((cat) => _buildCategoryChip(
+                    cat.name,
+                    _selectedCategoryId == cat.id,
+                    () => setState(() => _selectedCategoryId =
+                        _selectedCategoryId == cat.id ? null : cat.id),
+                  )),
             ],
           ),
           const SizedBox(height: 16),
