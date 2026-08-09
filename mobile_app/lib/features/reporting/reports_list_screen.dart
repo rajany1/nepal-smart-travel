@@ -1105,6 +1105,16 @@ class _SubmitReportSheetState extends State<_SubmitReportSheet> {
   Future<void> _capturePhoto() async {
     setState(() => _isCapturingPhoto = true);
     try {
+      final loc = LocationService();
+      final pos = await loc.getAccurateLocationForReport();
+      if (pos == null) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Location access is required to take a photo. Please enable GPS and location permission.'), backgroundColor: AppTheme.errorColor));
+          setState(() => _isCapturingPhoto = false);
+        }
+        return;
+      }
+      if (mounted) setState(() { _lat = pos.latitude; _lng = pos.longitude; });
       final photo = await _cameraService.capturePhoto();
       if (photo != null && mounted) {
         if (await CameraService.isWithinSizeLimit(photo)) {

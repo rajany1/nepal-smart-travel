@@ -69,7 +69,10 @@ class ReportAnalysisService
                 ]);
 
             if ($action === 'approve') {
-                $this->awardApprovalXp($report);
+                $gpsVerified = ($analysis['location_check']['gps_status'] ?? null) === 'verified';
+                if ($gpsVerified) {
+                    $this->awardApprovalXp($report);
+                }
             } else {
                 app(AchievementService::class)->revokeReportApprovalXp($report);
             }
@@ -212,10 +215,12 @@ class ReportAnalysisService
         }
 
         if ($report->gps_verification_status === 'mismatched') {
-            return ['valid' => true, 'verifiable' => true, 'gps_status' => 'mismatched', 'reason' => 'Photo GPS does not match reported location — flagged for moderator'];
+            return ['valid' => false, 'verifiable' => true, 'gps_status' => 'mismatched', 'reason' => 'Photo GPS does not match reported location — likely fake'];
         }
 
-        return ['valid' => true, 'verifiable' => true, 'gps_status' => $report->gps_verification_status, 'reason' => 'Location looks valid'];
+        $verifiable = $report->gps_verification_status === 'verified';
+
+        return ['valid' => true, 'verifiable' => $verifiable, 'gps_status' => $report->gps_verification_status, 'reason' => 'Location looks valid'];
     }
 
     protected function analyzeImages(Report $report, array $text = []): array
@@ -241,6 +246,26 @@ class ReportAnalysisService
             if (filesize($path) > self::MAX_IMAGE_BYTES) {
                 $images[] = ['media_id' => $item->id, 'verdict' => 'skipped', 'reason' => 'Image too large (>4MB) — skipped'];
                 continue;
+            }
+
+            // Same-image reuse trap: exact duplicate of a photo used in another
+            // report within the last 30 days is almost certainly re-uploaded fake.
+            $hash = $item->media_hash ?: hash_file('sha256', $path);
+            if ($hash) {
+                $duplicate = DB::table('report_media')
+                    ->join('reports', 'reports.id', '=', 'report_media.report_id')
+                    ->where('report_media.media_hash', $hash)
+                    ->where('report_media.report_id', '!=', $report->id)
+                    ->where('reports.created_at', '>=', now()->subDays(30))
+                    ->first(['report_media.report_id']);
+                if ($duplicate) {
+                    $images[] = [
+                        'media_id' => $item->id,
+                        'verdict' => 'duplicate',
+                        'reason' => "Identical image already used in report #{$duplicate->report_id} — likely re-uploaded",
+                    ];
+                    continue;
+                }
             }
 
             try {
@@ -272,6 +297,7 @@ class ReportAnalysisService
         }
 
         $verdict = 'clean';
+        $duplicates = false;
         foreach ($images as $img) {
             if ($img['verdict'] === 'violation') {
                 $verdict = 'violation';
@@ -279,6 +305,12 @@ class ReportAnalysisService
             }
             if ($img['verdict'] === 'suspicious' && $verdict === 'clean') {
                 $verdict = 'suspicious';
+            }
+            if ($img['verdict'] === 'duplicate') {
+                $duplicates = true;
+                if ($verdict === 'clean') {
+                    $verdict = 'duplicate';
+                }
             }
         }
 
@@ -300,10 +332,12 @@ class ReportAnalysisService
             . "Text analysis category match: " . ($categoryMatch === null ? 'unknown' : ($categoryMatch ? 'yes' : 'no')) . "\n\n"
             . "Guidelines:\n"
             . "- A photo is LEGITIMATE if it actually shows the incident/issue described (e.g. landslide, flood, damaged road, garbage pile, accident scene).\n"
-            . "- A photo is MISLEADING or fake if: it is AI-generated, it shows something unrelated to the claim (e.g. random objects, furniture, selfie, screenshot, stock photo), or it contradicts the description.\n"
+            . "- A photo taken OF A DEVICE SCREEN/DISPLAY (a laptop, phone or monitor showing another image) is FAKE. Detect screen-photo telltales: moiré pattern (wavy rainbow distortion), visible pixel grid or scanlines when zoomed, reflections or glare from a display surface, screen bezel or display edge visible, wallpaper-like texture. Real photos taken with a phone camera do not have these patterns.\n"
+            . "- A photo is MISLEADING or fake if: it is AI-generated, it is a photo of a screen, it shows something unrelated to the claim (e.g. random objects, furniture, selfie, screenshot, stock photo), or it contradicts the description.\n"
             . "- Reports can be in Nepali or English — language of the photo text is never a violation.\n"
             . "Return JSON ONLY:\n"
             . "- \"is_ai_generated\" (bool — true if the image looks AI-generated/rendered)\n"
+            . "- \"is_screen_photo\" (bool — true if the photo is a photo of a screen/display showing another image, or shows moiré/pixel-grid/glare patterns typical of photographing a screen)\n"
             . "- \"shows_what\" (string — what the photo actually shows)\n"
             . "- \"matches_title_description\" (bool — photo matches the claim)\n"
             . "- \"misleading\" (bool — photo shows something different from the claim or is deliberately misleading)\n"
@@ -321,6 +355,7 @@ class ReportAnalysisService
         $entry = [
             'media_id' => $mediaId,
             'is_ai_generated' => (bool) ($result['is_ai_generated'] ?? false),
+            'is_screen_photo' => (bool) ($result['is_screen_photo'] ?? false),
             'shows_what' => $result['shows_what'] ?? '',
             'matches_title_description' => $result['matches_title_description'] ?? null,
             'misleading' => (bool) ($result['misleading'] ?? false),
@@ -333,6 +368,17 @@ class ReportAnalysisService
         if (($result['phishing'] ?? false) || ($result['inappropriate_abusive'] ?? false)) {
             $entry['verdict'] = 'violation';
             $entry['verdict_reason'] = 'Prohibited content (abusive/phishing)';
+        } elseif (($result['is_screen_photo'] ?? false)) {
+            if ($confidence >= self::IMAGE_VIOLATION_CONFIDENCE) {
+                $entry['verdict'] = 'violation';
+                $entry['verdict_reason'] = 'Photo of a screen/display (moiré or pixel-grid pattern) — not a real scene';
+            } elseif ($confidence >= 0.55) {
+                $entry['verdict'] = 'suspicious';
+                $entry['verdict_reason'] = 'Possible photo of a screen (moiré/pixel pattern) — needs moderator review';
+            } else {
+                $entry['verdict'] = 'suspicious';
+                $entry['verdict_reason'] = 'Weak screen-photo signal detected — needs moderator review';
+            }
         } elseif (($result['is_ai_generated'] ?? false) || ($result['misleading'] ?? false)) {
             if ($confidence >= self::IMAGE_VIOLATION_CONFIDENCE) {
                 $entry['verdict'] = 'violation';
@@ -359,15 +405,20 @@ class ReportAnalysisService
             return 'reject';
         }
 
+        // Location authenticity gate: only EXIF-verified photos can auto-approve.
+        // Photos without GPS metadata or with mismatched GPS need a human decision.
+        if (($location['gps_status'] ?? null) !== 'verified' && ($location['verifiable'] ?? false) !== true) {
+            return 'pending-review';
+        }
+        if (($location['gps_status'] ?? null) !== 'verified') {
+            return 'pending-review';
+        }
+
         if (($image['verdict'] ?? 'clean') === 'violation') {
             return 'reject';
         }
 
-        if (($image['verdict'] ?? 'clean') === 'unverifiable') {
-            return 'pending-review';
-        }
-
-        if (($image['verdict'] ?? 'clean') === 'suspicious') {
+        if (in_array($image['verdict'] ?? 'clean', ['unverifiable', 'suspicious', 'duplicate'])) {
             return 'pending-review';
         }
 

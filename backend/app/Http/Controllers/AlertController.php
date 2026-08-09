@@ -187,7 +187,7 @@ class AlertController extends Controller
         $guardTitle = $safety->guard($user, (string) $validated['title'], 'alert', $alert->id, 'title', 'realtime');
         $guardDesc = $safety->guard($user, (string) $validated['description'], 'alert', $alert->id, 'description', 'realtime');
         if ($guardTitle['action'] === 'censored' || $guardDesc['action'] === 'censored') {
-            $alert->update(['title' => $guardTitle['text'], 'description' => $guardDesc['text']]);
+            $alert->update(['title' => $guardTitle['censored'] ?? $guardTitle['text'], 'description' => $guardDesc['censored'] ?? $guardDesc['text']]);
         }
         $safetyPayload = $safety->payload([$guardTitle, $guardDesc]);
 

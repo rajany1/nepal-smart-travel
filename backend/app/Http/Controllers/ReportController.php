@@ -421,7 +421,7 @@ class ReportController extends Controller
         $guardTitle = $safety->guard($request->user(), (string) $validated['title'], 'report', $report->id, 'title', 'realtime');
         $guardDesc = $safety->guard($request->user(), (string) $validated['description'], 'report', $report->id, 'description', 'realtime');
         if ($guardTitle['action'] === 'censored' || $guardDesc['action'] === 'censored') {
-            $report->update(['title' => $guardTitle['text'], 'description' => $guardDesc['text']]);
+            $report->update(['title' => $guardTitle['censored'] ?? $guardTitle['text'], 'description' => $guardDesc['censored'] ?? $guardDesc['text']]);
         }
         $safetyPayload = $safety->payload([$guardTitle, $guardDesc]);
 
@@ -435,6 +435,7 @@ class ReportController extends Controller
             $report->media()->create([
                 'media_url' => $path,
                 'type' => 'image',
+                'media_hash' => hash_file('sha256', \Illuminate\Support\Facades\Storage::disk('public')->path($path)),
             ]);
         }
 
@@ -681,7 +682,7 @@ class ReportController extends Controller
         $safety = app(\App\Services\ContentSafetyService::class);
         $guard = $safety->guard($user, (string) $request->content, 'report_comment', $comment->id, 'content', 'realtime');
         if ($guard['action'] === 'censored') {
-            $comment->update(['content' => $guard['text']]);
+            $comment->update(['content' => $guard['censored'] ?? $guard['text']]);
         }
         $safetyPayload = $safety->payload([$guard]);
 

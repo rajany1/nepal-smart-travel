@@ -25,6 +25,8 @@ class ContentSafetyService
 {
     private ?array $wordlistCache = null;
 
+    private ?array $canonIndexCache = null;
+
     private const LEET = [
         '0' => 'o', '1' => 'i', '3' => 'e', '4' => 'a', '5' => 's', '7' => 't',
         '8' => 'b', '2' => 'z', '6' => 'g', '9' => 'g', '@' => 'a', '$' => 's',
@@ -44,9 +46,9 @@ class ContentSafetyService
 
         $hits = [];
 
-        // Pass 1: clean word-boundary matches
+        // Pass 1: word-boundary matches (ASCII + Devanagari, unicode-safe)
         foreach ($this->wordlist() as $word => $severity) {
-            if (preg_match_all('/\b' . preg_quote($word, '/') . '\b/i', $text, $m, PREG_OFFSET_CAPTURE)) {
+            if (preg_match_all('/(?<![\p{L}\p{N}_])' . preg_quote($word, '/') . '(?![\p{L}\p{N}_])/iu', $text, $m, PREG_OFFSET_CAPTURE)) {
                 foreach ($m[0] as [$matched, $offset]) {
                     $hits[] = [
                         'word' => $word,
@@ -59,39 +61,47 @@ class ContentSafetyService
             }
         }
 
-        // Pass 2: obfuscated matches - "f u c k", "f.u.c.k", "f00k", "fUcK"
-        $tokens = preg_split('/([^a-zA-Z0-9]+)/', $text, -1, PREG_SPLIT_OFFSET_CAPTURE);
+        // Pass 2: obfuscated matches - "f u c k", "f.u.c.k", "f00k", "fUcK",
+        // and romanized/Devanagari Nepali variants ("c h o d", "चो द", "चुद")
+        $tokens = preg_split('/([^\p{L}\p{N}_]+)/u', $text, -1, PREG_SPLIT_OFFSET_CAPTURE);
         $n = count($tokens);
+        $canonIndex = $this->canonicalIndex();
         for ($i = 0; $i < $n; $i++) {
             $raw = $tokens[$i][0];
             if ($raw === '') {
                 continue;
             }
             $start = $tokens[$i][1];
-            $decoded = $this->normalize($raw);
-            if ($decoded === '') {
-                continue;
+            // Build a candidate by consuming ONLY short fragments (<=2 chars):
+            // "f u c k", "fu" "ck", "चो" "द". Long tokens ("timi") never merge.
+            // Stop as soon as a full dictionary word is formed.
+            $decoded = '';
+            $matchKey = null;
+            $matchJ = -1;
+            $k = $i;
+            while ($k < $n && mb_strlen($tokens[$k][0]) <= 2 && mb_strlen($decoded) < 20) {
+                $decoded .= $this->tokenKey($tokens[$k][0]);
+                if (isset($canonIndex[$decoded])) {
+                    $matchKey = $canonIndex[$decoded];
+                    $matchJ = $k;
+                    break;
+                }
+                $k++;
             }
-            // merge consecutive short naked tokens ("f" "u" "c" "k", "fu" "ck")
-            $j = $i;
-            while ($j + 1 < $n && strlen($tokens[$j + 1][0]) <= 2 && strlen($decoded . $this->normalize($tokens[$j + 1][0])) <= 20) {
-                $j++;
-                $decoded .= $this->normalize($tokens[$j][0]);
-            }
-            if ($decoded !== '' && isset($this->wordlist()[$decoded])) {
-                $end = ($j > $i)
-                    ? $tokens[$j][1] + strlen($tokens[$j][0])
-                    : $start + strlen($raw);
+            if ($matchKey !== null) {
+                $end = $tokens[$matchJ][1] + strlen($tokens[$matchJ][0]);
                 $span = substr($text, $start, $end - $start);
                 $hits[] = [
-                    'word' => $decoded,
-                    'severity' => $this->wordlist()[$decoded],
+                    'word' => $matchKey,
+                    'severity' => $this->wordlist()[$matchKey],
                     'censored' => $this->censorWord($span),
                     'start' => $start,
                     'end' => $end,
                 ];
+                $i = $matchJ;
             }
-            $i = max($i, $j);
+            // no match: advance only one token — a match may start at the
+            // next fragment ("it is f u c k" -> the "f u c k" group)
         }
 
         // dedupe overlapping spans
@@ -138,8 +148,8 @@ class ContentSafetyService
         $keep = $this->censorKeep();
         $out = '';
         $letters = 0;
-        foreach (mb_str_split($matched) as $i => $ch) {
-            if (preg_match('/[a-z]/i', $ch)) {
+        foreach (mb_str_split($matched) as $ch) {
+            if (preg_match('/[\p{L}]/u', $ch)) {
                 $letters++;
                 $out .= ($letters > $keep) ? '*' : $ch;
             } else {
@@ -174,28 +184,83 @@ class ContentSafetyService
         return preg_replace('/[^a-z]/', '', $out);
     }
 
+    /**
+     * Canonical key used for lookups: ascii leet-form for romanized words,
+     * consonant-only form for Devanagari (so चोद / चुद / चूद all collide).
+     */
+    private function tokenKey(string $raw): string
+    {
+        $ascii = $this->normalize($raw);
+        if ($ascii !== '') {
+            return $ascii;
+        }
+        return $this->canonicalDevanagari($raw);
+    }
+
+    /**
+     * Reduce a Devanagari token to its consonants: matras (vowel signs),
+     * halant, nukta and marks are dropped. "चोद", "चुद", "चूद", "चो द" all
+     * become "चद" and match the same dictionary entry.
+     */
+    private function canonicalDevanagari(string $raw): string
+    {
+        $out = '';
+        foreach (mb_str_split($raw) as $ch) {
+            $code = mb_ord($ch);
+            if ($code === false) {
+                continue;
+            }
+            // consonants, nukta-form consonants, and independent vowels
+            if ((0x0915 <= $code && $code <= 0x0939)
+                || (0x0958 <= $code && $code <= 0x095F)
+                || (0x0904 <= $code && $code <= 0x0914)) {
+                $out .= $ch;
+            }
+        }
+        return $out;
+    }
+
+    /**
+     * word => canonical key map built from the active wordlist, used to
+     * resolve obfuscated tokens back to their dictionary word.
+     */
+    private function canonicalIndex(): array
+    {
+        if ($this->canonIndexCache !== null) {
+            return $this->canonIndexCache;
+        }
+        $map = [];
+        foreach ($this->wordlist() as $word => $severity) {
+            $key = $this->tokenKey($word);
+            if ($key !== '' && !isset($map[$key])) {
+                $map[$key] = $word;
+            }
+        }
+        return $this->canonIndexCache = $map;
+    }
+
 /**
      * Realtime guard. Censors, records, escalates.
      *
      * @return array{action: string, censored: string, warning: ?array, account: string, until: ?string}
      */
-    public function guard(User $user, string $content, ?string $entityType = null, $entityId = null): array
+    public function guard(User $user, string $content, ?string $entityType = null, $entityId = null, ?string $field = null, string $source = 'live'): array
     {
         $result = $this->censor($content);
         if (empty($result['hits'])) {
-            return $this->cleanResult($content);
+            return $this->activeAction($content);
         }
 
         $user->refresh();
         if ($user->status === 'banned') {
-            return $this->cleanResult($result['text']) + [
+            return $this->activeAction($result['text']) + [
                 'action' => 'blocked',
                 'account' => 'banned',
                 'until' => null,
             ];
         }
 
-        $this->recordViolation($user, $entityType, $entityId, $result['hits'], $content, $result['text'], 'live');
+        $this->recordViolation($user, $entityType, $entityId, $result['hits'], $content, $result['text'], $field, $source);
 
         $ladder = $this->applyStrikePolicy($user, $entityType);
 
@@ -211,7 +276,7 @@ class ContentSafetyService
     /**
      * Persistent record of what was said, what it became, and at what severity.
      */
-    private function recordViolation(User $user, ?string $entityType, $entityId, array $hits, string $original, string $censored, string $source = 'live'): void
+    private function recordViolation(User $user, ?string $entityType, $entityId, array $hits, string $original, string $censored, ?string $field = null, string $source = 'live'): void
     {
         $map = [
             'PlaceReview' => 'review',
@@ -225,11 +290,12 @@ class ContentSafetyService
             'user_id' => $user->id,
             'entity_type' => $map[$entityType] ?? ($entityType ?? 'content'),
             'entity_id' => $entityId,
+            'field' => $field ?? 'content',
             'original_text' => mb_substr($original, 0, 500),
             'censored_text' => mb_substr($censored, 0, 500),
-            'severity' => 'mild',
-            'bad_words' => array_map(fn($h) => $h['word'], $hits),
-            'source' => $entityType ?? 'content',
+            'severity' => $hits[0]['severity'] ?? 'mild',
+            'found_words' => array_map(fn($h) => $h['word'], $hits),
+            'source' => $source,
         ]);
     }
 
@@ -437,7 +503,7 @@ class ContentSafetyService
                     $updates = [];
                     foreach ($dirty as $field => $d) {
                         $updates[$field] = $d['censored'];
-                        $this->recordViolation($user, $type, $pk, $d['hits'], $d['original'], $d['censored'], 'sweep');
+                        $this->recordViolation($user, $type, $pk, $d['hits'], $d['original'], $d['censored'], $field, 'sweep');
                     }
                     DB::table($table)->where('id', $pk)->update($updates);
                     $report['censored']++;

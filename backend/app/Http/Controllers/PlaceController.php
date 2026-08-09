@@ -119,7 +119,7 @@ class PlaceController extends Controller
             $guardName = $safety->guard($request->user(), (string) $request->input('name', ''), 'place', $place->id, 'name', 'realtime');
             $guardDesc = $safety->guard($request->user(), (string) ($request->description ?? ''), 'place', $place->id, 'description', 'realtime');
             if ($guardName['action'] === 'censored' || $guardDesc['action'] === 'censored') {
-                $place->update(['name' => $guardName['text'], 'description' => $guardDesc['text']]);
+                $place->update(['name' => $guardName['censored'] ?? $guardName['text'], 'description' => $guardDesc['censored'] ?? $guardDesc['text']]);
             }
             $safetyPayload = $safety->payload([$guardName, $guardDesc]);
         } else {
@@ -803,7 +803,7 @@ class PlaceController extends Controller
         $guardTitle = $safety->guard($user, (string) $request->title, 'place_review', $review->id, 'title', 'realtime');
         $guardDesc = $safety->guard($user, (string) $request->description, 'place_review', $review->id, 'description', 'realtime');
         if ($guardTitle['action'] === 'censored' || $guardDesc['action'] === 'censored') {
-            $review->update(['title' => $guardTitle['text'], 'description' => $guardDesc['text']]);
+            $review->update(['title' => $guardTitle['censored'] ?? $guardTitle['text'], 'description' => $guardDesc['censored'] ?? $guardDesc['text']]);
         }
         $safetyPayload = $safety->payload([$guardTitle, $guardDesc]);
 
@@ -1016,9 +1016,9 @@ class PlaceController extends Controller
         $guardSuggested = $safety->guard($user, (string) ($request->suggested_name ?? ''), 'place_correction', $correction->id, 'suggested_name', 'realtime');
         if ($guardName['action'] === 'censored' || $guardDesc['action'] === 'censored' || $guardSuggested['action'] === 'censored') {
             $correction->update([
-                'place_name' => $guardName['text'],
-                'description' => $guardDesc['text'],
-                'suggested_name' => $guardSuggested['text'],
+                'place_name' => $guardName['censored'] ?? $guardName['text'],
+                'description' => $guardDesc['censored'] ?? $guardDesc['text'],
+                'suggested_name' => $guardSuggested['censored'] ?? $guardSuggested['text'],
             ]);
         }
         $safetyPayload = $safety->payload([$guardName, $guardDesc, $guardSuggested]);
