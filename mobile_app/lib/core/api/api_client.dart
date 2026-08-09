@@ -356,19 +356,6 @@ class ApiClient {
     return _dio.get('/road-conditions', queryParameters: queryParams);
   }
 
-  // Store
-  Future<Response> getStoreItems() async {
-    return _dio.get('/store/items');
-  }
-
-  Future<Response> purchaseItem(int itemId) async {
-    return _dio.post('/store/items/$itemId/purchase');
-  }
-
-  Future<Response> getMyPurchases() async {
-    return _dio.get('/store/my-purchases');
-  }
-
   // AI Assistant
   Future<Response> chatWithAssistant({
     required String message,
@@ -395,8 +382,7 @@ class ApiClient {
 
   Future<Response> getPartnerDetail(int id) => _dio.get('/partners/$id');
 
-  // Sponsors
-  Future<Response> getSponsors() => _dio.get('/sponsors');
+  // Sponsors removed — replaced by ad campaigns (2026-08)
 
   // User Bookings
   Future<Response> createBooking(Map<String, dynamic> data) => _dio.post('/bookings', data: data);
@@ -404,8 +390,8 @@ class ApiClient {
   Future<Response> removeBookingCoupon(int bookingId) => _dio.delete('/bookings/$bookingId/coupon');
   Future<Response> cancelBooking(int bookingId) => _dio.post('/bookings/$bookingId/cancel');
 
-  // Store - Available Codes for booking auto-apply
-  Future<Response> getAvailableCodes() => _dio.get('/store/my-available-codes');
+  // Reward Offer codes available for booking auto-apply
+  Future<Response> getAvailableOfferCodes() => _dio.get('/offers/available');
   /// Complete the user profile with required information
   Future<Response> completeProfile({
     required String bio,
@@ -480,8 +466,26 @@ class ApiClient {
 
   // ============ Ad Campaigns ============
 
-  Future<Response> getActiveAds() async {
-    return _dio.get('/ads/active');
+  Future<Response> getActiveAds({
+    String? adContext,
+    String? district,
+    String? category,
+    int? limit,
+  }) async {
+    final params = <String, dynamic>{};
+    if (adContext != null && adContext.isNotEmpty) params['context'] = adContext;
+    if (district != null && district.isNotEmpty) params['district'] = district;
+    if (category != null && category.isNotEmpty) params['category'] = category;
+    if (limit != null) params['limit'] = limit;
+    return _dio.get('/ads/active', queryParameters: params);
+  }
+
+  Future<Response> trackAdImpression(int adCampaignId) {
+    return _dio.post('/ads/track-impression', data: {'ad_campaign_id': adCampaignId});
+  }
+
+  Future<Response> trackAdClick(int adCampaignId) {
+    return _dio.post('/ads/track-click', data: {'ad_campaign_id': adCampaignId});
   }
 
   // ============ Subscription Plans ============
@@ -492,6 +496,27 @@ class ApiClient {
 
   Future<Response> getMySubscription() async {
     return _dio.get('/subscription/my');
+  }
+
+  // ============ Reward Offers ============
+
+  Future<Response> getOffers({String? district, String? type}) async {
+    return _dio.get('/offers', queryParameters: {
+      if (district != null && district.isNotEmpty) 'district': district,
+      if (type != null && type.isNotEmpty) 'type': type,
+    });
+  }
+
+  Future<Response> getOfferById(int id) async {
+    return _dio.get('/offers/$id');
+  }
+
+  Future<Response> claimOffer(int id) async {
+    return _dio.post('/offers/$id/claim');
+  }
+
+  Future<Response> getMyOffers() async {
+    return _dio.get('/offers/my');
   }
 }
 

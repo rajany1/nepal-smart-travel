@@ -11,6 +11,9 @@
             <a href="{{ route('admin.places.osm') }}" class="px-3 py-1.5 text-sm font-medium rounded-lg {{ request()->routeIs('admin.places.osm') ? 'bg-emerald-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200' }}">
                 <i class="fas fa-globe-asia mr-1"></i> OSM Live (Nepal)
             </a>
+            <a href="{{ route('admin.places.corrections') }}" class="px-3 py-1.5 text-sm font-medium rounded-lg {{ request()->routeIs('admin.places.corrections') ? 'bg-amber-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200' }}">
+                <i class="fas fa-flag mr-1"></i> Corrections
+            </a>
         </div>
         <div class="px-6 py-4 border-b border-gray-100 flex flex-wrap items-center justify-between gap-4">
             <div class="flex items-center gap-3">
@@ -62,6 +65,7 @@
             @endphp
             <form id="bulkForm" method="POST" action="">
                 @csrf
+            </form>
             <table class="w-full">
                 <thead class="bg-gray-50">
                     <tr>
@@ -95,7 +99,7 @@
                     @forelse($places as $place)
                     <tr class="hover:bg-gray-50">
                         <td class="px-4 py-4">
-                            <input type="checkbox" name="ids[]" value="{{ $place->id }}" class="place-checkbox rounded border-gray-300" onchange="updateBulkBar()">
+                            <input type="checkbox" name="ids[]" value="{{ $place->id }}" form="bulkForm" class="place-checkbox rounded border-gray-300" onchange="updateBulkBar()">
                         </td>
                         <td class="px-6 py-4 text-sm text-gray-500">#{{ $place->id }}</td>
                         <td class="px-6 py-4">
@@ -134,7 +138,7 @@
                             @endif
                         </td>
                         <td class="px-6 py-4 text-right flex gap-2 justify-end">
-                            @if(!$place->is_active && !$place->is_verified)
+                            @if(!$place->is_verified)
                                 <form method="POST" action="{{ route('admin.places.approve', $place->id) }}" class="inline">
                                     @csrf
                                     <button type="submit" class="px-3 py-1.5 text-xs font-medium bg-green-50 text-green-600 rounded-lg hover:bg-green-100 transition" title="Approve & Publish">
@@ -175,7 +179,6 @@
                     @endforelse
                 </tbody>
             </table>
-            </form>
         </div>
         <!-- Bulk Action Bar -->
         <div id="bulkBar" class="hidden px-6 py-3 bg-primary-50 border-t border-primary-100 flex items-center justify-between">

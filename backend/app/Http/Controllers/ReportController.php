@@ -416,6 +416,15 @@ class ReportController extends Controller
         // but flag it for admin review. Moderators can reject based on this.
         $report = Report::create($validated);
 
+        // Review AI agent - real-time safety guard
+        $safety = app(\App\Services\ContentSafetyService::class);
+        $guardTitle = $safety->guard($request->user(), (string) $validated['title'], 'report', $report->id, 'title', 'realtime');
+        $guardDesc = $safety->guard($request->user(), (string) $validated['description'], 'report', $report->id, 'description', 'realtime');
+        if ($guardTitle['action'] === 'censored' || $guardDesc['action'] === 'censored') {
+            $report->update(['title' => $guardTitle['text'], 'description' => $guardDesc['text']]);
+        }
+        $safetyPayload = $safety->payload([$guardTitle, $guardDesc]);
+
         dispatch(new AnalyzeReport($report->id));
         dispatch(new TranslateContent('report', $report->id, 'title'));
         dispatch(new TranslateContent('report', $report->id, 'description'));
@@ -474,6 +483,7 @@ class ReportController extends Controller
             'success' => true,
             'message' => $message,
             'data' => $responseData,
+            'safety' => $safetyPayload,
         ], 201);
     }
 
@@ -518,7 +528,13 @@ class ReportController extends Controller
             $validated['verified_at'] = now();
         }
 
+        $wasApproved = $report->status === 'approved';
         $report->update($validated);
+
+        // Revoke approval XP when an approved report is rejected/unapproved via API
+        if ($wasApproved && isset($validated['status']) && $validated['status'] !== 'approved') {
+            app(AchievementService::class)->revokeReportApprovalXp($report);
+        }
 
         // Notify nearby users when report is approved
         if (isset($validated['status']) && $validated['status'] === 'approved') {
@@ -661,6 +677,14 @@ class ReportController extends Controller
             'parent_comment_id' => $request->parent_comment_id,
         ]);
 
+        // Review AI agent - real-time safety guard
+        $safety = app(\App\Services\ContentSafetyService::class);
+        $guard = $safety->guard($user, (string) $request->content, 'report_comment', $comment->id, 'content', 'realtime');
+        if ($guard['action'] === 'censored') {
+            $comment->update(['content' => $guard['text']]);
+        }
+        $safetyPayload = $safety->payload([$guard]);
+
         $report->increment('comments_count');
 
         app(AchievementService::class)->checkAndAwardAchievements($user);
@@ -678,6 +702,7 @@ class ReportController extends Controller
                 'created_at' => $comment->created_at,
                 'time_ago' => $comment->created_at->diffForHumans(),
             ],
+            'safety' => $safetyPayload,
         ]);
     }
 

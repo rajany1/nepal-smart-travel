@@ -42,6 +42,13 @@ class RolePermissionSeeder extends Seeder
             // System (no nav menu)
             ['name' => 'manage_roles', 'display_name' => 'Manage Roles', 'group' => 'system', 'description' => 'Create, edit, and delete roles', 'route_name' => 'admin.roles'],
             ['name' => 'manage_permissions', 'display_name' => 'Manage Permissions', 'group' => 'system', 'description' => 'Create, edit, and delete permissions', 'route_name' => 'admin.permissions'],
+
+            // Monetization
+            ['name' => 'manage_offers', 'display_name' => 'Manage Offers', 'group' => 'monetization', 'menu_group' => 'monetization', 'description' => 'Approve, reject, or pause business reward offers', 'menu_label' => 'Offers', 'menu_icon' => 'gift', 'menu_order' => 8, 'route_name' => 'admin.offers'],
+            ['name' => 'verify_businesses', 'display_name' => 'Verify Businesses', 'group' => 'monetization', 'description' => 'Approve or reject business partner registrations', 'route_name' => 'admin.travel-partners'],
+
+            // Website
+            ['name' => 'manage_curated_routes', 'display_name' => 'Manage Curated Routes', 'group' => 'website', 'menu_group' => 'main', 'description' => 'Create and edit curated routes for the public website', 'menu_label' => 'Routes', 'menu_icon' => 'route', 'menu_order' => 9, 'route_name' => 'admin.routes'],
         ];
 
         foreach ($permissions as $p) {
@@ -76,6 +83,13 @@ class RolePermissionSeeder extends Seeder
                 'description' => 'Regular platform user',
                 'is_system' => true,
                 'is_default' => true,
+                'permissions' => [],
+            ],
+            'business' => [
+                'display_name' => 'Business Partner',
+                'description' => 'Business partner who manages reward offers',
+                'is_system' => true,
+                'is_default' => false,
                 'permissions' => [],
             ],
         ];

@@ -6,7 +6,9 @@ import '../../config/themes/app_theme.dart';
 import '../../core/models/place.dart';
 import '../../providers/place_details_provider.dart';
 import '../../widgets/image_carousel_widget.dart';
+import '../../widgets/ad_inline_banner.dart';
 import '../../core/services/session_manager.dart';
+import 'place_correction_screen.dart';
 
 class PlaceDetailsScreen extends StatefulWidget {
   final Place place;
@@ -403,6 +405,31 @@ class _PlaceDetailsScreenState extends State<PlaceDetailsScreen> {
                         ),
                       ),
 
+                      // Report a problem
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                        child: OutlinedButton.icon(
+                          onPressed: () {
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (_) => PlaceCorrectionScreen(place: place),
+                              ),
+                            );
+                          },
+                          icon: const Icon(Icons.flag_outlined, size: 18),
+                          label: const Text('Report a problem'),
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: AppTheme.textSecondary,
+                            side: BorderSide(color: AppTheme.dividerColor),
+                            minimumSize: const Size.fromHeight(44),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                          ),
+                        ),
+                      ),
+
                       // Description
                       if (place.description != null &&
                           place.description!.isNotEmpty) ...[
@@ -569,6 +596,13 @@ class _PlaceDetailsScreenState extends State<PlaceDetailsScreen> {
                           ),
                         ),
                       ],
+
+                      // Sponsored ad for this place's category
+                      AdInlineBanner(
+                        adContext: 'place_detail',
+                        category: place.category.toLowerCase(),
+                        district: place.district,
+                      ),
 
                       // Write a Review
                       Padding(

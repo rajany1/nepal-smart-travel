@@ -28,6 +28,16 @@ class User extends Authenticatable
         return $this->hasMany(\App\Models\PlaceReview::class);
     }
 
+    public function moderationStrikes(): \Illuminate\Database\Eloquent\Relations\HasMany
+    {
+        return $this->hasMany(ModerationStrike::class, 'user_id');
+    }
+
+    public function contentViolations(): \Illuminate\Database\Eloquent\Relations\HasMany
+    {
+        return $this->hasMany(ContentViolation::class, 'user_id');
+    }
+
     public function socialAccounts(): \Illuminate\Database\Eloquent\Relations\HasMany
     {
         return $this->hasMany(SocialAccount::class);
@@ -146,6 +156,7 @@ class User extends Authenticatable
         'rejected_reports',
         'is_verified',
         'status',
+        'suspended_until',
         'profile_completed',
         'badges',
         'expertise_regions',
@@ -181,6 +192,7 @@ class User extends Authenticatable
             'approval_rate' => 'decimal:2',
             'rank' => 'integer',
             'last_contribution_at' => 'datetime',
+            'suspended_until' => 'datetime',
         ];
     }
 
@@ -197,6 +209,21 @@ class User extends Authenticatable
     public function isModerator(): bool
     {
         return $this->role?->name === 'moderator';
+    }
+
+    public function isBusiness(): bool
+    {
+        return $this->role?->name === 'business';
+    }
+
+    public function business(): \Illuminate\Database\Eloquent\Relations\HasOne
+    {
+        return $this->hasOne(TravelPartner::class, 'user_id');
+    }
+
+    public function offerRedemptions(): \Illuminate\Database\Eloquent\Relations\HasMany
+    {
+        return $this->hasMany(OfferRedemption::class);
     }
 
     public function promoteToAdmin(): bool

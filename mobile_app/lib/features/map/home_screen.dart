@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+﻿import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:dio/dio.dart';
 import '../../config/themes/app_theme.dart';
@@ -16,11 +16,14 @@ import '../assistant/assistant_screen.dart';
 import '../profile/profile_screen.dart';
 import '../alerts/alerts_screen.dart';
 import '../leaderboard/leaderboard_screen.dart';
-import '../sponsors/sponsors_screen.dart';
 import '../store/store_screen.dart';
 import '../bookings/my_bookings_screen.dart';
 import '../subscriptions/subscription_plans_screen.dart';
 import '../../widgets/ad_banner_carousel.dart';
+import '../offers/offers_screen.dart';
+import '../offers/offer_detail_screen.dart';
+import '../../core/models/offer_model.dart';
+import '../../providers/offer_provider.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -230,6 +233,21 @@ color: AppTheme.surfaceColor,
             ),
             const SizedBox(height: 24),
 
+            // Rewards
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text('Rewards', style: Theme.of(context).textTheme.titleLarge),
+                TextButton(
+                  onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const OffersScreen())),
+                  child: const Text('See All'),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            const _RewardsStrip(),
+            const SizedBox(height: 24),
+
             // Live Alerts
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -266,18 +284,6 @@ color: AppTheme.surfaceColor,
                 ),
               )),
 
-            const SizedBox(height: 24),
-
-            // Sponsors
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Text('Our Sponsors', style: Theme.of(context).textTheme.titleLarge),
-                TextButton(onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const SponsorsScreen())), child: const Text('See All')),
-              ],
-            ),
-            const SizedBox(height: 8),
-            const _SponsorsLogoStrip(),
             const SizedBox(height: 24),
 
             // Nearby Highlights
@@ -353,6 +359,110 @@ color: AppTheme.surfaceColor,
                 ),
               ),
             ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _RewardsStrip extends StatelessWidget {
+  const _RewardsStrip();
+
+  @override
+  Widget build(BuildContext context) {
+    final provider = context.watch<OfferProvider>();
+    final offers = provider.offers;
+
+    return SizedBox(
+      height: 130,
+      child: provider.isLoading && offers.isEmpty
+          ? const Center(child: CircularProgressIndicator())
+          : offers.isEmpty
+              ? Container(
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: AppTheme.primaryColor.withOpacity(0.06),
+                    borderRadius: BorderRadius.circular(16),
+                  ),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.card_giftcard, color: AppTheme.primaryColor),
+                      const SizedBox(width: 12),
+                      const Expanded(
+                        child: Text(
+                          'Exclusive business offers & discounts',
+                          style: TextStyle(color: Colors.grey, fontSize: AppTheme.textSm),
+                        ),
+                      ),
+                      TextButton(
+                        onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const OffersScreen())),
+                        child: const Text('Explore'),
+                      ),
+                    ],
+                  ),
+                )
+              : ListView.separated(
+                  scrollDirection: Axis.horizontal,
+                  itemCount: offers.length,
+                  separatorBuilder: (_, __) => const SizedBox(width: 12),
+                  itemBuilder: (context, i) => _MiniOfferCard(offer: offers[i]),
+                ),
+    );
+  }
+}
+
+class _MiniOfferCard extends StatelessWidget {
+  final OfferModel offer;
+
+  const _MiniOfferCard({required this.offer});
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: () => Navigator.push(
+        context,
+        MaterialPageRoute(builder: (_) => OfferDetailScreen(offer: offer)),
+      ),
+      child: Container(
+        width: 200,
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          gradient: const LinearGradient(
+            colors: [AppTheme.primaryColor, Color(0xFF0EA5A0)],
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+          ),
+          borderRadius: BorderRadius.circular(16),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Text(
+              offer.label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: AppTheme.textLg,
+                fontWeight: FontWeight.w900,
+              ),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              offer.title,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(color: Colors.white70, fontSize: AppTheme.textXs),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              offer.business?.name ?? 'Local business',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(color: Colors.white, fontSize: AppTheme.textXs, fontWeight: FontWeight.w600),
+            ),
           ],
         ),
       ),
@@ -467,69 +577,3 @@ class _PlaceCard extends StatelessWidget {
   }
 }
 
-class _SponsorsLogoStrip extends StatefulWidget {
-  const _SponsorsLogoStrip();
-  @override
-  State<_SponsorsLogoStrip> createState() => _SponsorsLogoStripState();
-}
-
-class _SponsorsLogoStripState extends State<_SponsorsLogoStrip> {
-  final _api = ApiClient.instance;
-  List<dynamic> _sponsors = [];
-  bool _loaded = false;
-
-  @override
-  void initState() {
-    super.initState();
-    _load();
-  }
-
-  Future<void> _load() async {
-    try {
-      final res = await _api.getSponsors();
-      _sponsors = res.data['data'] as List<dynamic>;
-    } catch (_) {}
-    if (mounted) setState(() { _loaded = true; });
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    if (!_loaded || _sponsors.isEmpty) return const SizedBox.shrink();
-    return SizedBox(
-      height: 90,
-      child: ListView.builder(
-        scrollDirection: Axis.horizontal,
-        itemCount: _sponsors.length,
-        itemBuilder: (_, i) {
-          final s = _sponsors[i] as Map<String, dynamic>;
-          return GestureDetector(
-            onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const SponsorsScreen())),
-            child: Container(
-              width: 100,
-              margin: const EdgeInsets.only(right: 10),
-              child: Card(
-                margin: EdgeInsets.zero,
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    CircleAvatar(
-                      radius: 18,
-                      backgroundColor: Colors.purple.shade50,
-                      child: Text(s['name']?[0]?.toUpperCase() ?? '?', style: TextStyle(fontSize: 16, color: Colors.purple.shade700, fontWeight: FontWeight.bold)),
-                    ),
-                    const SizedBox(height: 4),
-                    Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 6),
-                      child: Text(s['name'] ?? '', style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w500), maxLines: 1, overflow: TextOverflow.ellipsis, textAlign: TextAlign.center),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          );
-        },
-      ),
-    );
-  }
-}

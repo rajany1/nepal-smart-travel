@@ -3,11 +3,13 @@ import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
 import 'package:dio/dio.dart';
+import 'package:connectivity_plus/connectivity_plus.dart';
 import '../../config/themes/app_theme.dart';
 import '../../core/api/api_client.dart';
 import '../../core/services/offline_db_service.dart';
 import '../../providers/place_provider.dart';
 import '../../providers/auth_provider.dart';
+import '../auth/login_screen.dart';
 
 class AddPlaceScreen extends StatefulWidget {
   final double? initialLat;
@@ -70,6 +72,17 @@ class _AddPlaceScreenState extends State<AddPlaceScreen> {
     if (widget.initialCategory != null && _categories.contains(widget.initialCategory)) {
       _selectedCategory = widget.initialCategory;
     }
+    _checkConnectivity();
+  }
+
+  Future<void> _checkConnectivity() async {
+    try {
+      final result = await Connectivity().checkConnectivity();
+      if (!mounted) return;
+      setState(() {
+        _isOnline = result.isNotEmpty;
+      });
+    } catch (_) {}
   }
 
   @override
@@ -156,6 +169,73 @@ class _AddPlaceScreenState extends State<AddPlaceScreen> {
           ),
         );
         Navigator.pop(context, true);
+      }
+    } on DioException catch (e) {
+      if (!mounted) return;
+
+      // Lost connection mid-request -> queue offline instead of erroring out
+      if (e.type == DioExceptionType.connectionError ||
+          e.type == DioExceptionType.connectionTimeout ||
+          e.type == DioExceptionType.receiveTimeout ||
+          e.type == DioExceptionType.sendTimeout) {
+        await OfflineDbService.instance.addToSyncQueue(
+          operation: 'create',
+          entityType: 'place',
+          payload: placeData,
+          mediaPaths: _selectedImages.isNotEmpty
+              ? _selectedImages.map((f) => f.path).toList()
+              : null,
+        );
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('No connection - place saved offline. Will sync when online.'),
+            backgroundColor: Colors.orange,
+          ),
+        );
+        Navigator.pop(context, true);
+        return;
+      }
+
+      final status = e.response?.statusCode;
+      final bodyMessage = (e.response?.data is Map && e.response?.data['message'] != null)
+          ? e.response?.data['message'].toString()
+          : null;
+
+      if (status == 401) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Please log in to submit places.'),
+            backgroundColor: Colors.red,
+          ),
+        );
+        Navigator.pop(context);
+        Navigator.push(
+          context,
+          MaterialPageRoute(builder: (_) => const LoginScreen()),
+        );
+      } else if (status == 409) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(bodyMessage ?? 'This place already exists in our database.'),
+            backgroundColor: Colors.orange,
+          ),
+        );
+        Navigator.pop(context, false);
+      } else if (status == 422) {
+        final errors = e.response?.data is Map ? (e.response?.data['errors'] as Map?)?.values : null;
+        final firstError = errors != null && errors.isNotEmpty
+            ? (errors.first as List).first.toString()
+            : 'Please check the form and try again.';
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(firstError), backgroundColor: Colors.red),
+        );
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(bodyMessage ?? 'Error: ${e.message ?? 'Could not submit place.'}'),
+            backgroundColor: Colors.red,
+          ),
+        );
       }
     } catch (e) {
       if (mounted) {

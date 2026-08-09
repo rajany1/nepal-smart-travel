@@ -66,7 +66,7 @@ class _ReportsListScreenState extends State<ReportsListScreen>
     await provider.fetchEmergencyReports(lat: _userLat, lng: _userLng, radiusKm: 20.0);
     if (mounted) provider.startAutoRefresh();
     // Preload ad campaigns for feed injection
-    unawaited(context.read<AdProvider>().fetchActiveAds());
+    unawaited(context.read<AdProvider>().fetchActiveAds(adContext: 'report'));
   }
 
   @override

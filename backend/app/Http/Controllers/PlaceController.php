@@ -54,6 +54,34 @@ class PlaceController extends Controller
             $category = PlaceCategories::create(['name' => $request->category]);
         }
 
+        $osmId = $request->osm_id ? preg_replace('/^osm_/', '', $request->osm_id) : null;
+
+        // Prevent duplicates: exact OSM id already stored (admin import or prior submission)
+        if ($osmId) {
+            $existing = Place::where('osm_id', $osmId)->first();
+            if ($existing) {
+                return response()->json([
+                    'success' => false,
+                    'message' => $existing->is_active
+                        ? 'This place already exists in our database.'
+                        : 'This place has already been submitted and is awaiting review.',
+                    'data' => ['id' => (string)$existing->id],
+                ], 409);
+            }
+        }
+
+        // Prevent duplicates: same name near the same coordinates (within ~150m)
+        $nearby = Place::whereRaw('LOWER(TRIM(name)) = ?', [mb_strtolower(trim($request->name))])
+            ->whereRaw("(6371 * acos(cos(radians(?)) * cos(radians(latitude)) * cos(radians(longitude) - radians(?)) + sin(radians(?)) * sin(radians(latitude)))) <= 0.15",
+                [$request->latitude, $request->longitude, $request->latitude])
+            ->first();
+        if ($nearby) {
+            return response()->json([
+                'success' => false,
+                'message' => 'A similar place ("' . $nearby->name . '") already exists nearby.',
+            ], 409);
+        }
+
         $place = Place::create([
             'uuid' => (string) Str::uuid(),
             'name' => $request->name,
@@ -64,7 +92,7 @@ class PlaceController extends Controller
             'phone' => $request->phone ?? '',
             'category_id' => $category->id,
             'source' => 'user_submitted',
-            'osm_id' => $request->osm_id ? preg_replace('/^osm_/', '', $request->osm_id) : null,
+            'osm_id' => $osmId,
             'created_by' => $request->user()?->id,
             'is_active' => false,
             'is_verified' => false,
@@ -85,6 +113,19 @@ class PlaceController extends Controller
             dispatch(new TranslateContent('place', $place->id, 'description'));
         }
 
+        // Review AI agent - real-time safety guard
+        if ($request->user()) {
+            $safety = app(\App\Services\ContentSafetyService::class);
+            $guardName = $safety->guard($request->user(), (string) $request->input('name', ''), 'place', $place->id, 'name', 'realtime');
+            $guardDesc = $safety->guard($request->user(), (string) ($request->description ?? ''), 'place', $place->id, 'description', 'realtime');
+            if ($guardName['action'] === 'censored' || $guardDesc['action'] === 'censored') {
+                $place->update(['name' => $guardName['text'], 'description' => $guardDesc['text']]);
+            }
+            $safetyPayload = $safety->payload([$guardName, $guardDesc]);
+        } else {
+            $safetyPayload = ['censored' => false, 'warning' => null, 'account' => 'active', 'until' => null];
+        }
+
         // Log activity
         AuditLog::create([
             'user_id' => $request->user()?->id,
@@ -99,6 +140,7 @@ class PlaceController extends Controller
             'success' => true,
             'message' => 'Place submitted for review.',
             'data' => ['id' => (string)$place->id, 'uuid' => $place->uuid],
+            'safety' => $safetyPayload,
         ], 201);
     }
 
@@ -326,25 +368,39 @@ class PlaceController extends Controller
         // Attach Nepali translations (name_ne, description_ne, etc.)
         $adminPlaces = TranslationService::attachToPlaces($adminPlaces);
 
-        // 3. Merge: featured admin first, then OSM, then regular admin.
-        // Reserve half the slots for OSM so both sources always appear,
-        // even in OSM-dense areas (city centres).
-        $featuredAdmin = [];
-        $regularAdmin = [];
-        foreach ($adminPlaces as $p) {
-            if ($p['is_featured']) {
-                $featuredAdmin[] = $p;
-            } else {
-                $regularAdmin[] = $p;
-            }
+        // 2b. Cross-source dedup: drop OSM results already stored in our DB
+        // (matched by osm_id, or by same name within ~100m for legacy admin rows).
+        $dbPlaces = Place::select('id', 'osm_id', 'name', 'latitude', 'longitude')
+            ->whereNotNull('osm_id')
+            ->orWhereNotNull('latitude')
+            ->get();
+        $dbOsmIds = $dbPlaces->map(fn($p) => $p->osm_id)
+            ->filter()
+            ->map(fn($v) => str_replace('osm_', '', (string)$v))
+            ->flip();
+        $dbByName = [];
+        foreach ($dbPlaces as $p) {
+            if (!$p->name || $p->latitude === null || $p->longitude === null) continue;
+            $dbByName[mb_strtolower(trim($p->name))][] = [(float)$p->latitude, (float)$p->longitude];
         }
+        $osmPlaces = array_values(array_filter($osmPlaces, function ($p) use ($dbOsmIds, $dbByName) {
+            $osmKey = str_replace('osm_', '', $p['id'] ?? '');
+            if (isset($dbOsmIds[$osmKey])) return false;
+            $key = mb_strtolower(trim($p['name'] ?? ''));
+            foreach ($dbByName[$key] ?? [] as [$dLat, $dLng]) {
+                if ($this->haversineDistance($dLat, $dLng, $p['latitude'], $p['longitude']) <= 0.1) {
+                    return false;
+                }
+            }
+            return true;
+        }));
 
-        $osmSlots = (int) ceil($limit * 0.5);
-        $osmPlaces = array_slice($osmPlaces, 0, $osmSlots);
-        $adminSlots = $limit - count($featuredAdmin) - count($osmPlaces);
-        $regularAdmin = array_slice($regularAdmin, 0, max($adminSlots, 0));
-
-        $combined = array_merge($featuredAdmin, $osmPlaces, $regularAdmin);
+        // 3. Merge all sources and sort purely by distance from the user
+        // (no OSM-on-top / DB-on-bottom bias — closest place wins).
+        $combined = array_merge($adminPlaces, $osmPlaces);
+        usort($combined, fn($a, $b) =>
+            ($a['distance_km'] ?? PHP_FLOAT_MAX) <=> ($b['distance_km'] ?? PHP_FLOAT_MAX)
+        );
 
         // Limit total results
         $combined = array_slice($combined, 0, $limit);
@@ -742,6 +798,15 @@ class PlaceController extends Controller
             ]
         );
 
+        // Review AI agent - real-time safety guard (censors + records + escalates)
+        $safety = app(\App\Services\ContentSafetyService::class);
+        $guardTitle = $safety->guard($user, (string) $request->title, 'place_review', $review->id, 'title', 'realtime');
+        $guardDesc = $safety->guard($user, (string) $request->description, 'place_review', $review->id, 'description', 'realtime');
+        if ($guardTitle['action'] === 'censored' || $guardDesc['action'] === 'censored') {
+            $review->update(['title' => $guardTitle['text'], 'description' => $guardDesc['text']]);
+        }
+        $safetyPayload = $safety->payload([$guardTitle, $guardDesc]);
+
         // Award review XP only for the first submission of this review
         if ($review->wasRecentlyCreated) {
             $reviewXp = GameSetting::getValue('review_xp', 3);
@@ -785,6 +850,7 @@ class PlaceController extends Controller
                 'average_rating' => round((float)$place->average_rating, 1),
                 'total_reviews' => $place->total_reviews,
             ],
+            'safety' => $safetyPayload,
         ]);
     }
 
@@ -872,16 +938,13 @@ class PlaceController extends Controller
             'osm_ids.*' => 'string|max:50',
         ]);
 
-        $user = $request->user();
         $statuses = [];
 
         foreach ($request->osm_ids as $osmId) {
             // Normalize: app sends "osm_node/123", DB stores "node/123"
             $dbOsmId = preg_replace('/^osm_/', '', $osmId);
 
-            $place = Place::where('osm_id', $dbOsmId)
-                ->where('created_by', $user?->id)
-                ->first();
+            $place = Place::where('osm_id', $dbOsmId)->first();
 
             if (!$place) {
                 $statuses[$osmId] = 'none';
@@ -900,6 +963,97 @@ class PlaceController extends Controller
         return response()->json([
             'success' => true,
             'data' => $statuses,
+        ]);
+    }
+
+    public function storeCorrection(Request $request)
+    {
+        $request->validate([
+            'place_id' => 'nullable|integer|exists:places,id',
+            'osm_id' => 'nullable|string|max:50',
+            'place_name' => 'required|string|max:255',
+            'correction_type' => 'required|in:wrong_location,wrong_name,closed,duplicate,outdated_info,other',
+            'description' => 'required|string|max:1000',
+            'suggested_name' => 'nullable|string|max:255',
+            'suggested_latitude' => 'nullable|numeric|between:-90,90',
+            'suggested_longitude' => 'nullable|numeric|between:-180,180',
+        ]);
+
+        $user = $request->user();
+        if (!$user) {
+            return response()->json(['success' => false, 'message' => 'Please log in to report a problem.'], 401);
+        }
+
+        $placeId = $request->place_id;
+        $osmId = $request->osm_id ? preg_replace('/^osm_/', '', $request->osm_id) : null;
+
+        $correction = \App\Models\PlaceCorrection::create([
+            'place_id' => $placeId,
+            'osm_id' => $osmId,
+            'place_name' => $request->place_name,
+            'user_id' => $user->id,
+            'correction_type' => $request->correction_type,
+            'description' => $request->description,
+            'suggested_name' => $request->suggested_name,
+            'suggested_latitude' => $request->suggested_latitude,
+            'suggested_longitude' => $request->suggested_longitude,
+            'status' => 'pending',
+        ]);
+
+        AuditLog::create([
+            'user_id' => $user->id,
+            'action' => 'place.correction-submitted',
+            'resource_type' => 'place_correction',
+            'resource_id' => $correction->id,
+            'description' => 'Correction requested for: ' . $request->place_name,
+            'ip_address' => $request->ip(),
+        ]);
+
+        // Review AI agent - real-time safety guard
+        $safety = app(\App\Services\ContentSafetyService::class);
+        $guardName = $safety->guard($user, (string) $request->place_name, 'place_correction', $correction->id, 'place_name', 'realtime');
+        $guardDesc = $safety->guard($user, (string) $request->description, 'place_correction', $correction->id, 'description', 'realtime');
+        $guardSuggested = $safety->guard($user, (string) ($request->suggested_name ?? ''), 'place_correction', $correction->id, 'suggested_name', 'realtime');
+        if ($guardName['action'] === 'censored' || $guardDesc['action'] === 'censored' || $guardSuggested['action'] === 'censored') {
+            $correction->update([
+                'place_name' => $guardName['text'],
+                'description' => $guardDesc['text'],
+                'suggested_name' => $guardSuggested['text'],
+            ]);
+        }
+        $safetyPayload = $safety->payload([$guardName, $guardDesc, $guardSuggested]);
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Correction request submitted. Our team will review it.',
+            'data' => ['id' => $correction->id, 'status' => 'pending'],
+            'safety' => $safetyPayload,
+        ], 201);
+    }
+
+    public function myCorrections(Request $request)
+    {
+        $user = $request->user();
+        $corrections = \App\Models\PlaceCorrection::where('user_id', $user?->id)
+            ->orderByDesc('created_at')
+            ->limit(50)
+            ->get()
+            ->map(fn($c) => [
+                'id' => $c->id,
+                'place_id' => $c->place_id,
+                'osm_id' => $c->osm_id,
+                'place_name' => $c->place_name,
+                'correction_type' => $c->correction_type,
+                'description' => $c->description,
+                'suggested_name' => $c->suggested_name,
+                'status' => $c->status,
+                'admin_note' => $c->admin_note,
+                'created_at' => $c->created_at?->toIso8601String(),
+            ]);
+
+        return response()->json([
+            'success' => true,
+            'data' => $corrections,
         ]);
     }
 }

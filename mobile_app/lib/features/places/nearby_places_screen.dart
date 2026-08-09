@@ -17,6 +17,7 @@ import '../../core/models/ad_campaign.dart';
 import '../../providers/place_provider.dart';
 import '../../providers/ad_provider.dart';
 import '../../widgets/ad_cards.dart';
+import '../../widgets/ad_inline_banner.dart';
 import 'place_details_screen.dart';
 import 'add_place_screen.dart';
 import 'filter_places_sheet.dart';
@@ -125,7 +126,7 @@ class _NearbyPlacesScreenState extends State<NearbyPlacesScreen> {
 if (mounted && _lat != null && _lng != null) {
         provider.fetchNearbyPlaces(lat: _lat!, lng: _lng!, radiusKm: _searchRadiusKm);
         provider.fetchFeaturedPlaces(lat: _lat, lng: _lng);
-        unawaited(context.read<AdProvider>().fetchActiveAds());
+        unawaited(context.read<AdProvider>().fetchActiveAds(adContext: 'nearby'));
         WidgetsBinding.instance.addPostFrameCallback((_) async {
           await Future.delayed(const Duration(milliseconds: 200));
           if (mounted && _lat != null && _lng != null) {
@@ -1002,6 +1003,10 @@ if (mounted && _lat != null && _lng != null) {
                         search: _searchController.text.isNotEmpty ? _searchController.text : null,
                       );
                     }
+                    context.read<AdProvider>().fetchActiveAds(
+                      adContext: adContextForCategory(cat.name),
+                      category: adCategorySlugForCategory(cat.name),
+                    );
                   },
                 ),
               );

@@ -17,8 +17,18 @@ class CheckUserStatus
             return $next($request);
         }
 
+        // Auto-reactivate expired suspensions so users are never locked out longer than intended
+        if ($user->status === 'suspended' && $user->suspended_until !== null && $user->suspended_until->lte(now())) {
+            $user->update(['status' => 'active', 'suspended_until' => null]);
+            return $next($request);
+        }
+
         if (in_array($user->status, ['banned', 'suspended', 'deleted'])) {
-            $user->tokens()->delete();
+            // Banned/deleted = permanent, tokens are revoked. Suspended users keep
+            // their session so the app can still show the reason + expiry to them.
+            if (in_array($user->status, ['banned', 'deleted'])) {
+                $user->tokens()->delete();
+            }
 
             // Web response: logout session and redirect
             if (!$request->expectsJson()) {
@@ -37,16 +47,17 @@ class CheckUserStatus
                 'success' => false,
                 'message' => match ($reason) {
                     'banned' => 'Your account has been permanently banned due to violation of our community guidelines.',
-                    'suspended' => 'Your account has been temporarily suspended. Please contact support to regain access.',
+                    'suspended' => 'Your account has been temporarily suspended until ' . optional($user->suspended_until)->format('M j, Y g:i A') . ' due to repeated violations of our community guidelines.',
                     default => 'This account has been deleted.',
                 },
                 'reason' => $reason,
+                'suspended_until' => optional($user->suspended_until)->toDateTimeString(),
                 'code' => match ($reason) {
                     'banned' => 'ACCOUNT_BANNED',
                     'suspended' => 'ACCOUNT_SUSPENDED',
                     default => 'ACCOUNT_DELETED',
                 },
-                'requires_logout' => true,
+                'requires_logout' => $reason !== 'suspended',
             ], 403);
         }
 

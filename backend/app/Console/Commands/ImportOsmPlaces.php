@@ -211,6 +211,20 @@ class ImportOsmPlaces extends Command
                     continue;
                 }
 
+                // Legacy merge: legacy admin-created row (no osm_id) at the same spot
+                // and same name gets the osm_id attached instead of inserting a duplicate.
+                $legacy = Place::whereNull('osm_id')
+                    ->whereRaw('LOWER(TRIM(name)) = ?', [mb_strtolower(trim($name))])
+                    ->whereRaw("(6371 * acos(cos(radians(?)) * cos(radians(latitude)) * cos(radians(longitude) - radians(?)) + sin(radians(?)) * sin(radians(latitude)))) <= 0.2",
+                        [$elemLat, $elemLng, $elemLat])
+                    ->first();
+                if ($legacy) {
+                    $legacy->update(['osm_id' => $osmId, 'source' => $legacy->source === 'admin' ? 'osm' : $legacy->source]);
+                    $imported++;
+                    $this->line("  ↦ Linked osm_id {$osmId} to existing place #{$legacy->id} ('{$name}')");
+                    continue;
+                }
+
                 $category = $this->osmToCategory($tags);
                 $categoryId = $this->getCategoryId($category);
 

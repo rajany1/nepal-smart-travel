@@ -1,8 +1,10 @@
-import 'package:flutter/material.dart';
+﻿import 'package:flutter/material.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../core/api/api_client.dart';
 
 class AdBannerCarousel extends StatefulWidget {
-  const AdBannerCarousel({super.key});
+  final String adContext;
+  const AdBannerCarousel({super.key, this.adContext = 'home'});
 
   @override
   State<AdBannerCarousel> createState() => _AdBannerCarouselState();
@@ -29,10 +31,30 @@ class _AdBannerCarouselState extends State<AdBannerCarousel> {
 
   Future<void> _load() async {
     try {
-      final res = await _api.getActiveAds();
+      final res = await _api.getActiveAds(adContext: widget.adContext);
       _ads = (res.data['data'] as List<dynamic>?) ?? [];
+      for (final ad in _ads) {
+        if (ad is Map<String, dynamic> && ad['id'] is int) {
+          _api.trackAdImpression(ad['id'] as int).then((_) {}).catchError((_) {});
+        }
+      }
     } catch (_) {}
     if (mounted) setState(() { _loaded = true; });
+  }
+
+  Future<void> _onTap(dynamic ad) async {
+    if (ad is! Map<String, dynamic>) return;
+    final id = ad['id'];
+    if (id is int) {
+      _api.trackAdClick(id).then((_) {}).catchError((_) {});
+    }
+    final target = ad['target_url'] as String?;
+    if (target != null && target.isNotEmpty) {
+      final uri = Uri.tryParse(target);
+      if (uri != null) {
+        await launchUrl(uri, mode: LaunchMode.externalApplication);
+      }
+    }
   }
 
   @override
@@ -57,7 +79,7 @@ class _AdBannerCarouselState extends State<AdBannerCarousel> {
                     elevation: 2,
                     child: InkWell(
                       borderRadius: BorderRadius.circular(14),
-                      onTap: () {},
+                      onTap: () => _onTap(ad),
                       child: Container(
                         decoration: BoxDecoration(
                           borderRadius: BorderRadius.circular(14),

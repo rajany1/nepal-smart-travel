@@ -8,7 +8,8 @@ import '../../core/api/api_client.dart';
 import 'booking_form_screen.dart';
 
 class MyBookingsScreen extends StatefulWidget {
-  const MyBookingsScreen({super.key});
+  final bool inTab;
+  const MyBookingsScreen({super.key, this.inTab = false});
 
   @override
   State<MyBookingsScreen> createState() => _MyBookingsScreenState();
@@ -73,7 +74,9 @@ class _MyBookingsScreenState extends State<MyBookingsScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('My Bookings')),
+      appBar: widget.inTab
+          ? null
+          : AppBar(title: const Text('My Bookings')),
       floatingActionButton: FloatingActionButton.extended(
         onPressed: _newBooking,
         icon: const Icon(Icons.add),

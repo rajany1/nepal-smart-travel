@@ -39,20 +39,20 @@ class _BookingFormScreenState extends State<BookingFormScreen> {
 
   List<Map<String, dynamic>> _availableCodes = [];
   bool _loadingCodes = true;
-  int? _selectedCodeId;
+  String? _selectedCode;
   Map<String, dynamic>? _selectedCodeData;
 
   double get _discountAmount {
     if (_selectedCodeData == null) return 0;
-    final item = _selectedCodeData!['shop_item'] as Map<String, dynamic>?;
-    if (item == null) return 0;
-    final discountType = item['discount_type'] as String?;
-    final discountValue = double.tryParse(item['discount_value']?.toString() ?? '') ?? 0;
+    final offer = _selectedCodeData!['offer'] as Map<String, dynamic>?;
+    if (offer == null) return 0;
+    final offerType = offer['offer_type'] as String?;
+    final discountValue = double.tryParse(offer['discount_value']?.toString() ?? '') ?? 0;
     final amount = double.tryParse(_amountCtl.text) ?? 0;
-    if (discountType == 'percentage') {
-      return amount * discountValue / 100;
-    } else if (discountType == 'fixed') {
-      return discountValue;
+    if (offerType == 'percentage_off') {
+      return (amount * discountValue / 100).clamp(0, amount);
+    } else if (offerType == 'fixed_off') {
+      return discountValue.clamp(0, amount);
     }
     return 0;
   }
@@ -77,10 +77,10 @@ class _BookingFormScreenState extends State<BookingFormScreen> {
 
   Future<void> _loadCodes() async {
     try {
-      final response = await _api.getAvailableCodes();
+      final response = await _api.getAvailableOfferCodes();
       if (!mounted) return;
       setState(() {
-        _availableCodes = (response.data['data'] as List? ?? []).cast<Map<String, dynamic>>();
+        _availableCodes = (response.data['redemptions'] as List? ?? []).cast<Map<String, dynamic>>();
         _loadingCodes = false;
       });
     } catch (_) {
@@ -112,8 +112,8 @@ class _BookingFormScreenState extends State<BookingFormScreen> {
         'notes': _notesCtl.text,
         'booked_at': _selectedDate?.toIso8601String(),
       };
-      if (_selectedCodeId != null) {
-        data['shop_code_id'] = _selectedCodeId;
+      if (_selectedCode != null) {
+        data['offer_code'] = _selectedCode;
       }
 
       await _api.createBooking(data);
@@ -428,10 +428,10 @@ class _BookingFormScreenState extends State<BookingFormScreen> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(children: [
-            Icon(Icons.card_giftcard, size: 18, color: Colors.amber[700]),
+            Icon(Icons.local_offer, size: 18, color: Colors.amber[700]),
             const SizedBox(width: 6),
             Text(
-              'Available Rewards & Coupons',
+              'Available Offer Codes',
               style: TextStyle(
                 fontWeight: FontWeight.w600,
                 fontSize: AppTheme.textBase,
@@ -441,12 +441,12 @@ class _BookingFormScreenState extends State<BookingFormScreen> {
           ]),
           const SizedBox(height: 8),
           ..._availableCodes.map((code) {
-            final item = code['shop_item'] as Map<String, dynamic>?;
-            final itemName = item?['name'] ?? 'Reward';
-            final discountType = item?['discount_type'] as String?;
-            final discountValue = double.tryParse(item?['discount_value']?.toString() ?? '') ?? 0;
+            final offer = code['offer'] as Map<String, dynamic>?;
+            final offerName = offer?['title'] ?? 'Reward';
+            final offerType = offer?['offer_type'] as String?;
+            final discountValue = double.tryParse(offer?['discount_value']?.toString() ?? '') ?? 0;
             final codeStr = code['code'] as String? ?? '';
-            final isSelected = _selectedCodeId == code['id'];
+            final isSelected = _selectedCode == codeStr;
             return Container(
               margin: const EdgeInsets.only(bottom: 6),
               decoration: BoxDecoration(
@@ -459,7 +459,7 @@ class _BookingFormScreenState extends State<BookingFormScreen> {
               child: ListTile(
                 dense: true,
                 contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 0),
-                title: Text(itemName, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500)),
+                title: Text(offerName, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500)),
                 subtitle: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
@@ -471,9 +471,9 @@ class _BookingFormScreenState extends State<BookingFormScreen> {
                         color: Colors.grey[500],
                       ),
                     ),
-                    if (discountType != null && discountValue > 0)
+                    if (offerType != null && discountValue > 0)
                       Text(
-                        discountType == 'percentage'
+                        offerType == 'percentage_off'
                             ? '$discountValue% OFF'
                             : 'Rs. ${discountValue.toStringAsFixed(0)} OFF',
                         style: TextStyle(
@@ -487,7 +487,7 @@ class _BookingFormScreenState extends State<BookingFormScreen> {
                 trailing: isSelected
                     ? TextButton(
                         onPressed: () => setState(() {
-                          _selectedCodeId = null;
+                          _selectedCode = null;
                           _selectedCodeData = null;
                         }),
                         style: TextButton.styleFrom(foregroundColor: Colors.red),
@@ -495,7 +495,7 @@ class _BookingFormScreenState extends State<BookingFormScreen> {
                       )
                     : TextButton(
                         onPressed: () => setState(() {
-                          _selectedCodeId = code['id'] as int?;
+                          _selectedCode = codeStr;
                           _selectedCodeData = code;
                         }),
                         child: const Text('Apply', style: TextStyle(fontSize: 11)),
@@ -503,7 +503,7 @@ class _BookingFormScreenState extends State<BookingFormScreen> {
               ),
             );
           }),
-          if (_selectedCodeId != null && _discountAmount > 0) ...[
+          if (_selectedCode != null && _discountAmount > 0) ...[
             const SizedBox(height: 8),
             Container(
               padding: const EdgeInsets.all(10),

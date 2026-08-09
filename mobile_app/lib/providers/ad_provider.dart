@@ -17,12 +17,22 @@ class AdProvider extends ChangeNotifier {
   bool get isLoading => _isLoading;
   String? get errorMessage => _errorMessage;
 
-  Future<void> fetchActiveAds() async {
+  Future<void> fetchActiveAds({
+    String? adContext,
+    String? district,
+    String? category,
+    int? limit,
+  }) async {
     _isLoading = true;
     notifyListeners();
 
     try {
-      final res = await _api.getActiveAds();
+      final res = await _api.getActiveAds(
+        adContext: adContext,
+        district: district,
+        category: category,
+        limit: limit,
+      );
       final data = (res.data['data'] as List<dynamic>?) ?? [];
       _ads = data.map((e) => AdCampaignModel.fromJson(e as Map<String, dynamic>)).toList();
 
@@ -37,6 +47,14 @@ class AdProvider extends ChangeNotifier {
 
     _isLoading = false;
     notifyListeners();
+  }
+
+  Future<void> trackImpression(AdCampaignModel ad) {
+    return _api.trackAdImpression(ad.id).then((_) {}).catchError((_) {});
+  }
+
+  Future<void> trackClick(AdCampaignModel ad) {
+    return _api.trackAdClick(ad.id).then((_) {}).catchError((_) {});
   }
 
   void clear() {

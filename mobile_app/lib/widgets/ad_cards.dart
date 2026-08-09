@@ -2,15 +2,28 @@
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../config/themes/app_theme.dart';
+import '../core/api/api_client.dart';
 import '../core/models/ad_campaign.dart';
 
-class AdPlaceCard extends StatelessWidget {
+class AdPlaceCard extends StatefulWidget {
   final AdCampaignModel ad;
 
   const AdPlaceCard({super.key, required this.ad});
 
   @override
+  State<AdPlaceCard> createState() => _AdPlaceCardState();
+}
+
+class _AdPlaceCardState extends State<AdPlaceCard> {
+  @override
+  void initState() {
+    super.initState();
+    ApiClient.instance.trackAdImpression(widget.ad.id).then((_) {}).catchError((_) {});
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final ad = widget.ad;
     return Padding(
       padding: const EdgeInsets.only(bottom: 8),
       child: Material(
@@ -109,19 +122,32 @@ class AdPlaceCard extends StatelessWidget {
   }
 
   void _onTap(BuildContext context) {
-    if (ad.targetUrl != null && ad.targetUrl!.isNotEmpty) {
-      launchUrl(Uri.parse(ad.targetUrl!), mode: LaunchMode.externalApplication);
+    ApiClient.instance.trackAdClick(widget.ad.id).then((_) {}).catchError((_) {});
+    if (widget.ad.targetUrl != null && widget.ad.targetUrl!.isNotEmpty) {
+      launchUrl(Uri.parse(widget.ad.targetUrl!), mode: LaunchMode.externalApplication);
     }
   }
 }
 
-class AdReportCard extends StatelessWidget {
+class AdReportCard extends StatefulWidget {
   final AdCampaignModel ad;
 
   const AdReportCard({super.key, required this.ad});
 
   @override
+  State<AdReportCard> createState() => _AdReportCardState();
+}
+
+class _AdReportCardState extends State<AdReportCard> {
+  @override
+  void initState() {
+    super.initState();
+    ApiClient.instance.trackAdImpression(widget.ad.id).then((_) {}).catchError((_) {});
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final ad = widget.ad;
     return Card(
       margin: const EdgeInsets.only(bottom: 12),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
@@ -188,8 +214,9 @@ class AdReportCard extends StatelessWidget {
   }
 
   void _onTap(BuildContext context) {
-    if (ad.targetUrl != null && ad.targetUrl!.isNotEmpty) {
-      launchUrl(Uri.parse(ad.targetUrl!), mode: LaunchMode.externalApplication);
+    ApiClient.instance.trackAdClick(widget.ad.id).then((_) {}).catchError((_) {});
+    if (widget.ad.targetUrl != null && widget.ad.targetUrl!.isNotEmpty) {
+      launchUrl(Uri.parse(widget.ad.targetUrl!), mode: LaunchMode.externalApplication);
     }
   }
 }

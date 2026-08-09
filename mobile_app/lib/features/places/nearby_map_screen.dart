@@ -18,9 +18,12 @@ import '../../core/models/place.dart';
 import '../../core/api/api_client.dart';
 import '../../providers/place_provider.dart';
 import '../../providers/map_view_provider.dart';
+import '../../providers/auth_provider.dart';
+import '../auth/login_screen.dart';
 import 'place_details_screen.dart';
 import 'add_place_screen.dart';
 import 'filter_places_sheet.dart';
+import '../../widgets/ad_inline_banner.dart';
 
 /// Nepal Smart Travel enhanced nearby map screen with:
 /// - Satellite/Standard view toggle
@@ -375,6 +378,31 @@ class _NearbyMapScreenState extends State<NearbyMapScreen> {
   }
 
   void _confirmSaveOsmPlace(PlaceModel place) {
+    final auth = context.read<AuthProvider>();
+    if (!auth.isAuthenticated) {
+      showDialog(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Login required'),
+          content: Text('Log in to save "${place.name}" to our local database.'),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+            FilledButton(
+              onPressed: () {
+                Navigator.pop(ctx);
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => const LoginScreen()),
+                );
+              },
+              child: const Text('Log in'),
+            ),
+          ],
+        ),
+      );
+      return;
+    }
+
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -399,10 +427,14 @@ class _NearbyMapScreenState extends State<NearbyMapScreen> {
                   ),
                 ),
               );
-              if (result == true && mounted) {
-                setState(() {
-                  _osmSubmissionStatuses[place.id.toString()] = 'pending';
-                });
+              if (mounted) {
+                if (result == true) {
+                  setState(() {
+                    _osmSubmissionStatuses[place.id.toString()] = 'pending';
+                  });
+                } else {
+                  _checkOsmSubmissionStatuses();
+                }
               }
             },
             icon: const Icon(Icons.save, size: 18),
@@ -1393,6 +1425,7 @@ class _NearbyMapScreenState extends State<NearbyMapScreen> {
                         ),
                       ),
                       const Divider(height: 1, thickness: 1),
+                      AdInlineBanner(adContext: 'explore'),
                     ],
                   ),
                 ),

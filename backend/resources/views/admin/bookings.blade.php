@@ -121,8 +121,8 @@
                         <td class="px-4 py-3 text-right">
                             <p class="font-semibold text-sm">Rs. {{ number_format($b->amount, 2) }}</p>
                             @if($b->discount_amount > 0)
-                            <p class="text-xs text-green-600">-Rs. {{ number_format($b->discount_amount, 2) }}</p>
-                            <p class="text-xs font-bold text-slate-700">= Rs. {{ number_format($b->amount - $b->discount_amount, 2) }}</p>
+                            <p class="text-xs text-slate-400 line-through">Rs. {{ number_format($b->discount_amount + $b->amount, 2) }}</p>
+                            <p class="text-xs text-green-600">-Rs. {{ number_format($b->discount_amount, 2) }} ({{ $b->offerRedemption?->code ?? 'offer' }})</p>
                             @endif
                         </td>
                         <td class="px-4 py-3 text-right">
@@ -130,7 +130,18 @@
                             <p class="text-xs text-amber-500">Pool: Rs. {{ number_format($b->reward_pool_share, 2) }}</p>
                         </td>
                         <td class="px-4 py-3 text-center">
-                            @if($b->shopCode)
+                            @if($b->offerRedemption)
+                            <span class="inline-flex items-center gap-1 text-xs bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full font-medium">
+                                <i class="fas fa-ticket-alt"></i>
+                                {{ $b->offerRedemption->offer?->title ?? 'Offer' }}
+                            </span>
+                            <p class="text-[10px] text-slate-400 mt-0.5 font-mono">{{ $b->offerRedemption->code }}</p>
+                            @if($b->offerRedemption->consumed_at)
+                            <p class="text-[10px] text-green-600 mt-0.5"><i class="fas fa-check"></i> Consumed</p>
+                            @elseif($b->offerRedemption->applied_at)
+                            <p class="text-[10px] text-amber-500 mt-0.5">Applied</p>
+                            @endif
+                            @elseif($b->shopCode)
                             <span class="inline-flex items-center gap-1 text-xs bg-purple-100 text-purple-700 px-2 py-0.5 rounded-full font-medium">
                                 <i class="fas fa-tag"></i>
                                 {{ $b->shopCode->shopItem?->name ?? 'Coupon' }}
@@ -218,6 +229,18 @@
                                             @if($b->confirmed_at)<p><span class="text-slate-500">Confirmed:</span> {{ $b->confirmed_at->format('M d, Y h:i A') }}</p>@endif
                                             @if($b->completed_at)<p><span class="text-slate-500">Completed:</span> {{ $b->completed_at->format('M d, Y h:i A') }}</p>@endif
                                         </div>
+@if($b->offerRedemption)
+                                        <div class="mt-3 pt-3 border-t border-slate-200">
+                                            <h5 class="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2"><i class="fas fa-ticket-alt mr-1"></i> Offer Code Details</h5>
+                                            <div class="space-y-1 text-sm">
+                                                <p><span class="text-slate-500">Code:</span> <code class="bg-slate-200 px-1.5 py-0.5 rounded text-xs font-mono">{{ $b->offerRedemption->code }}</code></p>
+                                                <p><span class="text-slate-500">Offer:</span> {{ $b->offerRedemption->offer?->title }}</p>
+                                                @if($b->discount_amount > 0)<p><span class="text-slate-500">Discount:</span> <span class="font-semibold text-green-600">Rs. {{ number_format($b->discount_amount, 2) }}</span></p>@endif
+                                                @if($b->offerRedemption->applied_at)<p><span class="text-slate-500">Applied:</span> {{ $b->offerRedemption->applied_at->format('M d, Y') }}</p>@endif
+                                                @if($b->offerRedemption->consumed_at)<p><span class="text-slate-500">Consumed:</span> {{ $b->offerRedemption->consumed_at->format('M d, Y') }}</p>@endif
+                                            </div>
+                                        </div>
+                                        @endif
                                         @if($b->shopCode)
                                         <div class="mt-3 pt-3 border-t border-slate-200">
                                             <h5 class="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2"><i class="fas fa-tag mr-1"></i> Coupon Details</h5>
@@ -312,12 +335,12 @@
                 <textarea name="notes" rows="2" class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm"></textarea>
             </div>
 
-            {{-- Reward / Coupon Section --}}
-            <div class="bg-purple-50 border border-purple-200 rounded-lg p-4 space-y-3">
-                <p class="text-xs font-semibold text-purple-700 uppercase tracking-wider"><i class="fas fa-tag mr-1"></i> Reward & Discount</p>
+            {{-- Offer Code Section --}}
+            <div class="bg-amber-50 border border-amber-200 rounded-lg p-4 space-y-3">
+                <p class="text-xs font-semibold text-amber-700 uppercase tracking-wider"><i class="fas fa-ticket-alt mr-1"></i> Offer Code Discount</p>
                 <div>
-                    <label class="block text-xs font-semibold text-slate-600 mb-1">User's Available Reward <span id="rewardFilterInfo" class="text-xs text-slate-400 font-normal"></span></label>
-                    <select name="shop_code_id" id="rewardCodeSelect" onchange="applyRewardByCode()" class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm">
+                    <label class="block text-xs font-semibold text-slate-600 mb-1">User's Claimed Offer Code <span id="rewardFilterInfo" class="text-xs text-slate-400 font-normal"></span></label>
+                    <select name="offer_redemption_id" id="rewardCodeSelect" onchange="applyRewardByCode()" class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm">
                         <option value="">— Select user & partner first —</option>
                     </select>
                 </div>
@@ -353,7 +376,7 @@
 
 @section('scripts')
 <script>
-let userCodes = @json($userCodes);
+let userRedemptions = @json($userRedemptions);
 
 function autofillAmount() {
     const sel = document.getElementById('partnerSelect');
@@ -402,16 +425,16 @@ function filterRewards() {
     const userOpt = userSel.options[userSel.selectedIndex];
     const userId = userOpt?.value || '';
 
-    codeSelect.innerHTML = '<option value="">— No Reward —</option>';
+    codeSelect.innerHTML = '<option value="">— No Offer Code —</option>';
 
     if (!userId) {
         document.getElementById('rewardFilterInfo').textContent = '(select a user first)';
         return;
     }
 
-    const codes = userCodes[userId] || [];
+    const codes = userRedemptions[userId] || [];
     if (!codes.length) {
-        document.getElementById('rewardFilterInfo').textContent = '(no codes available)';
+        document.getElementById('rewardFilterInfo').textContent = '(no claimed offer codes)';
         return;
     }
 
@@ -419,7 +442,7 @@ function filterRewards() {
 
     let filtered = codes;
     if (partnerId) {
-        filtered = codes.filter(c => c.sponsor_travel_partner_id == partnerId);
+        filtered = codes.filter(c => String(c.business_id || '') === String(partnerId));
     }
 
     document.getElementById('rewardFilterInfo').textContent = '(' + filtered.length + ' available' + ')';
@@ -427,10 +450,9 @@ function filterRewards() {
     filtered.forEach(c => {
         const opt = document.createElement('option');
         opt.value = c.id;
-        opt.dataset.discountType = c.discount_type || '';
+        opt.dataset.offerType = c.offer_type || '';
         opt.dataset.discountValue = c.discount_value;
-        opt.dataset.valueNpr = c.value_npr;
-        opt.textContent = c.shop_item_name + ' — Rs.' + c.value_npr.toLocaleString() + (c.discount_type ? ' [' + (c.discount_type === 'percentage' ? c.discount_value + '%' : 'Rs.' + c.discount_value + ' off') + ']' : '');
+        opt.textContent = '[' + c.code + '] ' + c.offer_name + (c.offer_type === 'percentage_off' ? ' — ' + c.discount_value + '% off' : c.offer_type === 'fixed_off' ? ' — Rs.' + c.discount_value + ' off' : '');
         codeSelect.appendChild(opt);
     });
 }
@@ -448,12 +470,10 @@ function applyRewardByCode() {
     }
 
     let discount = 0;
-    if (opt.dataset.discountType === 'fixed') {
+    if (opt.dataset.offerType === 'fixed_off') {
         discount = parseFloat(opt.dataset.discountValue) || 0;
-    } else if (opt.dataset.discountType === 'percentage') {
+    } else if (opt.dataset.offerType === 'percentage_off') {
         discount = amount * (parseFloat(opt.dataset.discountValue) || 0) / 100;
-    } else {
-        discount = parseFloat(opt.dataset.valueNpr) || 0;
     }
 
     discount = Math.min(discount, amount);

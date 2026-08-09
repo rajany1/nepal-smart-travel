@@ -6,9 +6,8 @@ use App\Http\Controllers\Controller;
 use App\Models\TravelPartner;
 use App\Models\Booking;
 use App\Models\CommissionTransaction;
+use App\Models\OfferRedemption;
 use App\Models\User;
-use App\Models\ShopCode;
-use App\Models\ShopItem;
 use App\Services\ModeratorService;
 use App\Services\ShopService;
 use Illuminate\Http\Request;
@@ -36,16 +35,43 @@ class TravelPartnerController extends Controller
     public function partners(Request $request)
     {
         $this->requireAdmin($request);
-        $partners = TravelPartner::withCount('bookings')->orderBy('name')->paginate(20);
+        $partners = TravelPartner::withCount('bookings')
+            ->orderByRaw("CASE WHEN verification_status = 'pending' THEN 0 ELSE 1 END")
+            ->orderBy('name')
+            ->paginate(20);
         return view('admin.travel_partners', compact('partners'));
     }
+
+    public function verifyPartner(TravelPartner $travelPartner)
+    {
+        $this->requireAdmin(request());
+        $travelPartner->update([
+            'verification_status' => 'verified',
+            'rejected_reason' => null,
+        ]);
+        $this->moderatorService->log(Auth::user(), 'business.verified', 'travel_partner', $travelPartner->id, 'Verified business: ' . $travelPartner->name);
+        return back()->with('success', 'Business verified: ' . $travelPartner->name);
+    }
+
+    public function rejectPartner(Request $request, TravelPartner $travelPartner)
+    {
+        $this->requireAdmin($request);
+        $travelPartner->update([
+            'verification_status' => 'rejected',
+            'rejected_reason' => $request->input('reason'),
+        ]);
+        $this->moderatorService->log(Auth::user(), 'business.rejected', 'travel_partner', $travelPartner->id, 'Rejected business: ' . $travelPartner->name . ' — ' . $request->input('reason'));
+        return back()->with('success', 'Business rejected.');
+    }
+
+    private const BUSINESS_TYPES = 'hotel,restaurant,cafe,shop,vehicle_rental,guide,adventure,other';
 
     public function partnerStore(Request $request)
     {
         $this->requireAdmin($request);
         $partner = TravelPartner::create($request->validate([
             'name' => 'required|string|max:255',
-            'type' => 'required|in:hotel,vehicle_rental,guide,adventure',
+            'type' => 'required|in:' . self::BUSINESS_TYPES,
             'description' => 'nullable|string',
             'phone' => 'nullable|string|max:50',
             'email' => 'nullable|email|max:255',
@@ -66,7 +92,7 @@ class TravelPartnerController extends Controller
         $this->requireAdmin($request);
         $travelPartner->update($request->validate([
             'name' => 'required|string|max:255',
-            'type' => 'required|in:hotel,vehicle_rental,guide,adventure',
+            'type' => 'required|in:' . self::BUSINESS_TYPES,
             'description' => 'nullable|string',
             'phone' => 'nullable|string|max:50',
             'email' => 'nullable|email|max:255',
@@ -88,7 +114,7 @@ class TravelPartnerController extends Controller
         $status = $request->get('status');
         $search = $request->get('search');
 
-        $query = Booking::with(['travelPartner', 'user', 'shopCode.shopItem', 'commissionTransaction']);
+        $query = Booking::with(['travelPartner', 'user', 'shopCode.shopItem', 'offerRedemption.offer.business', 'commissionTransaction']);
 
         if ($status) $query->where('status', $status);
 
@@ -117,29 +143,27 @@ class TravelPartnerController extends Controller
         ];
 
         $partners = TravelPartner::active()->orderBy('name')->get();
-        $shopItems = ShopItem::with('sponsor')->where('is_active', true)->orderBy('name')->get();
         $users = User::select('id', 'name', 'email', 'phone')->orderBy('name')->get();
 
-        $userCodes = ShopCode::with(['shopItem.sponsor'])
-            ->where('is_used', true)
-            ->whereNull('consumed_at')
+        $userRedemptions = OfferRedemption::with('offer.business:id,name')
+            ->where('status', 'claimed')
             ->whereNull('booking_id')
-            ->whereNotNull('purchased_by')
+            ->whereNull('consumed_at')
             ->get()
-            ->groupBy('purchased_by')
-            ->map(fn($codes) => $codes->map(fn($c) => [
-                'id' => $c->id,
-                'code' => $c->code,
-                'shop_item_id' => $c->shop_item_id,
-                'shop_item_name' => $c->shopItem?->name,
-                'value_npr' => (float)($c->shopItem?->value_npr ?? 0),
-                'discount_type' => $c->shopItem?->discount_type,
-                'discount_value' => (float)($c->shopItem?->discount_value ?? 0),
-                'sponsor_travel_partner_id' => $c->shopItem?->sponsor?->travel_partner_id,
+            ->groupBy('user_id')
+            ->map(fn($redemptions) => $redemptions->map(fn($r) => [
+                'id' => $r->id,
+                'code' => $r->code,
+                'offer_id' => $r->offer_id,
+                'offer_name' => $r->offer?->title,
+                'offer_type' => $r->offer?->offer_type,
+                'discount_value' => (float)($r->offer?->discount_value ?? 0),
+                'price_xp' => (int)($r->offer?->price_xp ?? 0),
+                'business_id' => $r->offer?->business_id,
             ])->values())
             ->toArray();
 
-        return view('admin.bookings', compact('bookings', 'partners', 'shopItems', 'users', 'userCodes', 'status', 'search', 'stats'));
+        return view('admin.bookings', compact('bookings', 'partners', 'users', 'userRedemptions', 'status', 'search', 'stats'));
     }
 
     public function bookingStore(Request $request)
@@ -155,29 +179,24 @@ class TravelPartnerController extends Controller
             'discount_amount' => 'nullable|numeric|min:0',
             'notes' => 'nullable|string',
             'booked_at' => 'nullable|date',
-            'shop_code_id' => 'nullable|exists:shop_codes,id',
+            'offer_redemption_id' => 'nullable|exists:offer_redemptions,id',
         ]);
 
         $finalAmount = $data['amount'];
         $discount = 0;
 
-        if (!empty($data['shop_code_id'])) {
-            $shopCode = ShopCode::with('shopItem')->find($data['shop_code_id']);
-            if ($shopCode && $shopCode->shopItem) {
-                if ($shopCode->booking_id || $shopCode->consumed_at) {
-                    return back()->with('error', 'Shop code is already applied or consumed.')
+        if (!empty($data['offer_redemption_id'])) {
+            $redemption = OfferRedemption::with('offer')->find($data['offer_redemption_id']);
+            if ($redemption && $redemption->offer) {
+                if ($redemption->booking_id || $redemption->consumed_at) {
+                    return back()->with('error', 'Offer code is already applied or consumed.')
                         ->withInput();
                 }
-                $item = $shopCode->shopItem;
-                // BE-17: unify discount resolution with ShopService::applyToBooking
-                if ($item->discount_type && $item->discount_value) {
-                    if ($item->discount_type === 'percentage') {
-                        $discount = $finalAmount * (float)$item->discount_value / 100;
-                    } elseif ($item->discount_type === 'fixed') {
-                        $discount = (float)$item->discount_value;
-                    } else {
-                        $discount = (float)$item->value_npr;
-                    }
+                $offer = $redemption->offer;
+                if ($offer->offer_type === 'percentage_off' && $offer->discount_value > 0 && $offer->discount_value <= 100) {
+                    $discount = $finalAmount * (float)$offer->discount_value / 100;
+                } elseif ($offer->offer_type === 'fixed_off' && $offer->discount_value > 0) {
+                    $discount = (float)$offer->discount_value;
                 }
             }
         }
@@ -198,8 +217,12 @@ class TravelPartnerController extends Controller
             'status' => 'pending',
         ]));
 
-        if (!empty($data['shop_code_id'])) {
-            ShopCode::where('id', $data['shop_code_id'])->update(['booking_id' => $booking->id]);
+        if (!empty($data['offer_redemption_id'])) {
+            OfferRedemption::where('id', $data['offer_redemption_id'])->update([
+                'booking_id' => $booking->id,
+                'discount_amount' => $discount,
+                'applied_at' => now(),
+            ]);
         }
 
         CommissionTransaction::create([
@@ -218,6 +241,10 @@ class TravelPartnerController extends Controller
     {
         $this->requireAdmin($request);
         $booking->update(['status' => 'confirmed', 'confirmed_at' => now()]);
+
+        if ($booking->offerRedemption) {
+            $booking->offerRedemption->update(['consumed_at' => now(), 'status' => 'used']);
+        }
 
         if ($booking->shopCode) {
             $booking->shopCode->update(['consumed_at' => now()]);
@@ -247,6 +274,20 @@ class TravelPartnerController extends Controller
         }
         if ($booking->shopCode) {
             $this->shopService->releaseFromBooking($booking->shopCode);
+        }
+        if ($booking->offerRedemption) {
+            $redemption = $booking->offerRedemption;
+            if ($booking->discount_amount > 0) {
+                $booking->update([
+                    'amount' => $booking->amount + $booking->discount_amount,
+                    'discount_amount' => 0,
+                ]);
+            }
+            $redemption->update([
+                'booking_id' => null,
+                'discount_amount' => null,
+                'applied_at' => null,
+            ]);
         }
         $this->moderatorService->log(Auth::user(), 'booking.cancelled', 'booking', $booking->id, 'Cancelled booking #' . $booking->id);
         return redirect()->route('admin.bookings')->with('success', 'Booking cancelled.');

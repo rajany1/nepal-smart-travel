@@ -65,9 +65,15 @@
                             <a href="{{ route('admin.live-map') }}?lat={{ $p['latitude'] }}&lng={{ $p['longitude'] }}&zoom=16" target="_blank" class="px-3 py-1.5 text-xs font-medium bg-blue-50 text-blue-600 rounded-lg hover:bg-blue-100 transition" title="View on map">
                                 <i class="fas fa-map-marker-alt"></i>
                             </a>
-                            <button type="button" onclick="quickImport(this)" data-name="{{ str_replace('"', '&quot;', $p['name']) }}" data-category="{{ $p['category'] }}" data-lat="{{ $p['latitude'] }}" data-lng="{{ $p['longitude'] }}" data-address="{{ str_replace('"', '&quot;', $p['address'] ?? '') }}" data-district="{{ str_replace('"', '&quot;', $p['district'] ?? '') }}" data-phone="{{ str_replace('"', '&quot;', $p['phone'] ?? '') }}" class="px-3 py-1.5 text-xs font-medium bg-emerald-50 text-emerald-600 rounded-lg hover:bg-emerald-100 transition" title="Import to database">
+                            @if(!empty($p['in_db']))
+                            <span class="px-3 py-1.5 text-xs font-medium bg-green-50 text-green-600 rounded-lg" title="Already saved in database">
+                                <i class="fas fa-check mr-1"></i>In DB
+                            </span>
+                            @else
+                            <button type="button" onclick="quickImport(this)" data-name="{{ str_replace('"', '&quot;', $p['name']) }}" data-category="{{ $p['category'] }}" data-lat="{{ $p['latitude'] }}" data-lng="{{ $p['longitude'] }}" data-address="{{ str_replace('"', '&quot;', $p['address'] ?? '') }}" data-district="{{ str_replace('"', '&quot;', $p['district'] ?? '') }}" data-phone="{{ str_replace('"', '&quot;', $p['phone'] ?? '') }}" data-osm-id="{{ $p['id'] }}" class="px-3 py-1.5 text-xs font-medium bg-emerald-50 text-emerald-600 rounded-lg hover:bg-emerald-100 transition" title="Import to database">
                                 <i class="fas fa-download"></i>
                             </button>
+                            @endif
                         </td>
                     </tr>
                     @empty
@@ -106,6 +112,8 @@
             <div class="p-6">
                 <form id="importForm" method="POST" action="{{ route('admin.places.create') }}">
                     @csrf
+                    <input type="hidden" name="osm_id" id="import_osm_id" value="">
+                    <input type="hidden" name="source" id="import_source" value="osm">
                     <div class="space-y-3">
                         <div>
                             <label class="block text-sm font-medium text-gray-700 mb-1">Name</label>
@@ -207,6 +215,8 @@ function quickImport(btn) {
     document.getElementById('import_address').value = btn.dataset.address;
     document.getElementById('import_district').value = btn.dataset.district;
     document.getElementById('import_phone').value = btn.dataset.phone;
+    document.getElementById('import_osm_id').value = btn.dataset.osmId || '';
+    document.getElementById('import_source').value = btn.dataset.osmId ? 'osm' : 'admin';
 
     const catSelect = document.getElementById('import_category_id');
     const catMap = {

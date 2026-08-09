@@ -28,7 +28,12 @@ class AgentOrchestrator
     {
         $results = [];
 
-        $agents = AiAgent::whereIn('agent_type', ['translator', 'review_moderator'])->get();
+        $agents = AiAgent::whereIn('agent_type', [
+            'translator', 'translation', 'review_moderator',
+            'travel_consultant', 'hotel_manager', 'content_writer',
+            'weather_analyst', 'route_planner', 'booking_assistant',
+            'fraud_detection', 'marketing',
+        ])->where('status', '!=', 'paused')->get();
 
         foreach ($agents as $agent) {
             $handlerClass = $this->resolveHandler($agent->agent_type);
@@ -100,13 +105,19 @@ class AgentOrchestrator
             return ['task' => $task->id, 'status' => 'failed'];
         }
 
+        $claimed = AiAgentTask::where('id', $task->id)
+            ->where('status', 'pending')
+            ->update(['status' => 'processing', 'started_at' => now()]);
+
+        if (!$claimed) {
+            return ['task' => $task->id, 'status' => 'skipped', 'message' => 'Task already claimed/processed by another worker'];
+        }
+
         $handlerClass = $this->resolveHandler($agent->agent_type);
         if (!$handlerClass) {
             $task->update(['status' => 'failed', 'error_message' => "No handler for agent_type: {$agent->agent_type}"]);
             return ['task' => $task->id, 'status' => 'failed'];
         }
-
-        $task->update(['started_at' => now()]);
 
         try {
             $handler = new $handlerClass($agent);
@@ -168,6 +179,14 @@ class AgentOrchestrator
             'report_manager' => \App\Services\Ai\Handlers\ReportManagerHandler::class,
             'manager' => \App\Services\Ai\Handlers\ManagerAiHandler::class,
             'customer_support' => \App\Services\Ai\Handlers\CustomerSupportHandler::class,
+            'travel_consultant' => \App\Services\Ai\Handlers\TravelConsultantHandler::class,
+            'hotel_manager' => \App\Services\Ai\Handlers\HotelManagerHandler::class,
+            'content_writer' => \App\Services\Ai\Handlers\ContentWriterHandler::class,
+            'weather_analyst' => \App\Services\Ai\Handlers\WeatherAnalystHandler::class,
+            'route_planner' => \App\Services\Ai\Handlers\RoutePlannerHandler::class,
+            'booking_assistant' => \App\Services\Ai\Handlers\BookingAssistantHandler::class,
+            'fraud_detection' => \App\Services\Ai\Handlers\FraudDetectionHandler::class,
+            'marketing' => \App\Services\Ai\Handlers\MarketingHandler::class,
             default => null,
         };
     }

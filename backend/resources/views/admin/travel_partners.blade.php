@@ -23,6 +23,7 @@
                         <th class="px-6 py-3 text-center text-xs font-semibold text-slate-500 uppercase tracking-wider">Commission</th>
                         <th class="px-6 py-3 text-center text-xs font-semibold text-slate-500 uppercase tracking-wider">NPR Value</th>
                         <th class="px-6 py-3 text-center text-xs font-semibold text-slate-500 uppercase tracking-wider">Bookings</th>
+                        <th class="px-6 py-3 text-center text-xs font-semibold text-slate-500 uppercase tracking-wider">Verification</th>
                         <th class="px-6 py-3 text-center text-xs font-semibold text-slate-500 uppercase tracking-wider">Status</th>
                         <th class="px-6 py-3 text-right text-xs font-semibold text-slate-500 uppercase tracking-wider">Actions</th>
                     </tr>
@@ -45,13 +46,31 @@
                         <td class="px-6 py-4 text-center"><span class="font-semibold text-green-600">{{ $p->commission_rate }}%</span>@if($p->commission_fixed > 0) <span class="text-xs text-slate-400">+ Rs.{{ number_format($p->commission_fixed) }}</span>@endif</td>
                         <td class="px-6 py-4 text-center font-semibold text-green-600">@if($p->value_npr > 0)Rs. {{ number_format($p->value_npr, 2) }}@else<span class="text-slate-300">—</span>@endif</td>
                         <td class="px-6 py-4 text-center text-sm text-slate-600">{{ $p->bookings_count }}</td>
+                        <td class="px-6 py-4 text-center">
+                            @if($p->verification_status === 'pending')
+                                <span class="text-xs bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full font-medium"><i class="fas fa-clock"></i> Pending</span>
+                            @elseif($p->verification_status === 'verified')
+                                <span class="text-xs bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full font-medium"><i class="fas fa-check-circle"></i> Verified</span>
+                            @elseif($p->verification_status === 'rejected')
+                                <span class="text-xs bg-red-100 text-red-700 px-2 py-0.5 rounded-full font-medium"><i class="fas fa-times-circle"></i> Rejected</span>
+                            @endif
+                        </td>
                         <td class="px-6 py-4 text-center">@if($p->is_active)<span class="text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded-full font-medium">Active</span>@else<span class="text-xs bg-red-100 text-red-700 px-2 py-0.5 rounded-full font-medium">Inactive</span>@endif</td>
                         <td class="px-6 py-4 text-right">
-                            <button onclick="openEdit({{ $p->id }})" class="px-3 py-1.5 text-xs font-medium bg-primary-50 text-primary-600 rounded-lg hover:bg-primary-100"><i class="fas fa-edit"></i> Edit</button>
+                            <div class="flex items-center justify-end gap-2">
+                                @if($p->verification_status === 'pending')
+                                    <form method="POST" action="{{ route('admin.travel-partners.verify', $p) }}">
+                                        @csrf
+                                        <button type="submit" class="px-3 py-1.5 text-xs font-medium bg-emerald-600 text-white rounded-lg hover:bg-emerald-700"><i class="fas fa-check"></i> Verify</button>
+                                    </form>
+                                    <button type="button" onclick="showReject({{ $p->id }}, '{{ addslashes($p->name) }}')" class="px-3 py-1.5 text-xs font-medium bg-red-600 text-white rounded-lg hover:bg-red-700"><i class="fas fa-times"></i> Reject</button>
+                                @endif
+                                <button onclick="openEdit({{ $p->id }})" class="px-3 py-1.5 text-xs font-medium bg-primary-50 text-primary-600 rounded-lg hover:bg-primary-100"><i class="fas fa-edit"></i> Edit</button>
+                            </div>
                         </td>
                     </tr>
                     @empty
-                    <tr><td colspan="7" class="px-6 py-12 text-center text-slate-400"><i class="fas fa-building text-3xl mb-3"></i><p class="text-sm">No partners yet.</p></td></tr>
+                    <tr><td colspan="8" class="px-6 py-12 text-center text-slate-400"><i class="fas fa-building text-3xl mb-3"></i><p class="text-sm">No partners yet.</p></td></tr>
                     @endforelse
                 </tbody>
             </table>
@@ -103,6 +122,24 @@
     </div>
 </div>
 
+<div id="rejectModal" class="hidden fixed inset-0 z-50 bg-black/40 grid place-items-center">
+    <div class="bg-white rounded-2xl shadow-xl w-full max-w-md mx-4 p-6">
+        <h4 class="text-lg font-bold mb-1">Reject Business</h4>
+        <p class="text-sm text-slate-500 mb-4"><strong id="rejectName"></strong></p>
+        <form method="POST" id="rejectForm" class="space-y-4">
+            @csrf
+            <div>
+                <label class="block text-xs font-semibold text-slate-600 mb-1">Reason (visible to business)</label>
+                <textarea name="reason" rows="3" required placeholder="e.g. Invalid contact details, incomplete information..." class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm"></textarea>
+            </div>
+            <div class="flex justify-end gap-3">
+                <button type="button" onclick="closeReject()" class="px-4 py-2 text-sm text-slate-600 hover:bg-slate-100 rounded-lg">Cancel</button>
+                <button type="submit" class="px-4 py-2 text-sm font-semibold bg-red-600 text-white rounded-lg hover:bg-red-700">Reject</button>
+            </div>
+        </form>
+    </div>
+</div>
+
 <div id="editModal" class="hidden fixed inset-0 z-50 bg-black/40 grid place-items-center" onclick="if(event.target===this)this.classList.add('hidden')">
     <div class="bg-white rounded-2xl shadow-xl w-full max-w-lg mx-4 max-h-[90vh] overflow-y-auto p-6">
         <div class="flex items-center justify-between mb-4">
@@ -116,9 +153,13 @@
                 <div><label>Type</label>
                     <select name="type" id="editType" required class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm">
                         <option value="hotel">Hotel</option>
+                        <option value="restaurant">Restaurant</option>
+                        <option value="cafe">Cafe</option>
+                        <option value="shop">Shop</option>
                         <option value="vehicle_rental">Vehicle Rental</option>
                         <option value="guide">Guide</option>
                         <option value="adventure">Adventure</option>
+                        <option value="other">Other</option>
                     </select>
                 </div>
             </div>
@@ -158,6 +199,14 @@ function openEdit(id) {
     document.getElementById('editDistrict').value = p.district || ''; document.getElementById('editAddress').value = p.address || '';
     document.getElementById('editRate').value = p.commission_rate; document.getElementById('editFixed').value = p.commission_fixed;
     document.getElementById('editValueNpr').value = p.value_npr; document.getElementById('editActive').checked = p.is_active; document.getElementById('editModal').classList.remove('hidden');
+}
+function showReject(id, name) {
+    document.getElementById('rejectForm').action = '/admin/travel-partners/' + id + '/reject';
+    document.getElementById('rejectName').textContent = name;
+    document.getElementById('rejectModal').classList.remove('hidden');
+}
+function closeReject() {
+    document.getElementById('rejectModal').classList.add('hidden');
 }
 </script>
 @endsection

@@ -16,6 +16,13 @@ class CustomerSupportHandler extends BaseHandler
         $input = $task->input_data;
         $action = $input['action'] ?? 'chat';
 
+        if (in_array($action, ['assess', 'auto', 'auto-work'])) {
+            $msg = 'Customer Support online — ' . Place::active()->count() . ' places, ' . Alert::where(function ($q) {
+                $q->whereNull('expires_at')->orWhere('expires_at', '>', now());
+            })->count() . ' live alerts available for chat context';
+            return $this->markComplete($task, ['message' => $msg]);
+        }
+
         if ($action === 'chat') {
             return $this->chat($task);
         }

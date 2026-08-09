@@ -133,17 +133,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 },
               ),
 
-              // Sponsors
-              ListTile(
-                leading: const Icon(Icons.star, color: Colors.purple),
-                title: const Text('Sponsors'),
-                trailing: const Icon(Icons.chevron_right),
-                onTap: () {
-                  Navigator.pop(ctx);
-                  Navigator.of(context).pushNamed('/sponsors');
-                },
-              ),
-
               // Subscriptions
               ListTile(
                 leading: const Icon(Icons.subscriptions, color: Colors.red),

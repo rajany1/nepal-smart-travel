@@ -1,4 +1,4 @@
-<?php
+﻿<?php
 
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
@@ -13,7 +13,6 @@ use App\Http\Controllers\LeaderboardController;
 use App\Http\Controllers\PushTokenController;
 use App\Http\Controllers\AchievementController as ApiAchievementController;
 use App\Http\Controllers\WeatherController;
-use App\Http\Controllers\StoreController;
 use App\Http\Controllers\SubscriptionController as ApiSubscriptionController;
 use App\Http\Controllers\AdController;
 use App\Http\Controllers\Api\ConsumerController;
@@ -43,7 +42,7 @@ Route::prefix('v1')->group(function () {
     Route::get('/profile/field-options', [ProfileController::class, 'fieldOptions']);
     Route::get('/profile/field-definitions', [ProfileController::class, 'fieldDefinitions']);
 
-    // ✅ Reports - public read
+    // âœ… Reports - public read
     Route::get('/reports/categories', [ReportController::class, 'categories']);
     Route::get('/reports/form-config', [ReportController::class, 'formConfig']);
     Route::get('/reports', [ReportController::class, 'index']);
@@ -51,36 +50,43 @@ Route::prefix('v1')->group(function () {
     Route::get('/reports/my', [ReportController::class, 'myReports']);
     Route::get('/reports/{id}', [ReportController::class, 'show']);
 
-    // ✅ Public user profile
+    // âœ… Public user profile
     Route::get('/users/{id}/profile', [UserProfileController::class, 'show']);
 
-    // ✅ Leaderboard - public read
+    // âœ… Leaderboard - public read
     Route::get('/leaderboard/top', [LeaderboardController::class, 'topThree']);
     Route::get('/leaderboard', [LeaderboardController::class, 'index']);
 
-    // ✅ Weather grid - public read
+    // âœ… Weather grid - public read
     Route::get('/weather/grid', [WeatherController::class, 'grid']);
 
-    // ✅ Subscription plans - public read
+    // âœ… Subscription plans - public read
     Route::get('/subscription/plans', [ApiSubscriptionController::class, 'plans']);
 
-    // ✅ Active ads - public read
+    // âœ… Active ads - public read
     Route::get('/ads/active', [AdController::class, 'active']);
 
-    // ✅ Partners - public read
+    // Ad tracking - public (guest impressions/clicks counted, deduped by IP)
+    Route::post('/ads/track-impression', [AdController::class, 'trackImpression'])->middleware('throttle:60,1');
+    Route::post('/ads/track-click', [AdController::class, 'trackClick'])->middleware('throttle:60,1');
+
+    // âœ… Partners - public read
     Route::get('/partners', [ConsumerController::class, 'partners']);
     Route::get('/partners/{id}', [ConsumerController::class, 'partnerDetail']);
 
-    // ✅ Sponsors - public read
-    Route::get('/sponsors', [ConsumerController::class, 'sponsors']);
     Route::get('/road-conditions', [AlertController::class, 'roadConditions']);
     Route::post('/assistant/chat', [ReportController::class, 'assistantChat']);
     Route::get('/places/{id}/translations', [PlaceController::class, 'translations']);
 
-    // ✅ Store items - public read (purchase & my-purchases require auth)
-    Route::get('/store/items', [StoreController::class, 'items']);
+    // Reward offers - public read
+    Route::get('/offers', [\App\Http\Controllers\Api\OfferController::class, 'index']);
+    Route::get('/offers/{id}', [\App\Http\Controllers\Api\OfferController::class, 'show'])->whereNumber('id');
 
     Route::middleware(['auth:sanctum', 'status'])->group(function () {
+        Route::get('/offers/my', [\App\Http\Controllers\Api\OfferController::class, 'my']);
+        Route::get('/offers/available', [\App\Http\Controllers\Api\OfferController::class, 'available']);
+        Route::post('/offers/{id}/claim', [\App\Http\Controllers\Api\OfferController::class, 'claim']);
+
         Route::get('/users/me', [AuthController::class, 'me']);
         Route::put('/users/me', [AuthController::class, 'update']);
         Route::delete('/users/me', [AuthController::class, 'destroy']);
@@ -106,20 +112,22 @@ Route::prefix('v1')->group(function () {
         Route::get('/achievements', [ApiAchievementController::class, 'index']);
         Route::get('/xp-history', [ApiAchievementController::class, 'xpHistory']);
 
-        // ✅ Places - auth required for write operations
+        // âœ… Places - auth required for write operations
         Route::post('/places', [PlaceController::class, 'store']);
         Route::post('/places/{id}/reviews', [PlaceController::class, 'addReview']);
+        Route::post('/places/corrections', [PlaceController::class, 'storeCorrection']);
+        Route::get('/places/corrections/mine', [PlaceController::class, 'myCorrections']);
 
-        // ✅ Reports - auth required for write operations
+        // âœ… Reports - auth required for write operations
         Route::post('/reports', [ReportController::class, 'store']);
         Route::put('/reports/{id}', [ReportController::class, 'update']);
         Route::delete('/reports/{id}', [ReportController::class, 'destroy']);
 
-        // ✅ Report Reactions (max 10/min to prevent spam)
+        // âœ… Report Reactions (max 10/min to prevent spam)
         Route::post('/reports/{id}/reactions', [ReportController::class, 'toggleReaction'])->middleware('throttle:10,1');
         Route::delete('/reports/{id}/reactions', [ReportController::class, 'removeReaction'])->middleware('throttle:10,1');
 
-        // ✅ Report Comments
+        // âœ… Report Comments
         Route::post('/reports/{id}/comments', [ReportController::class, 'addComment']);
         Route::delete('/reports/{id}/comments/{commentId}', [ReportController::class, 'deleteComment']);
 
@@ -131,17 +139,9 @@ Route::prefix('v1')->group(function () {
         Route::post('/push-tokens', [PushTokenController::class, 'store']);
         Route::put('/push-tokens/unsubscribe', [PushTokenController::class, 'unsubscribe']);
 
-        // Store (purchase & my-purchases require auth; items is public above)
-        Route::post('/store/items/{shopItem}/purchase', [StoreController::class, 'purchase']);
-        Route::get('/store/my-purchases', [StoreController::class, 'myPurchases']);
-        Route::get('/store/my-available-codes', [StoreController::class, 'availableCodes']);
-
         // Subscription
         Route::get('/subscription/my', [ApiSubscriptionController::class, 'my']);
         Route::get('/subscription/features', [ApiSubscriptionController::class, 'features']);
-
-        // Ad tracking
-        Route::post('/ads/track-impression', [AdController::class, 'trackImpression']);
 
         // User bookings
         Route::post('/bookings', [ConsumerController::class, 'createBooking']);

@@ -66,6 +66,35 @@ class AchievementService
         });
     }
 
+    public function revokeReportApprovalXp(Report $report): bool
+    {
+        $transaction = XpTransaction::where('reference_type', Report::class)
+            ->where('reference_id', $report->id)
+            ->where('action_type', 'report_approved')
+            ->where('amount', '>', 0)
+            ->latest()
+            ->first();
+
+        if (!$transaction) return false;
+
+        $user = User::find($transaction->user_id);
+        if ($user) {
+            $this->deductXp(
+                $user,
+                $transaction->amount,
+                'report_approval_revoked',
+                "Report approval revoked: {$report->title}"
+            );
+            if ($user->approved_reports > 0) {
+                $user->decrement('approved_reports');
+            }
+        }
+
+        $transaction->delete();
+
+        return true;
+    }
+
     public function checkLevelUp(User $user): void
     {
         $newLevel = $this->calculateLevel($user->total_xp);

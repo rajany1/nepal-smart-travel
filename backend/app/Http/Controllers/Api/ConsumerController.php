@@ -3,11 +3,10 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
-use App\Models\TravelPartner;
-use App\Models\Sponsor;
 use App\Models\Booking;
 use App\Models\CommissionTransaction;
-use App\Models\ShopCode;
+use App\Models\OfferRedemption;
+use App\Models\TravelPartner;
 use App\Services\ShopService;
 use Illuminate\Http\Request;
 
@@ -31,14 +30,6 @@ class ConsumerController extends Controller
         return response()->json(['success' => true, 'data' => $partner]);
     }
 
-    // ==================== SPONSORS ====================
-
-    function sponsors()
-    {
-        $sponsors = Sponsor::where('is_active', true)->withCount('shopItems')->orderBy('sort_order')->orderBy('name')->get();
-        return response()->json(['success' => true, 'data' => $sponsors]);
-    }
-
     // ==================== BOOKINGS (User-facing) ====================
 
     public function __construct(
@@ -56,7 +47,7 @@ class ConsumerController extends Controller
             'amount' => 'nullable|numeric|min:0',
             'notes' => 'nullable|string',
             'booked_at' => 'nullable|date',
-            'shop_code_id' => 'nullable|exists:shop_codes,id',
+            'offer_code' => 'nullable|string|max:32',
         ]);
 
         $partner = TravelPartner::findOrFail($data['travel_partner_id']);
@@ -68,13 +59,12 @@ class ConsumerController extends Controller
 
         $booking = Booking::create($data);
 
-        if (!empty($data['shop_code_id'])) {
-            $code = ShopCode::findOrFail($data['shop_code_id']);
+        if (!empty($data['offer_code'])) {
             try {
-                $this->shopService->applyToBooking($user, $code, $booking);
+                $this->applyOfferToBooking($user, $data['offer_code'], $booking);
             } catch (\RuntimeException $e) {
                 $booking->delete();
-                return response()->json(['message' => $e->getMessage()], 422);
+                return response()->json(['success' => false, 'message' => $e->getMessage()], 422);
             }
         }
 
@@ -96,12 +86,58 @@ class ConsumerController extends Controller
             'status' => 'pending',
         ]);
 
-        return response()->json(['success' => true, 'data' => $booking->load('travelPartner', 'shopCode')], 201);
+        return response()->json([
+            'success' => true,
+            'data' => $booking->load('travelPartner', 'offerRedemption.offer.business'),
+        ], 201);
+    }
+
+    private function applyOfferToBooking(Booking $booking, string $code): void
+    {
+        $redemption = OfferRedemption::with('offer')
+            ->where('code', strtoupper(trim($code)))
+            ->where('user_id', $booking->user_id)
+            ->where('status', 'claimed')
+            ->whereNull('booking_id')
+            ->whereNull('consumed_at')
+            ->first();
+
+        if (!$redemption) {
+            throw new \RuntimeException('Invalid, used, or not-yours offer code.');
+        }
+
+        $offer = $redemption->offer;
+        if (!$offer || !$offer->isActive()) {
+            throw new \RuntimeException('This offer is no longer valid.');
+        }
+
+        $discount = 0;
+        if ($offer->offer_type === 'percentage_off' && $offer->discount_value > 0) {
+            $discountValue = (float)$offer->discount_value;
+            if ($discountValue <= 100) {
+                $discount = $booking->amount * $discountValue / 100;
+            }
+        } elseif ($offer->offer_type === 'fixed_off' && $offer->discount_value > 0) {
+            $discount = (float)$offer->discount_value;
+        }
+        $discount = min($discount, $booking->amount);
+        $discount = round($discount, 2);
+
+        $redemption->update([
+            'booking_id' => $booking->id,
+            'discount_amount' => $discount,
+            'applied_at' => now(),
+        ]);
+
+        $booking->update([
+            'discount_amount' => $discount,
+            'amount' => $booking->amount - $discount,
+        ]);
     }
 
     function myBookings(Request $request)
     {
-        $bookings = Booking::with('travelPartner', 'shopCode')
+        $bookings = Booking::with('travelPartner', 'offerRedemption.offer.business')
             ->where('user_id', $request->user()->id)
             ->orderByDesc('created_at')
             ->paginate(20);
@@ -120,6 +156,7 @@ class ConsumerController extends Controller
 
         $booking->update(['status' => 'cancelled']);
 
+        $this->releaseOfferFromBooking($booking);
         if ($booking->shopCode) {
             $this->shopService->releaseFromBooking($booking->shopCode);
         }
@@ -134,13 +171,38 @@ class ConsumerController extends Controller
             abort(403, 'Not your booking.');
         }
         if (!$booking->isPending()) {
-            return response()->json(['message' => 'Only pending bookings can have their coupon removed.'], 422);
-        }
-        if (!$booking->shopCode) {
-            return response()->json(['message' => 'No coupon applied to this booking.'], 422);
+            return response()->json(['message' => 'Only pending bookings can have their code removed.'], 422);
         }
 
-        $this->shopService->releaseFromBooking($booking->shopCode);
-        return response()->json(['success' => true, 'message' => 'Coupon removed.']);
+        if ($booking->offerRedemption) {
+            $this->releaseOfferFromBooking($booking);
+            return response()->json(['success' => true, 'message' => 'Offer code removed from booking.']);
+        }
+
+        if ($booking->shopCode) {
+            $this->shopService->releaseFromBooking($booking->shopCode);
+            return response()->json(['success' => true, 'message' => 'Coupon removed.']);
+        }
+
+        return response()->json(['message' => 'No code applied to this booking.'], 422);
+    }
+
+    private function releaseOfferFromBooking(Booking $booking): void
+    {
+        $redemption = OfferRedemption::where('booking_id', $booking->id)->first();
+        if (!$redemption) return;
+
+        if ($booking->discount_amount > 0) {
+            $booking->update([
+                'amount' => $booking->amount + $booking->discount_amount,
+                'discount_amount' => 0,
+            ]);
+        }
+
+        $redemption->update([
+            'booking_id' => null,
+            'discount_amount' => null,
+            'applied_at' => null,
+        ]);
     }
 }

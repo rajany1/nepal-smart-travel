@@ -13,9 +13,9 @@ import 'providers/profile_provider.dart';
 import 'providers/report_provider.dart';
 import 'providers/leaderboard_provider.dart';
 import 'providers/map_view_provider.dart';
-import 'providers/store_provider.dart';
 import 'providers/ad_provider.dart';
 import 'providers/booking_provider.dart';
+import 'providers/offer_provider.dart';
 
 import 'features/auth/login_screen.dart';
 import 'features/auth/register_screen.dart';
@@ -40,7 +40,6 @@ import 'features/leaderboard/leaderboard_screen.dart';
 // Consumer feature screens
 import 'features/partners/partners_list_screen.dart';
 import 'features/bookings/my_bookings_screen.dart';
-import 'features/sponsors/sponsors_screen.dart';
 import 'features/subscriptions/subscription_plans_screen.dart';
 import 'features/store/store_screen.dart';
 
@@ -93,9 +92,9 @@ class NepalSmartTravelApp extends StatelessWidget {
         ChangeNotifierProvider(create: (_) => ReportProvider()),
         ChangeNotifierProvider(create: (_) => LeaderboardProvider()),
         ChangeNotifierProvider(create: (_) => MapViewProvider()),
-        ChangeNotifierProvider(create: (_) => StoreProvider()),
         ChangeNotifierProvider(create: (_) => AdProvider()),
         ChangeNotifierProvider(create: (_) => BookingProvider()),
+        ChangeNotifierProvider(create: (_) => OfferProvider()),
       ],
       child: MaterialApp(
         debugShowCheckedModeBanner: false,
@@ -159,8 +158,6 @@ class NepalSmartTravelApp extends StatelessWidget {
               return MaterialPageRoute(builder: (_) => const PartnersListScreen(), settings: settings);
             case '/bookings':
               return MaterialPageRoute(builder: (_) => const MyBookingsScreen(), settings: settings);
-            case '/sponsors':
-              return MaterialPageRoute(builder: (_) => const SponsorsScreen(), settings: settings);
             case '/subscriptions':
               return MaterialPageRoute(builder: (_) => const SubscriptionPlansScreen(), settings: settings);
             case '/store':

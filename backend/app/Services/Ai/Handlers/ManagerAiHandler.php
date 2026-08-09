@@ -14,7 +14,7 @@ class ManagerAiHandler extends BaseHandler
         $input = $task->input_data;
         $action = $input['action'] ?? 'orchestrate';
 
-        if ($action === 'orchestrate') {
+        if (in_array($action, ['orchestrate', 'auto', 'auto-work'])) {
             return $this->orchestrate($task);
         }
         if ($action === 'assess') {
@@ -35,6 +35,14 @@ class ManagerAiHandler extends BaseHandler
             ['agent_type' => 'report_manager', 'type' => 'process-pending', 'data' => ['action' => 'process-pending']],
             ['agent_type' => 'review_moderator', 'type' => 'auto-moderate', 'data' => ['action' => 'auto']],
             ['agent_type' => 'translation', 'type' => 'auto-translate', 'data' => ['type' => 'auto']],
+            ['agent_type' => 'travel_consultant', 'type' => 'itineraries', 'data' => ['action' => 'auto']],
+            ['agent_type' => 'hotel_manager', 'type' => 'hotel-reports', 'data' => ['action' => 'auto']],
+            ['agent_type' => 'content_writer', 'type' => 'content-write', 'data' => ['action' => 'auto']],
+            ['agent_type' => 'weather_analyst', 'type' => 'weather-check', 'data' => ['action' => 'auto']],
+            ['agent_type' => 'route_planner', 'type' => 'route-plan', 'data' => ['action' => 'auto']],
+            ['agent_type' => 'booking_assistant', 'type' => 'booking-digest', 'data' => ['action' => 'auto']],
+            ['agent_type' => 'fraud_detection', 'type' => 'fraud-scan', 'data' => ['action' => 'auto']],
+            ['agent_type' => 'marketing', 'type' => 'marketing-posts', 'data' => ['action' => 'auto']],
         ];
 
         foreach ($workTypes as $work) {

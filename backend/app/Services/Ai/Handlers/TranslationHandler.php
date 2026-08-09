@@ -17,6 +17,15 @@ class TranslationHandler extends BaseHandler
         $input = $task->input_data;
         $type = $input['type'] ?? 'auto';
 
+        if ($type === 'assess') {
+            $count = 0;
+            foreach ($this->getTranslationSources() as $source) {
+                $count += $source['query']->count();
+            }
+            $msg = "{$count} untranslated item(s) found across place/review/report/alert content";
+            return $this->markComplete($task, ['untranslated_items' => $count, 'message' => $msg]);
+        }
+
         if ($type === 'auto') {
             return $this->handleAutoWork($task);
         }

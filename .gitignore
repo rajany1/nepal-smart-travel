@@ -79,3 +79,7 @@ yarn-error.log*
 .env.local
 .env.production
 .env.development
+
+# Runtime artifacts (worker pids, scratch)
+backend/*.pid
+backend/safety_test.php

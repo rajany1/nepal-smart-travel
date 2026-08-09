@@ -44,6 +44,9 @@ return [
     'ai' => [
         'provider' => env('AI_PROVIDER', 'gemini'),
         'model' => env('AI_MODEL', 'gemini-2.0-flash'),
+        'vision_provider' => env('AI_VISION_PROVIDER', 'gemini'),
+        'vision_model' => env('AI_VISION_MODEL', 'gemini-2.0-flash'),
+        'vision_groq_model' => env('AI_VISION_GROQ_MODEL', 'qwen/qwen3.6-27b'),
     ],
 
     'gemini' => [

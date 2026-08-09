@@ -182,6 +182,15 @@ class AlertController extends Controller
         $validated['created_by'] = $user->id;
         $alert = Alert::create($validated);
 
+        // Review AI agent - real-time safety guard
+        $safety = app(\App\Services\ContentSafetyService::class);
+        $guardTitle = $safety->guard($user, (string) $validated['title'], 'alert', $alert->id, 'title', 'realtime');
+        $guardDesc = $safety->guard($user, (string) $validated['description'], 'alert', $alert->id, 'description', 'realtime');
+        if ($guardTitle['action'] === 'censored' || $guardDesc['action'] === 'censored') {
+            $alert->update(['title' => $guardTitle['text'], 'description' => $guardDesc['text']]);
+        }
+        $safetyPayload = $safety->payload([$guardTitle, $guardDesc]);
+
         $alertXp = GameSetting::getValue('alert_post_xp', 5);
         app(AchievementService::class)->awardXp(
             $user, $alertXp, 'alert_created',
@@ -206,7 +215,8 @@ class AlertController extends Controller
         return response()->json([
             'success' => true,
             'message' => 'Alert created successfully',
-            'data' => $alert
+            'data' => $alert,
+            'safety' => $safetyPayload,
         ], 201);
     }
 }

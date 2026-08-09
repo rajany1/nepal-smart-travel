@@ -37,7 +37,23 @@ class AdCampaignController extends Controller
         if ($status) $query->where('status', $status);
         $campaigns = $query->orderBy('created_at', 'desc')->paginate(20);
         $partners = TravelPartner::active()->orderBy('name')->get();
-        return view('admin.ad_campaigns', compact('campaigns', 'partners', 'status'));
+
+        $all = AdCampaign::all();
+        $stats = [
+            'total' => $all->count(),
+            'pending' => $all->where('status', 'pending')->count(),
+            'active' => $all->where('status', 'active')->count(),
+            'impressions' => (int) $all->sum('current_impressions'),
+            'clicks' => (int) $all->sum('current_clicks'),
+            'revenue' => 0,
+            'unpaid' => 0,
+            'ctr' => 0,
+        ];
+        foreach ($all as $c) if ($c->payment_status === 'paid') $stats['revenue'] += (float) $c->paid_amount;
+        $stats['revenue'] = round($stats['revenue'], 2);
+        $stats['unpaid'] = $all->where('payment_status', 'unpaid')->count();
+        if ($stats['impressions'] > 0) $stats['ctr'] = round($stats['clicks'] / $stats['impressions'] * 100, 2);
+        return view('admin.ad_campaigns', compact('campaigns', 'partners', 'status', 'stats'));
     }
 
     public function store(Request $request)
@@ -81,6 +97,15 @@ class AdCampaignController extends Controller
             'starts_at' => 'nullable|date',
             'ends_at' => 'nullable|date|after:starts_at',
         ]));
+
+        if ($adCampaign->status === 'active' && ($reason = $this->cannotRunReason($adCampaign)) !== null) {
+            $adCampaign->update(['status' => $oldStatus === 'pending' ? 'pending' : 'paused']);
+            return back()->withErrors(['status' => 'Cannot set active: ' . $reason]);
+        }
+        if ($adCampaign->status !== 'paused' && $adCampaign->paused_by) {
+            $adCampaign->update(['paused_by' => null]);
+        }
+
         $this->moderatorService->log(Auth::user(), 'ad-campaign.updated', 'ad_campaign', $adCampaign->id, 'Updated campaign: ' . $adCampaign->name . ' (status: ' . $oldStatus . ' → ' . $adCampaign->status . ')');
         return redirect()->route('admin.ad-campaigns')->with('success', 'Campaign updated.');
     }
@@ -92,5 +117,87 @@ class AdCampaignController extends Controller
         $adCampaign->delete();
         $this->moderatorService->log(Auth::user(), 'ad-campaign.deleted', 'ad_campaign', $adCampaign->id, 'Deleted campaign: ' . $name);
         return redirect()->route('admin.ad-campaigns')->with('success', 'Campaign deleted.');
+    }
+
+    public function approve(Request $request, AdCampaign $adCampaign)
+    {
+        $this->requireAdmin($request);
+        if ($adCampaign->status !== 'pending') {
+            return back()->withErrors(['status' => 'Only pending campaigns can be approved.']);
+        }
+        if (($reason = $this->cannotRunReason($adCampaign)) !== null) {
+            return back()->withErrors(['status' => 'Cannot approve: ' . $reason]);
+        }
+        $adCampaign->update([
+            'status' => 'active',
+            'paused_by' => null,
+            'rejection_reason' => null,
+            'starts_at' => $adCampaign->starts_at ?? now(),
+        ]);
+        $this->moderatorService->log(Auth::user(), 'ad-campaign.approved', 'ad_campaign', $adCampaign->id, 'Approved campaign: ' . $adCampaign->name);
+        return redirect()->route('admin.ad-campaigns')->with('success', 'Campaign approved and is now live.');
+    }
+
+    public function reject(Request $request, AdCampaign $adCampaign)
+    {
+        $this->requireAdmin($request);
+        $reason = $request->input('reason', 'Not approved');
+        $adCampaign->update(['status' => 'rejected', 'rejection_reason' => $reason]);
+        $this->moderatorService->log(Auth::user(), 'ad-campaign.rejected', 'ad_campaign', $adCampaign->id, 'Rejected campaign: ' . $adCampaign->name . ' — ' . $reason);
+        return redirect()->route('admin.ad-campaigns')->with('success', 'Campaign rejected.');
+    }
+
+    public function pause(Request $request, AdCampaign $adCampaign)
+    {
+        $this->requireAdmin($request);
+        $adCampaign->update(['status' => 'paused', 'paused_by' => 'admin']);
+        return redirect()->route('admin.ad-campaigns')->with('success', 'Campaign paused.');
+    }
+
+    public function resume(Request $request, AdCampaign $adCampaign)
+    {
+        $this->requireAdmin($request);
+        if (($reason = $this->cannotRunReason($adCampaign)) !== null) {
+            return back()->withErrors(['status' => 'Cannot resume: ' . $reason]);
+        }
+        $adCampaign->update(['status' => 'active', 'paused_by' => null]);
+        return redirect()->route('admin.ad-campaigns')->with('success', 'Campaign resumed.');
+    }
+
+    private function cannotRunReason(AdCampaign $adCampaign): ?string
+    {
+        if ($adCampaign->payment_status === 'refunded') {
+            return 'the campaign was refunded.';
+        }
+        if ($adCampaign->payment_status !== 'paid' && (float) $adCampaign->budget > 0) {
+            return 'payment is pending.';
+        }
+        if (!$adCampaign->hasBudget()) {
+            return 'the budget is exhausted.';
+        }
+        if ($adCampaign->ends_at && $adCampaign->ends_at->lte(now())) {
+            return 'the campaign has ended.';
+        }
+        return null;
+    }
+
+    public function refund(Request $request, AdCampaign $adCampaign)
+    {
+        $this->requireAdmin($request);
+        if ($adCampaign->payment_status !== 'paid') {
+            return back()->withErrors(['status' => 'Only paid campaigns can be refunded.']);
+        }
+        $paid = (float) $adCampaign->paid_amount;
+        $spent = (float) $adCampaign->spent_amount;
+        $refundAmount = round(max($paid - $spent, 0), 2);
+
+        $adCampaign->payments()->where('status', 'success')->update(['status' => 'refunded']);
+        $adCampaign->update([
+            'payment_status' => 'refunded',
+            'status' => 'paused',
+            'paused_by' => 'admin',
+        ]);
+        $this->moderatorService->log(Auth::user(), 'ad-campaign.refunded', 'ad_campaign', $adCampaign->id, 'Refunded campaign: ' . $adCampaign->name . ' (Rs. ' . $refundAmount . ')');
+        return redirect()->route('admin.ad-campaigns')->with('success', 'Campaign refunded (Rs. ' . $refundAmount . ') and paused.');
     }
 }

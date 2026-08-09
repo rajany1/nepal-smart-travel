@@ -12,6 +12,8 @@ use App\Models\ReportCategorie;
 use App\Models\PlaceCategories;
 use App\Models\ModerationQueue;
 use App\Models\AuditLog;
+use App\Models\XpTransaction;
+use App\Models\PlaceImage;
 use App\Services\AchievementService;
 use App\Services\PushNotificationService;
 use App\Services\ModeratorService;
@@ -493,6 +495,8 @@ class AdminController extends Controller
 
                         $places = [];
                         $seen = [];
+                        $dbOsmIds = Place::whereNotNull('osm_id')->pluck('osm_id')
+                            ->map(fn($v) => str_replace('osm_', '', (string)$v))->flip();
 
                         foreach ($elements as $element) {
                             $tags = $element['tags'] ?? [];
@@ -524,6 +528,7 @@ class AdminController extends Controller
                                 'longitude' => $elemLng,
                                 'phone' => $tags['phone'] ?? $tags['contact:phone'] ?? null,
                                 'category' => $category,
+                                'in_db' => isset($dbOsmIds[$osmId]),
                             ];
                         }
 
@@ -581,18 +586,25 @@ class AdminController extends Controller
 
         $reporter = $report->user;
         if ($reporter) {
-            $rewardXp = GameSetting::getValue('report_approval_xp', 10);
-            app(AchievementService::class)->awardXp(
-                $reporter, $rewardXp, 'report_approved',
-                "Report approved: {$report->title}", $report
-            );
-            $reporter->increment('approved_reports');
+            $alreadyRewarded = XpTransaction::where('reference_type', Report::class)
+                ->where('reference_id', $report->id)
+                ->where('action_type', 'report_approved')
+                ->exists();
+
+            if (!$alreadyRewarded) {
+                $rewardXp = GameSetting::getValue('report_approval_xp', 10);
+                app(AchievementService::class)->awardXp(
+                    $reporter, $rewardXp, 'report_approved',
+                    "Report approved: {$report->title}", $report
+                );
+                $reporter->increment('approved_reports');
+            }
         }
 
         if ($report->latitude && $report->longitude) {
             try {
                 PushNotificationService::notifyNearbyUsers(
-                    title: '⚠️ ' . $report->title,
+                    title: 'âš ï¸ ' . $report->title,
                     message: str($report->description)->limit(100),
                     latitude: (float) $report->latitude,
                     longitude: (float) $report->longitude,
@@ -617,6 +629,10 @@ class AdminController extends Controller
         $report = Report::findOrFail($id);
         if ($report->status === 'rejected') {
             return back()->with('info', 'Report is already rejected');
+        }
+
+        if ($report->status === 'approved') {
+            app(AchievementService::class)->revokeReportApprovalXp($report);
         }
 
         $report->update(['status' => 'rejected']);
@@ -904,6 +920,106 @@ class AdminController extends Controller
         return back()->with('success', 'Place rejected and removed.');
     }
 
+    public function corrections(Request $request)
+    {
+        $this->requireAdmin($request);
+        $this->requirePermission('manage_places');
+
+        $status = $request->input('status', 'pending');
+        $query = \App\Models\PlaceCorrection::with(['user', 'place'])
+            ->orderByDesc('created_at');
+
+        if (in_array($status, ['pending', 'applied', 'rejected'])) {
+            $query->where('status', $status);
+        }
+
+        $corrections = $query->paginate(25);
+        $counts = [
+            'pending' => \App\Models\PlaceCorrection::where('status', 'pending')->count(),
+            'applied' => \App\Models\PlaceCorrection::where('status', 'applied')->count(),
+            'rejected' => \App\Models\PlaceCorrection::where('status', 'rejected')->count(),
+        ];
+
+        return view('admin.place_corrections', compact('corrections', 'status', 'counts'));
+    }
+
+    public function applyCorrection(Request $request, $id)
+    {
+        $this->requireAdmin($request);
+        $this->requirePermission('manage_places');
+
+        $correction = \App\Models\PlaceCorrection::findOrFail($id);
+
+        if ($correction->status !== 'pending') {
+            return back()->with('error', 'This correction was already reviewed.');
+        }
+
+        $note = $request->input('admin_note', '');
+        $applied = false;
+
+        // If the place exists in our DB, apply the suggested fixes
+        if ($correction->place_id) {
+            $place = Place::find($correction->place_id);
+            if ($place) {
+                $updates = [];
+                if ($correction->correction_type === 'wrong_name' && $correction->suggested_name) {
+                    $updates['name'] = $correction->suggested_name;
+                }
+                if ($correction->correction_type === 'wrong_location'
+                    && $correction->suggested_latitude !== null
+                    && $correction->suggested_longitude !== null) {
+                    $updates['latitude'] = $correction->suggested_latitude;
+                    $updates['longitude'] = $correction->suggested_longitude;
+                }
+                if ($updates) {
+                    $place->update($updates);
+                    $applied = true;
+                    $this->logAction('place.corrected', 'place', $place->id,
+                        "Applied correction #{$id} to place #{$place->id}: " . json_encode($updates));
+                }
+            }
+        }
+
+        // No place row (pure OSM) or nothing to apply -> still mark as applied/noted
+        if (!$applied && $correction->place_id) {
+            $this->logAction('place.correction-reviewed', 'place_correction', $id,
+                "Correction #{$id} reviewed (no changes applied): {$correction->place_name}");
+        }
+
+        $correction->update([
+            'status' => 'applied',
+            'admin_note' => $note ?: ($applied ? 'Changes applied to the place.' : 'Reviewed - no changes applied.'),
+            'reviewed_by' => Auth::id(),
+            'reviewed_at' => now(),
+        ]);
+
+        return back()->with('success', 'Correction #' . $correction->id . ' marked as applied.');
+    }
+
+    public function rejectCorrection(Request $request, $id)
+    {
+        $this->requireAdmin($request);
+        $this->requirePermission('manage_places');
+
+        $correction = \App\Models\PlaceCorrection::findOrFail($id);
+
+        if ($correction->status !== 'pending') {
+            return back()->with('error', 'This correction was already reviewed.');
+        }
+
+        $correction->update([
+            'status' => 'rejected',
+            'admin_note' => $request->input('admin_note', 'Correction not applicable.'),
+            'reviewed_by' => Auth::id(),
+            'reviewed_at' => now(),
+        ]);
+
+        $this->logAction('place.correction-rejected', 'place_correction', $id,
+            "Rejected correction #{$id} for: {$correction->place_name}");
+
+        return back()->with('success', 'Correction #' . $correction->id . ' rejected.');
+    }
+
     public function createAlert(Request $request)
     {
         $this->requireAdmin($request);
@@ -937,6 +1053,25 @@ class AdminController extends Controller
             'alert_post_xp' => GameSetting::getValue('alert_post_xp', 5),
             'review_xp' => GameSetting::getValue('review_xp', 3),
             'place_submit_xp' => GameSetting::getValue('place_submit_xp', 1),
+            'xp_per_npr_ratio' => GameSetting::getValue('xp_per_npr_ratio', 1),
+            'ad_cpm' => GameSetting::getValue('ad_cpm', 50),
+            'ad_cpc' => GameSetting::getValue('ad_cpc', 10),
+            'offer_commission_percent' => GameSetting::getValue('offer_commission_percent', 10),
+            'payout_min_esewa' => GameSetting::getValue('payout_min_esewa', 100),
+            'payout_min_khalti' => GameSetting::getValue('payout_min_khalti', 100),
+            'payout_min_bank' => GameSetting::getValue('payout_min_bank', 500),
+            'gateway_esewa_merchant_code' => GameSetting::getValue('gateway_esewa_merchant_code', config('payments.esewa.merchant_code')),
+            'gateway_esewa_secret_key' => GameSetting::getValue('gateway_esewa_secret_key', config('payments.esewa.secret_key')),
+            'gateway_esewa_sandbox' => (int) GameSetting::getValue('gateway_esewa_sandbox', config('payments.esewa.sandbox')),
+            'gateway_khalti_secret_key' => GameSetting::getValue('gateway_khalti_secret_key', config('payments.khalti.secret_key')),
+            'gateway_khalti_public_key' => GameSetting::getValue('gateway_khalti_public_key', config('payments.khalti.public_key')),
+            'gateway_khalti_sandbox' => (int) GameSetting::getValue('gateway_khalti_sandbox', config('payments.khalti.sandbox')),
+            'safety_warn_at_strikes' => GameSetting::getValue('safety_warn_at_strikes', 1),
+            'safety_suspend_at_strikes' => GameSetting::getValue('safety_suspend_at_strikes', 2),
+            'safety_block_at_strikes' => GameSetting::getValue('safety_block_at_strikes', 3),
+            'safety_suspend_hours' => GameSetting::getValue('safety_suspend_hours', 24),
+            'safety_strike_window_days' => GameSetting::getValue('safety_strike_window_days', 30),
+            'safety_ai_enabled' => (int) GameSetting::getValue('safety_ai_enabled', 1),
         ];
 
         return view('admin.settings', compact('settings'));
@@ -954,16 +1089,54 @@ class AdminController extends Controller
             'alert_post_xp' => 'required|integer|min:0|max:1000',
             'review_xp' => 'required|integer|min:0|max:1000',
             'place_submit_xp' => 'required|integer|min:0|max:1000',
+            'xp_per_npr_ratio' => 'required|numeric|min:0.01|max:100',
+            'ad_cpm' => 'required|numeric|min:0|max:100000',
+            'ad_cpc' => 'required|numeric|min:0|max:100000',
+            'offer_commission_percent' => 'required|numeric|min:0|max:100',
+            'payout_min_esewa' => 'required|numeric|min:0|max:1000000',
+            'payout_min_khalti' => 'required|numeric|min:0|max:1000000',
+            'payout_min_bank' => 'required|numeric|min:0|max:1000000',
+            'gateway_esewa_merchant_code' => 'nullable|string|max:255',
+            'gateway_esewa_secret_key' => 'nullable|string|max:255',
+            'gateway_esewa_sandbox' => 'required|in:0,1',
+            'gateway_khalti_secret_key' => 'nullable|string|max:255',
+            'gateway_khalti_public_key' => 'nullable|string|max:255',
+            'gateway_khalti_sandbox' => 'required|in:0,1',
+            'safety_warn_at_strikes' => 'required|integer|min:1|max:10',
+            'safety_suspend_at_strikes' => 'required|integer|min:2|max:10',
+            'safety_block_at_strikes' => 'required|integer|min:3|max:10',
+            'safety_suspend_hours' => 'required|integer|min:1|max:720',
+            'safety_strike_window_days' => 'required|integer|min:7|max:365',
+            'safety_ai_enabled' => 'required|in:0,1',
         ]);
 
         GameSetting::setValue('report_approval_xp', $validated['report_approval_xp']);
         GameSetting::setValue('alert_post_xp', $validated['alert_post_xp']);
         GameSetting::setValue('review_xp', $validated['review_xp']);
         GameSetting::setValue('place_submit_xp', $validated['place_submit_xp']);
+        GameSetting::setValue('xp_per_npr_ratio', $validated['xp_per_npr_ratio']);
+        GameSetting::setValue('ad_cpm', $validated['ad_cpm']);
+        GameSetting::setValue('ad_cpc', $validated['ad_cpc']);
+        GameSetting::setValue('offer_commission_percent', $validated['offer_commission_percent']);
+        GameSetting::setValue('payout_min_esewa', $validated['payout_min_esewa']);
+        GameSetting::setValue('payout_min_khalti', $validated['payout_min_khalti']);
+        GameSetting::setValue('payout_min_bank', $validated['payout_min_bank']);
+        GameSetting::setValue('gateway_esewa_merchant_code', $validated['gateway_esewa_merchant_code']);
+        GameSetting::setValue('gateway_esewa_secret_key', $validated['gateway_esewa_secret_key']);
+        GameSetting::setValue('gateway_esewa_sandbox', $validated['gateway_esewa_sandbox']);
+        GameSetting::setValue('gateway_khalti_secret_key', $validated['gateway_khalti_secret_key']);
+        GameSetting::setValue('gateway_khalti_public_key', $validated['gateway_khalti_public_key']);
+        GameSetting::setValue('gateway_khalti_sandbox', $validated['gateway_khalti_sandbox']);
+        GameSetting::setValue('safety_warn_at_strikes', $validated['safety_warn_at_strikes']);
+        GameSetting::setValue('safety_suspend_at_strikes', $validated['safety_suspend_at_strikes']);
+        GameSetting::setValue('safety_block_at_strikes', $validated['safety_block_at_strikes']);
+        GameSetting::setValue('safety_suspend_hours', $validated['safety_suspend_hours']);
+        GameSetting::setValue('safety_strike_window_days', $validated['safety_strike_window_days']);
+        GameSetting::setValue('safety_ai_enabled', $validated['safety_ai_enabled']);
 
-        $this->logAction('settings.updated', 'settings', null, 'Updated XP rates');
+        $this->logAction('settings.updated', 'settings', null, 'Updated XP, payout, payment gateway & content safety settings');
 
-        return back()->with('success', 'XP rate settings updated successfully');
+        return back()->with('success', 'Settings updated successfully');
     }
 
     public function createPlace(Request $request)
@@ -981,9 +1154,31 @@ class AdminController extends Controller
             'longitude' => 'required|numeric|between:-180,180',
             'phone' => 'nullable|string',
             'email' => 'nullable|email',
+            'osm_id' => 'nullable|string|max:50',
+            'source' => 'nullable|in:osm,admin,user_submitted',
         ]);
+
+        $osmId = $request->input('osm_id') ? preg_replace('/^osm_/', '', $request->input('osm_id')) : null;
+
+        if ($osmId && Place::where('osm_id', $osmId)->exists()) {
+            $existing = Place::where('osm_id', $osmId)->first();
+            $this->logAction('place.duplicate-blocked', 'place', $existing->id, "Blocked duplicate OSM import: {$validated['name']} (osm: {$osmId})");
+            return back()->with('error', "Duplicate blocked: \"{$validated['name']}\" already exists in the database (place #{$existing->id}).");
+        }
+
+        $similar = Place::whereRaw('LOWER(TRIM(name)) = ?', [mb_strtolower(trim($validated['name']))])
+            ->whereRaw("(6371 * acos(cos(radians(?)) * cos(radians(latitude)) * cos(radians(longitude) - radians(?)) + sin(radians(?)) * sin(radians(latitude)))) <= 0.15",
+                [$validated['latitude'], $validated['longitude'], $validated['latitude']])
+            ->first();
+        if ($similar) {
+            $this->logAction('place.duplicate-blocked', 'place', $similar->id, "Blocked duplicate import: {$validated['name']} matches #{$similar->id}");
+            return back()->with('error', "Duplicate blocked: \"{$validated['name']}\" matches existing place #{$similar->id} (\"" . $similar->name . "\"). Use the existing record instead.");
+        }
+
         $validated['uuid'] = (string) Str::uuid();
         $validated['created_by'] = Auth::id();
+        $validated['osm_id'] = $osmId;
+        $validated['source'] = $request->input('source') ?: 'admin';
         $place = Place::create($validated);
 
         // Handle image uploads

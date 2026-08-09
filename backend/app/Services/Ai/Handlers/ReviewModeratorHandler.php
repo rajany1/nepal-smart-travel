@@ -13,6 +13,12 @@ class ReviewModeratorHandler extends BaseHandler
         $input = $task->input_data;
         $action = $input['action'] ?? 'auto-moderate';
 
+        if ($action === 'assess') {
+            $count = PlaceReview::whereNull('moderated_at')->whereNot('rating', 0)->count();
+            $msg = "{$count} review(s) pending moderation";
+            return $this->markComplete($task, ['pending_reviews' => $count, 'message' => $msg]);
+        }
+
         if (in_array($action, ['auto-moderate', 'auto'])) {
             return $this->handleAutoModerate($task);
         }

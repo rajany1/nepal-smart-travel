@@ -48,6 +48,11 @@ class Booking extends Model
         return $this->hasOne(ShopCode::class);
     }
 
+    public function offerRedemption()
+    {
+        return $this->hasOne(OfferRedemption::class);
+    }
+
     public function isPending(): bool { return $this->status === 'pending'; }
     public function isConfirmed(): bool { return $this->status === 'confirmed'; }
     public function isCompleted(): bool { return $this->status === 'completed'; }

@@ -88,7 +88,7 @@ class AiAgentController extends Controller
             'ai_agent_id' => $agent->id,
             'type' => 'manual-run',
             'status' => 'pending',
-            'input_data' => ['action' => 'assess'],
+            'input_data' => ['action' => 'auto'],
         ]);
 
         $result = $orchestrator->executeTask($task);
