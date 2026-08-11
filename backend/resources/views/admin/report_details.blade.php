@@ -49,6 +49,47 @@
                     @endif
                 </div>
                 <div class="mt-2"><strong>Photo captured at:</strong> {{ $report->photo_captured_at ?? 'N/A' }}</div>
+                @if($report->moderation_message)
+                <div class="mt-4 pt-4 border-t border-gray-200">
+                    <h4 class="font-medium text-gray-800">AI Review</h4>
+                    <div class="mt-2 rounded-lg p-3 text-sm
+                        {{ $report->status === 'approved' ? 'bg-green-50 text-green-800' : '' }}
+                        {{ $report->status === 'pending' ? 'bg-amber-50 text-amber-800' : '' }}
+                        {{ $report->status === 'rejected' ? 'bg-red-50 text-red-800' : '' }}">
+                        @if($report->authenticity_score !== null)
+                            <p class="text-xs mb-1"><strong>AI Trust: {{ round((float) $report->authenticity_score * 100) }}%</strong></p>
+                        @endif
+                        <p>{{ $report->moderation_message }}</p>
+                        @php $analysis = $report->ai_analysis ?? []; @endphp
+                        @if(!empty($analysis['summary']))
+                            <p class="mt-2 text-xs opacity-80"><strong>Summary:</strong> {{ $analysis['summary'] }}</p>
+                        @endif
+                        @if(!empty($analysis['location_check']['reason']))
+                            <p class="mt-1 text-xs opacity-80"><strong>Location:</strong> {{ $analysis['location_check']['reason'] }}</p>
+                        @endif
+                        @if(!empty($analysis['image_check']['message']) && ($analysis['image_check']['reviewed'] ?? 0) > 0)
+                            <p class="mt-1 text-xs opacity-80"><strong>Images ({{ $analysis['image_check']['reviewed'] }} reviewed):</strong> {{ $analysis['image_check']['message'] }}</p>
+                        @endif
+                        @if(isset($analysis['image_check']['images']) && count($analysis['image_check']['images']))
+                            <ul class="mt-1 space-y-1">
+                                @foreach($analysis['image_check']['images'] as $img)
+                                    <li class="text-xs opacity-80">
+                                        @if(isset($img['screen_probability']) || isset($img['report_match']))
+                                            media #{{ $img['media_id'] ?? '?' }} — verdict {{ $img['verdict'] ?? '?' }}
+                                            @if(isset($img['screen_probability'])) · screen {{ round((float) $img['screen_probability'] * 100) }}% @endif
+                                            @if(isset($img['real_scene_probability'])) · real scene {{ round((float) $img['real_scene_probability'] * 100) }}% @endif
+                                            @if(isset($img['report_match'])) · match {{ round((float) $img['report_match'] * 100) }}% @endif
+                                        @endif
+                                        @if(!empty($img['verdict_reason']) || !empty($img['reason']))
+                                            — {{ $img['verdict_reason'] ?? $img['reason'] }}
+                                        @endif
+                                    </li>
+                                @endforeach
+                            </ul>
+                        @endif
+                    </div>
+                </div>
+                @endif
                 @isset($queueItem)
                 <div class="mt-4 pt-4 border-t border-gray-200">
                     <h4 class="font-medium text-gray-800">Moderation Queue</h4>

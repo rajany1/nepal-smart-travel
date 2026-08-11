@@ -51,6 +51,7 @@ class GeminiService
     {
         $options['response_mime_type'] = 'application/json';
         $text = $this->generate($prompt, $options);
+        $text = trim(preg_replace('/^```(?:json)?\s*|\s*```$/i', '', $text));
         return json_decode($text, true) ?? [];
     }
 
@@ -106,6 +107,7 @@ class GeminiService
     {
         $options['response_mime_type'] = 'application/json';
         $text = $this->generateWithImages($prompt, $imagePaths, $options);
+        $text = trim(preg_replace('/^```(?:json)?\s*|\s*```$/i', '', $text));
         return json_decode($text, true) ?? [];
     }
 }

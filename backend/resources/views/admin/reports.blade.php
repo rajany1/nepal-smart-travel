@@ -39,6 +39,8 @@
                     <th class="text-left px-6 py-3 text-xs font-medium text-gray-500 uppercase">Priority</th>
                     <th class="text-left px-6 py-3 text-xs font-medium text-gray-500 uppercase">GPS Verify</th>
                     <th class="text-left px-6 py-3 text-xs font-medium text-gray-500 uppercase">Status</th>
+                    <th class="text-left px-6 py-3 text-xs font-medium text-gray-500 uppercase">AI Trust</th>
+                    <th class="text-left px-6 py-3 text-xs font-medium text-gray-500 uppercase">AI Message</th>
                     <th class="text-left px-6 py-3 text-xs font-medium text-gray-500 uppercase">Date</th>
                     <th class="text-right px-6 py-3 text-xs font-medium text-gray-500 uppercase">Actions</th>
                 </tr>
@@ -82,6 +84,28 @@
                             {{ $report->status === 'rejected' ? 'bg-red-100 text-red-800' : '' }}">
                             {{ ucfirst($report->status) }}
                         </span>
+                    </td>
+                    <td class="px-6 py-4">
+                        @if($report->authenticity_score !== null)
+                        @php
+                            $trust = (float) $report->authenticity_score;
+                            $trustColor = $trust >= 0.75 ? 'bg-green-100 text-green-800' : ($trust >= 0.5 ? 'bg-amber-100 text-amber-800' : 'bg-red-100 text-red-800');
+                        @endphp
+                        <span class="text-xs font-medium px-2 py-1 rounded {{ $trustColor }}" title="AI authenticity trust score (0-100%)">
+                            {{ round($trust * 100) }}%
+                        </span>
+                        @else
+                        <span class="text-xs text-gray-400">—</span>
+                        @endif
+                    </td>
+                    <td class="px-6 py-4">
+                        @if($report->moderation_message)
+                        <p class="text-xs text-gray-600 max-w-[260px] truncate" title="{{ $report->moderation_message }}">
+                            {{ $report->moderation_message }}
+                        </p>
+                        @else
+                        <p class="text-xs text-gray-400">—</p>
+                        @endif
                     </td>
                     <td class="px-6 py-4 text-sm text-gray-500">{{ $report->created_at->format('M d, Y') }}</td>
                     <td class="px-6 py-4 text-right">

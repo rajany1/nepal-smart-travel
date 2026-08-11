@@ -17,6 +17,7 @@ class ReportAnalysisService
     private const MAX_IMAGES = 3;
     private const MAX_IMAGE_BYTES = 4 * 1024 * 1024;
     private const IMAGE_VIOLATION_CONFIDENCE = 0.8;
+    private const SCREEN_WEAK_SIGNAL = 0.15;
 
     private const NEPAL_BBOX = ['lat_min' => 26.0, 'lat_max' => 31.0, 'lng_min' => 79.5, 'lng_max' => 89.0];
 
@@ -29,7 +30,7 @@ class ReportAnalysisService
     public function __construct(?GroqService $groq = null, ?GeminiService $gemini = null, ?GroqService $visionGroq = null)
     {
         $this->groq = $groq ?? new GroqService(config('services.ai.model', 'llama-3.3-70b-versatile'));
-        $this->gemini = $gemini ?? new GeminiService(config('services.ai.vision_model', 'gemini-2.0-flash'));
+        $this->gemini = $gemini ?? new GeminiService(config('services.ai.vision_model', 'gemini-flash-latest'));
         $this->visionGroq = $visionGroq ?? new GroqService(config('services.ai.vision_groq_model', 'qwen/qwen3.6-27b'));
 
         $this->visionPrimary = config('services.ai.vision_provider', 'gemini') === 'groq'
@@ -38,15 +39,17 @@ class ReportAnalysisService
         $this->visionFallback = $this->visionPrimary === $this->gemini ? $this->visionGroq : $this->gemini;
     }
 
-    public function process(Report $report): array
+    public function process(Report $report, bool $force = false): array
     {
-        if ($report->status !== 'pending' || $report->ai_analyzed_at !== null) {
+        if (!$force && ($report->status !== 'pending' || $report->ai_analyzed_at !== null)) {
             return ['report_id' => $report->id, 'skipped' => true];
         }
 
         $analysis = $this->analyze($report);
+        $analysis['authenticity_score'] = $this->computeAuthenticityScore($analysis);
+        $message = $this->actionMessage($analysis);
 
-        DB::transaction(function () use ($report, $analysis) {
+        DB::transaction(function () use ($report, $analysis, $message) {
             $action = $analysis['action'] ?? 'approve';
             $now = now();
 
@@ -55,6 +58,8 @@ class ReportAnalysisService
                 'ai_analyzed_at' => $now,
                 'status' => $action === 'approve' ? 'approved' : ($action === 'reject' ? 'rejected' : 'pending'),
                 'verified_at' => $now,
+                'moderation_message' => $message,
+                'authenticity_score' => $analysis['authenticity_score'],
             ]);
 
             if (isset($analysis['suggested_priority']) && $analysis['suggested_priority'] !== $report->priority) {
@@ -66,6 +71,8 @@ class ReportAnalysisService
                 ->update([
                     'status' => $action === 'approve' ? 'approved' : ($action === 'reject' ? 'rejected' : 'pending'),
                     'reviewed_at' => $now,
+                    'reviewed_by' => null,
+                    'rejection_reason' => $action === 'reject' ? $message : null,
                 ]);
 
             if ($action === 'approve') {
@@ -83,6 +90,57 @@ class ReportAnalysisService
             'action' => $analysis['action'] ?? 'approve',
             'analysis' => $analysis,
         ];
+    }
+
+    /**
+     * Re-decide an ALREADY-analyzed pending report using its stored analysis
+     * and the CURRENT policy — no API call. Fixes reports stuck in pending
+     * under the old GPS gate (no_gps_data used to force pending-review).
+     */
+    public function redecode(Report $report): array
+    {
+        if ($report->status !== 'pending' || $report->ai_analyzed_at === null) {
+            return ['report_id' => $report->id, 'skipped' => true];
+        }
+
+        $analysis = $report->ai_analysis ?? [];
+        if (empty($analysis)) {
+            return ['report_id' => $report->id, 'skipped' => true];
+        }
+
+        $action = $this->decideAction($analysis, $analysis['location_check'] ?? [], $analysis['image_check'] ?? []);
+        $analysis['action'] = $action;
+        $analysis['authenticity_score'] = $this->computeAuthenticityScore($analysis);
+        $message = $this->actionMessage($analysis);
+
+        DB::transaction(function () use ($report, $analysis, $action, $message) {
+            $report->update([
+                'ai_analysis' => $analysis,
+                'status' => $action === 'approve' ? 'approved' : ($action === 'reject' ? 'rejected' : 'pending'),
+                'moderation_message' => $message,
+                'authenticity_score' => $analysis['authenticity_score'],
+            ]);
+
+            ModerationQueue::where('content_type', 'report')
+                ->where('content_id', $report->id)
+                ->update([
+                    'status' => $action === 'approve' ? 'approved' : ($action === 'reject' ? 'rejected' : 'pending'),
+                    'reviewed_at' => now(),
+                    'reviewed_by' => null,
+                    'rejection_reason' => $action === 'reject' ? $message : null,
+                ]);
+
+            if ($action === 'approve') {
+                $gpsVerified = ($analysis['location_check']['gps_status'] ?? null) === 'verified';
+                if ($gpsVerified) {
+                    $this->awardApprovalXp($report);
+                }
+            } else {
+                app(AchievementService::class)->revokeReportApprovalXp($report);
+            }
+        });
+
+        return ['report_id' => $report->id, 'action' => $action, 'analysis' => $analysis];
     }
 
     protected function analyze(Report $report): array
@@ -103,7 +161,7 @@ class ReportAnalysisService
 
             return array_merge($text, [
                 'location_check' => $this->checkLocation($report),
-                'image_check' => ['reviewed' => 0, 'images' => [], 'verdict' => 'clean', 'message' => 'Skipped — failed quality check'],
+                'image_check' => ['reviewed' => 0, 'images' => [], 'verdict' => 'unverifiable', 'message' => 'Skipped — failed quality check'],
                 'action' => 'reject',
             ]);
         }
@@ -114,7 +172,7 @@ class ReportAnalysisService
         if (!$text['is_legitimate'] || $text['is_duplicate']) {
             return array_merge($text, [
                 'location_check' => $this->checkLocation($report),
-                'image_check' => ['reviewed' => 0, 'images' => [], 'verdict' => 'clean', 'message' => 'Skipped — text analysis rejected'],
+                'image_check' => ['reviewed' => 0, 'images' => [], 'verdict' => 'unverifiable', 'message' => 'Skipped — text analysis rejected'],
                 'action' => 'reject',
             ]);
         }
@@ -124,7 +182,7 @@ class ReportAnalysisService
         if (!($location['valid'] ?? true)) {
             return array_merge($text, [
                 'location_check' => $location,
-                'image_check' => ['reviewed' => 0, 'images' => [], 'verdict' => 'clean', 'message' => 'Skipped — location invalid'],
+                'image_check' => ['reviewed' => 0, 'images' => [], 'verdict' => 'unverifiable', 'message' => 'Skipped — location invalid'],
                 'action' => 'reject',
             ]);
         }
@@ -274,19 +332,32 @@ class ReportAnalysisService
                     [$path],
                     ['maxOutputTokens' => 900]
                 );
-                $images[] = $this->judgeImage($item->id, $result);
-            } catch (\Exception $primaryError) {
-                try {
-                    $result = $this->visionFallback->generateJsonWithImages(
-                        $this->imagePrompt($report, $text),
-                        [$path],
-                        ['maxOutputTokens' => 900]
-                    );
+                if ($this->isVisionResultUsable($result)) {
                     $images[] = $this->judgeImage($item->id, $result);
-                } catch (\Exception $fallbackError) {
-                    Log::error("Image analysis failed for report#{$report->id} media#{$item->id}: Primary: " . $primaryError->getMessage() . " | Fallback: " . $fallbackError->getMessage());
-                    $images[] = ['media_id' => $item->id, 'verdict' => 'skipped', 'reason' => 'Vision API error'];
+                    continue;
                 }
+                $primaryError = new \RuntimeException('Vision result empty/unusable');
+            } catch (\Exception $primaryError) {
+                // already captured above; fall through to fallback
+            }
+            try {
+                $result = $this->visionFallback->generateJsonWithImages(
+                    $this->imagePrompt($report, $text),
+                    [$path],
+                    ['maxOutputTokens' => 900]
+                );
+                if ($this->isVisionResultUsable($result)) {
+                    $images[] = $this->judgeImage($item->id, $result);
+                    continue;
+                }
+                $images[] = [
+                    'media_id' => $item->id,
+                    'verdict' => 'unverifiable',
+                    'reason' => 'Vision model returned no usable data — could not verify image',
+                ];
+            } catch (\Exception $fallbackError) {
+                Log::error("Image analysis failed for report#{$report->id} media#{$item->id}: Primary: " . $primaryError->getMessage() . " | Fallback: " . $fallbackError->getMessage());
+                $images[] = ['media_id' => $item->id, 'verdict' => 'unverifiable', 'reason' => 'Vision API error'];
             }
         }
 
@@ -298,6 +369,7 @@ class ReportAnalysisService
 
         $verdict = 'clean';
         $duplicates = false;
+        $unverifiable = false;
         foreach ($images as $img) {
             if ($img['verdict'] === 'violation') {
                 $verdict = 'violation';
@@ -306,12 +378,18 @@ class ReportAnalysisService
             if ($img['verdict'] === 'suspicious' && $verdict === 'clean') {
                 $verdict = 'suspicious';
             }
+            if ($img['verdict'] === 'unverifiable') {
+                $unverifiable = true;
+            }
             if ($img['verdict'] === 'duplicate') {
                 $duplicates = true;
                 if ($verdict === 'clean') {
                     $verdict = 'duplicate';
                 }
             }
+        }
+        if ($verdict === 'clean' && $unverifiable) {
+            $verdict = 'unverifiable';
         }
 
         return ['reviewed' => $reviewed, 'images' => $images, 'verdict' => $verdict, 'message' => $verdict];
@@ -333,13 +411,19 @@ class ReportAnalysisService
             . "Guidelines:\n"
             . "- A photo is LEGITIMATE if it actually shows the incident/issue described (e.g. landslide, flood, damaged road, garbage pile, accident scene).\n"
             . "- A photo taken OF A DEVICE SCREEN/DISPLAY (a laptop, phone or monitor showing another image) is FAKE. Detect screen-photo telltales: moiré pattern (wavy rainbow distortion), visible pixel grid or scanlines when zoomed, reflections or glare from a display surface, screen bezel or display edge visible, wallpaper-like texture. Real photos taken with a phone camera do not have these patterns.\n"
-            . "- A photo is MISLEADING or fake if: it is AI-generated, it is a photo of a screen, it shows something unrelated to the claim (e.g. random objects, furniture, selfie, screenshot, stock photo), or it contradicts the description.\n"
+            . "- A MAP SCREENSHOT or a photo of a device showing a MAP/SATELLITE VIEW (e.g. Google Maps, Map Data, (c) Google, tiles, satellite/aerial imagery, labels over tiled imagery, top-down view) is NOT proof of a ground-level incident — such map/satellite-looking evidence is treated as screen/misleading content unless the description itself claims an aerial/map event.\n"
+            . "- Explicitly look for on-screen UI: map search box, zoom +/- buttons, (c) Google / Map data watermarks, map tiles with labels, browser tabs/address bar, taskbar, cursor, video progress bar, settings icons, window title bar.\n"
+            . "- A photo is MISLEADING or fake if: it is AI-generated, it is a photo of a screen, it is a map/satellite screenshot, it shows something unrelated to the claim (e.g. random objects, furniture, selfie, screenshot, stock photo), or it contradicts the description.\n"
             . "- Reports can be in Nepali or English — language of the photo text is never a violation.\n"
             . "Return JSON ONLY:\n"
             . "- \"is_ai_generated\" (bool — true if the image looks AI-generated/rendered)\n"
             . "- \"is_screen_photo\" (bool — true if the photo is a photo of a screen/display showing another image, or shows moiré/pixel-grid/glare patterns typical of photographing a screen)\n"
+            . "- \"screen_probability\" (number 0-1 — how likely this photo is a photo of another device's screen)\n"
+            . "- \"real_scene_probability\" (number 0-1 — how likely this is a direct real-world capture of the actual scene)\n"
+            . "- \"is_map_screenshot\" (bool — true if the photo shows a map/satellite view, map app interface, or a screen showing a map)\n"
             . "- \"shows_what\" (string — what the photo actually shows)\n"
             . "- \"matches_title_description\" (bool — photo matches the claim)\n"
+            . "- \"report_match\" (number 0-1 — how strongly the photo matches the report title/description)\n"
             . "- \"misleading\" (bool — photo shows something different from the claim or is deliberately misleading)\n"
             . "- \"inappropriate_abusive\" (bool — abusive, offensive, gali, or NSFW content)\n"
             . "- \"phishing\" (bool — scam/phishing/fake promotion content)\n"
@@ -352,10 +436,31 @@ class ReportAnalysisService
         $confidence = (float) ($result['confidence'] ?? 0);
         $reason = (string) ($result['summary'] ?? $result['shows_what'] ?? '');
 
+        $screenProb = (float) ($result['screen_probability'] ?? 0);
+        if ($screenProb <= 0 && ($result['is_screen_photo'] ?? false)) {
+            $screenProb = min($confidence, 0.99);
+        }
+        if (($result['is_screen_photo'] ?? false) && $screenProb < self::SCREEN_WEAK_SIGNAL) {
+            $screenProb = self::SCREEN_WEAK_SIGNAL;
+        }
+        $isMapShot = (bool) ($result['is_map_screenshot'] ?? false);
+        if ($isMapShot && $screenProb < self::SCREEN_WEAK_SIGNAL) {
+            $screenProb = self::SCREEN_WEAK_SIGNAL;
+        }
+        $realProb = (float) ($result['real_scene_probability'] ?? 0);
+        if ($realProb <= 0) {
+            $realProb = (float) ($result['report_match'] ?? 0);
+        }
+        $reportMatch = (float) ($result['report_match'] ?? (($result['matches_title_description'] ?? null) ? 0.9 : 0.3));
+
         $entry = [
             'media_id' => $mediaId,
             'is_ai_generated' => (bool) ($result['is_ai_generated'] ?? false),
-            'is_screen_photo' => (bool) ($result['is_screen_photo'] ?? false),
+            'is_screen_photo' => (bool) ($result['is_screen_photo'] ?? false) || $isMapShot,
+            'is_map_screenshot' => $isMapShot,
+            'screen_probability' => round($screenProb, 2),
+            'real_scene_probability' => round($realProb, 2),
+            'report_match' => round($reportMatch, 2),
             'shows_what' => $result['shows_what'] ?? '',
             'matches_title_description' => $result['matches_title_description'] ?? null,
             'misleading' => (bool) ($result['misleading'] ?? false),
@@ -368,17 +473,15 @@ class ReportAnalysisService
         if (($result['phishing'] ?? false) || ($result['inappropriate_abusive'] ?? false)) {
             $entry['verdict'] = 'violation';
             $entry['verdict_reason'] = 'Prohibited content (abusive/phishing)';
-        } elseif (($result['is_screen_photo'] ?? false)) {
-            if ($confidence >= self::IMAGE_VIOLATION_CONFIDENCE) {
-                $entry['verdict'] = 'violation';
-                $entry['verdict_reason'] = 'Photo of a screen/display (moiré or pixel-grid pattern) — not a real scene';
-            } elseif ($confidence >= 0.55) {
-                $entry['verdict'] = 'suspicious';
-                $entry['verdict_reason'] = 'Possible photo of a screen (moiré/pixel pattern) — needs moderator review';
-            } else {
-                $entry['verdict'] = 'suspicious';
-                $entry['verdict_reason'] = 'Weak screen-photo signal detected — needs moderator review';
-            }
+        } elseif ($screenProb >= self::IMAGE_VIOLATION_CONFIDENCE) {
+            $entry['verdict'] = 'violation';
+            $entry['verdict_reason'] = 'Photo of a screen/display (moiré or pixel-grid pattern) — not a real scene';
+        } elseif ($screenProb >= 0.55) {
+            $entry['verdict'] = 'suspicious';
+            $entry['verdict_reason'] = 'Possible photo of a screen (moiré/pixel pattern) — needs moderator review';
+        } elseif ($screenProb >= self::SCREEN_WEAK_SIGNAL) {
+            $entry['verdict'] = 'suspicious';
+            $entry['verdict_reason'] = 'Weak screen-photo signal detected — needs moderator review';
         } elseif (($result['is_ai_generated'] ?? false) || ($result['misleading'] ?? false)) {
             if ($confidence >= self::IMAGE_VIOLATION_CONFIDENCE) {
                 $entry['verdict'] = 'violation';
@@ -395,6 +498,62 @@ class ReportAnalysisService
         return $entry;
     }
 
+    /**
+     * A vision result full of defaults (empty JSON, all-false flags, no
+     * description) means the model produced NO usable analysis — treat it
+     * as a provider failure, never as a "clean" verdict.
+     */
+    protected function isVisionResultUsable(array $result): bool
+    {
+        if (empty($result)) {
+            return false;
+        }
+        foreach (['shows_what', 'summary', 'what_it_shows', 'key_content', 'confidence', 'report_match', 'screen_probability'] as $key) {
+            if (isset($result[$key]) && $result[$key] !== '' && $result[$key] !== null && $result[$key] !== 0) {
+                return true;
+            }
+        }
+        if (isset($result['is_screen_photo']) || isset($result['is_ai_generated'])
+            || isset($result['misleading']) || isset($result['matches_title_description'])) {
+            return true;
+        }
+        return false;
+    }
+
+    /**
+     * Overall trust score 0.00-1.00 combining text legitimacy, location
+     * verification, and the vision verdict. Used for the admin "AI trust"
+     * badge and stored in reports.authenticity_score.
+     */
+    public function computeAuthenticityScore(array $analysis): float
+    {
+        $text = round((int) ($analysis['is_legitimate'] ?? true) * (($analysis['is_duplicate'] ?? false) ? 0 : 1), 2);
+
+        $location = $analysis['location_check'] ?? [];
+        $gps = $location['gps_status'] ?? null;
+        $loc = ($location['valid'] ?? true)
+            ? ($gps === 'verified' ? 1.0 : ($gps === 'mismatched' ? 0.0 : 0.85))
+            : 0.0;
+
+        $image = $analysis['image_check'] ?? [];
+        $verdict = $image['verdict'] ?? 'clean';
+        $img = match ($verdict) {
+            'violation' => 0.05,
+            'duplicate' => 0.2,
+            'suspicious' => 0.45,
+            'unverifiable' => 0.5,
+            default => 0.95,
+        };
+        $images = $image['images'] ?? [];
+        if (count($images) > 0) {
+            $probs = array_map(fn ($i) => 1 - (float) ($i['screen_probability'] ?? 0), $images);
+            $img = ($img + min($probs)) / 2;
+        }
+
+        $score = ($text * 0.35) + ($loc * 0.25) + ($img * 0.4);
+        return round(max(0.0, min(1.0, $score)), 2);
+    }
+
     protected function decideAction(array $text, array $location, array $image): string
     {
         if (($text['is_duplicate'] ?? false) || !($text['is_legitimate'] ?? true)) {
@@ -405,12 +564,13 @@ class ReportAnalysisService
             return 'reject';
         }
 
-        // Location authenticity gate: only EXIF-verified photos can auto-approve.
-        // Photos without GPS metadata or with mismatched GPS need a human decision.
-        if (($location['gps_status'] ?? null) !== 'verified' && ($location['verifiable'] ?? false) !== true) {
-            return 'pending-review';
-        }
-        if (($location['gps_status'] ?? null) !== 'verified') {
+        // Reports WITHOUT verified photo GPS are still fully processed:
+        // missing EXIF data alone is not proof of a fake report, so a clean
+        // text+image review can still approve. (Location invalid — 0,0,
+        // outside Nepal, mismatched GPS — is rejected above/earlier.)
+
+        // NEVER auto-approve on unverifiable/suspicious/duplicate images.
+        if (in_array($image['verdict'] ?? 'clean', ['unverifiable', 'suspicious', 'duplicate'])) {
             return 'pending-review';
         }
 
@@ -418,11 +578,76 @@ class ReportAnalysisService
             return 'reject';
         }
 
-        if (in_array($image['verdict'] ?? 'clean', ['unverifiable', 'suspicious', 'duplicate'])) {
+        // NO-COMPROMISE GATE: a "clean" verdict must be data-backed. If the
+        // vision model produced no usable numbers, or the image does not
+        // strongly match the claim, a human decides — never silent approve.
+        $images = $image['images'] ?? [];
+        if (empty($images)) {
             return 'pending-review';
+        }
+        foreach ($images as $img) {
+            if ($img['verdict'] !== 'clean') {
+                return 'pending-review';
+            }
+            $realScene = (float) ($img['real_scene_probability'] ?? 0);
+            $match = (float) ($img['report_match'] ?? 0);
+            if ($realScene < 0.7 || $match < 0.6) {
+                return 'pending-review';
+            }
         }
 
         return 'approve';
+    }
+
+    /**
+     * Human-readable one-line reason for the admin panel: why the agent
+     * approved, rejected, or left this report for manual review.
+     */
+    protected function actionMessage(array $analysis): string
+    {
+        $action = $analysis['action'] ?? 'approve';
+        $loc = $analysis['location_check'] ?? [];
+        $img = $analysis['image_check'] ?? [];
+        $gps = $loc['gps_status'] ?? null;
+        $gpsNote = $gps === 'verified'
+            ? 'photo GPS verified'
+            : ($gps === null ? 'no photo GPS' : "photo GPS not verified ({$gps})");
+
+        if ($action === 'approve') {
+            $msg = 'AI approved — ' . trim((string) ($analysis['summary'] ?? 'valid community report'));
+            if ($gps !== 'verified') {
+                $msg .= ' | ' . $gpsNote . ' — processed without GPS verification';
+            }
+            $score = (float) ($analysis['authenticity_score'] ?? 0);
+            if ($score > 0) {
+                $msg .= ' | trust ' . round($score * 100) . '%';
+            }
+            return $msg;
+        }
+
+        if ($action === 'reject') {
+            foreach (($img['images'] ?? []) as $i) {
+                if (!empty($i['verdict_reason'])) {
+                    return 'AI rejected — ' . $i['verdict_reason'];
+                }
+            }
+            if (!empty($loc['reason']) && !($loc['valid'] ?? true)) {
+                return 'AI rejected — ' . $loc['reason'];
+            }
+            if (!empty($analysis['quality_check']['reason']) && !($analysis['quality_check']['pass'] ?? true)) {
+                return 'AI rejected — ' . $analysis['quality_check']['reason'];
+            }
+            $reason = (string) ($analysis['summary'] ?? 'not a legitimate community issue');
+            return 'AI rejected — ' . $reason;
+        }
+
+        $verdict = (string) ($img['verdict'] ?? 'manual review');
+        foreach (($img['images'] ?? []) as $i) {
+            if (!empty($i['verdict_reason'])) {
+                return 'AI: needs moderator review — ' . $i['verdict_reason'];
+            }
+        }
+        return 'AI: needs moderator review — ' . ($img['message'] ?? $verdict);
     }
 
     protected function awardApprovalXp(Report $report): void
