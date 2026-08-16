@@ -2,13 +2,15 @@
 
 namespace App\Jobs;
 
+use App\Exceptions\AiRateLimitException;
 use App\Models\ModelTranslation;
-use App\Services\Ai\GroqService;
+use App\Services\Ai\AiProviderInterface;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
+use Illuminate\Support\Facades\Log;
 
 class TranslateContent implements ShouldQueue
 {
@@ -17,7 +19,7 @@ class TranslateContent implements ShouldQueue
     public string $modelType;
     public int $modelId;
     public string $field;
-    public int $tries = 3;
+    public int $tries = 6;
 
     private const MODEL_MAP = [
         'place' => \App\Models\Place::class,
@@ -33,7 +35,7 @@ class TranslateContent implements ShouldQueue
         $this->field = $field;
     }
 
-    public function handle(GroqService $groq): void
+    public function handle(AiProviderInterface $ai): void
     {
         $class = self::MODEL_MAP[$this->modelType] ?? null;
         if (!$class) return;
@@ -52,9 +54,21 @@ class TranslateContent implements ShouldQueue
 
         if ($exists) return;
 
-        $translated = $groq->generate(
-            "Translate the following text to Nepali language. Return ONLY the translated text, nothing else.\n\n{$text}"
-        );
+        try {
+            $translated = $ai->generate(
+                "Translate the following text to Nepali language. Return ONLY the translated text, nothing else.\n\n{$text}"
+            );
+        } catch (AiRateLimitException $e) {
+            Log::warning('Translation paused: ' . $this->modelType . '#' . $this->modelId . ' field=' . $this->field . ': ' . $e->getMessage());
+
+            if ($this->attempts() < $this->tries) {
+                $this->release(600);
+            } else {
+                throw $e;
+            }
+
+            return;
+        }
 
         ModelTranslation::create([
             'translatable_type' => $this->modelType,

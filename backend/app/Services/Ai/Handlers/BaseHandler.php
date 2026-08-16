@@ -4,6 +4,8 @@ namespace App\Services\Ai\Handlers;
 
 use App\Models\AiAgent;
 use App\Models\AiAgentTask;
+use App\Services\Ai\AiFallbackRouter;
+use App\Services\Ai\AiProviderInterface;
 use App\Services\Ai\GeminiService;
 use App\Services\Ai\GroqService;
 
@@ -18,15 +20,32 @@ abstract class BaseHandler
 
     abstract public function handle(AiAgentTask $task): AiAgentTask;
 
-    protected function ai(): GeminiService|GroqService
+    /**
+     * Returns a fallback router: the agent's own provider first, then the
+     * configured text chain for the other providers. Agents stay resilient
+     * when their primary provider hits quota limits.
+     */
+    protected function ai(): AiProviderInterface
     {
         $provider = $this->agent->provider ?? config('services.ai.provider', 'gemini');
         $model = $this->agent->model ?: config('services.ai.model', 'gemini-2.0-flash');
 
-        return match ($provider) {
-            'groq' => new GroqService($model),
-            default => new GeminiService($model),
+        $attempts = match ($provider) {
+            'groq' => [['label' => 'groq:' . $model, 'provider' => new GroqService($model)]],
+            default => [['label' => 'gemini:' . $model, 'provider' => new GeminiService($model)]],
         };
+
+        $chain = AiFallbackRouter::textChain();
+        $primaryPrefix = $provider === 'groq' ? 'groq:' : 'gemini:';
+
+        foreach ($chain->getAttempts() as $attempt) {
+            if (str_starts_with((string) ($attempt['label'] ?? ''), $primaryPrefix)) {
+                continue;
+            }
+            $attempts[] = $attempt;
+        }
+
+        return new AiFallbackRouter($attempts, null, $chain->getKeyPool());
     }
 
     protected function markComplete(AiAgentTask $task, mixed $output): AiAgentTask

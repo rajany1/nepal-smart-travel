@@ -2,6 +2,7 @@
 
 namespace App\Jobs;
 
+use App\Exceptions\AiRateLimitException;
 use App\Models\Report;
 use App\Services\Ai\ReportAnalysisService;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -15,7 +16,7 @@ class AnalyzeReport implements ShouldQueue
     use Dispatchable, InteractsWithQueue, SerializesModels;
 
     public int $reportId;
-    public int $tries = 3;
+    public int $tries = 6;
 
     public function __construct(int $reportId)
     {
@@ -29,6 +30,14 @@ class AnalyzeReport implements ShouldQueue
 
         try {
             $service->process($report);
+        } catch (AiRateLimitException $e) {
+            Log::warning('Report analysis paused for report#' . $this->reportId . ': ' . $e->getMessage());
+
+            if ($this->attempts() < $this->tries) {
+                $this->release(600);
+            } else {
+                throw $e;
+            }
         } catch (\Throwable $e) {
             Log::error('AnalyzeReport failed for report#' . $this->reportId . ': ' . $e->getMessage());
             throw $e;

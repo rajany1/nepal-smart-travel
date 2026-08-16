@@ -4,8 +4,9 @@ namespace App\Services\Ai;
 
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
+use App\Exceptions\AiRateLimitException;
 
-class GroqService
+class GroqService implements AiProviderInterface
 {
     protected string $apiKey;
     protected string $model;
@@ -126,10 +127,14 @@ class GroqService
             }
 
             if (str_contains($body, 'rate_limit_exceeded')) {
-                Log::warning('Groq rate limit hit, retrying in 12s: ' . $body);
+                Log::warning('Groq rate limit hit, sleeping 12s: ' . $body);
                 sleep(12);
 
                 return $this->post($url, $payload, false);
+            }
+
+            if ($response->status() === 429) {
+                throw new AiRateLimitException('Groq rate limit exhausted: ' . $body);
             }
 
             Log::error('Groq API error: ' . $body);

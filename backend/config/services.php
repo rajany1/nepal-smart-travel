@@ -47,14 +47,24 @@ return [
         'vision_provider' => env('AI_VISION_PROVIDER', 'gemini'),
         'vision_model' => env('AI_VISION_MODEL', 'gemini-flash-latest'),
         'vision_groq_model' => env('AI_VISION_GROQ_MODEL', 'meta-llama/llama-4-scout-17b-16e-instruct'),
+        'text_chain' => env('AI_TEXT_CHAIN', 'groq,gemini,cloudflare'),
+        'vision_chain' => env('AI_VISION_CHAIN', 'gemini,cloudflare'),
     ],
 
     'gemini' => [
         'api_key' => env('GEMINI_API_KEY'),
+        'api_keys' => array_values(array_filter(array_map('trim', explode(',', (string) env('GEMINI_API_KEYS', ''))))),
     ],
 
     'groq' => [
         'api_key' => env('GROQ_API_KEY'),
+    ],
+
+    'cloudflare' => [
+        'account_id' => env('CLOUDFLARE_ACCOUNT_ID'),
+        'api_token' => env('CLOUDFLARE_API_TOKEN'),
+        'vision_model' => env('CLOUDFLARE_VISION_MODEL', '@cf/meta/llama-3.2-11b-vision-instruct'),
+        'text_model' => env('CLOUDFLARE_TEXT_MODEL', '@cf/meta/llama-3.3-70b-instruct-fp8-fast'),
     ],
 
     'firebase' => [

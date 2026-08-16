@@ -2,6 +2,7 @@
 
 namespace App\Services\Ai;
 
+use App\Exceptions\AiRateLimitException;
 use App\Models\GameSetting;
 use App\Models\ModerationQueue;
 use App\Models\Report;
@@ -21,22 +22,13 @@ class ReportAnalysisService
 
     private const NEPAL_BBOX = ['lat_min' => 26.0, 'lat_max' => 31.0, 'lng_min' => 79.5, 'lng_max' => 89.0];
 
-    protected GroqService $groq;
-    protected GeminiService $gemini;
-    protected GroqService $visionGroq;
-    protected GeminiService|GroqService $visionPrimary;
-    protected GeminiService|GroqService $visionFallback;
+    protected AiFallbackRouter $textRouter;
+    protected AiFallbackRouter $visionRouter;
 
-    public function __construct(?GroqService $groq = null, ?GeminiService $gemini = null, ?GroqService $visionGroq = null)
+    public function __construct(?AiFallbackRouter $textRouter = null, ?AiFallbackRouter $visionRouter = null)
     {
-        $this->groq = $groq ?? new GroqService(config('services.ai.model', 'llama-3.3-70b-versatile'));
-        $this->gemini = $gemini ?? new GeminiService(config('services.ai.vision_model', 'gemini-flash-latest'));
-        $this->visionGroq = $visionGroq ?? new GroqService(config('services.ai.vision_groq_model', 'qwen/qwen3.6-27b'));
-
-        $this->visionPrimary = config('services.ai.vision_provider', 'gemini') === 'groq'
-            ? $this->visionGroq
-            : $this->gemini;
-        $this->visionFallback = $this->visionPrimary === $this->gemini ? $this->visionGroq : $this->gemini;
+        $this->textRouter = $textRouter ?? AiFallbackRouter::textChain();
+        $this->visionRouter = $visionRouter ?? AiFallbackRouter::visionChain(fn (array $r) => $this->isVisionResultUsable($r));
     }
 
     public function process(Report $report, bool $force = false): array
@@ -230,7 +222,7 @@ class ReportAnalysisService
         $category = $report->category?->name ?? 'unknown';
         $text = "Title: {$report->title}\nDescription: {$report->description}\nPriority: {$report->priority}\nDistrict: {$report->district}\nCategory: {$category}\nReported location: {$report->latitude}, {$report->longitude}";
 
-        $result = $this->groq->generateJson(
+        $result = $this->textRouter->generateJson(
             "You are the approval officer for a Nepal community reporting app. Analyze this community report. Reports are written in Nepali OR English — Nepali text is NORMAL and legitimate, never reject a report just because it is not in English.\n\n"
             . "is_legitimate must be FALSE (reject) for: test/example/meaningless reports; personal or social chatter that is not a community issue (e.g. someone visiting a house, gossip, greetings, mood posts); vague statements with no incident, hazard, problem, event or actionable information; spam.\n"
             . "is_legitimate must be TRUE (approve) only for reports describing a real community issue: road damage, landslide, flood, fire, accident, waste, electricity/water outage, crime, missing person, animal hazards, events, lost/found, and similar.\n"
@@ -326,38 +318,55 @@ class ReportAnalysisService
                 }
             }
 
-            try {
-                $result = $this->visionPrimary->generateJsonWithImages(
-                    $this->imagePrompt($report, $text),
-                    [$path],
-                    ['maxOutputTokens' => 900]
-                );
-                if ($this->isVisionResultUsable($result)) {
-                    $images[] = $this->judgeImage($item->id, $result);
-                    continue;
-                }
-                $primaryError = new \RuntimeException('Vision result empty/unusable');
-            } catch (\Exception $primaryError) {
-                // already captured above; fall through to fallback
+            // Pure-code EXIF trace (free — no AI call): real camera photos carry
+            // Make/Model + lens data; screenshots/downloads usually carry none.
+            $trace = $this->checkCameraTrace($path);
+            $dims = @getimagesize($path);
+            $width = $dims[0] ?? 0;
+            $height = $dims[1] ?? 0;
+
+            // Screenshot/download heuristic: no camera metadata + square web-size
+            // dimensions = classic re-uploaded template/screenshot. Flag for human
+            // review WITHOUT spending any AI quota.
+            if ($trace['kind'] === 'no_metadata' && $width > 0 && $width === $height && $width < 800) {
+                $images[] = [
+                    'media_id' => $item->id,
+                    'verdict' => 'suspicious',
+                    'reason' => 'No camera metadata + square web-size dimensions — likely screenshot or downloaded image',
+                    'exif_trace' => $trace,
+                    'ai_skipped' => true,
+                    'provider_used' => null,
+                ];
+                continue;
             }
+
             try {
-                $result = $this->visionFallback->generateJsonWithImages(
+                $result = $this->visionRouter->generateJsonWithImages(
                     $this->imagePrompt($report, $text),
                     [$path],
                     ['maxOutputTokens' => 900]
                 );
-                if ($this->isVisionResultUsable($result)) {
-                    $images[] = $this->judgeImage($item->id, $result);
-                    continue;
-                }
+                $entry = $this->judgeImage($item->id, $result);
+                $entry['exif_trace'] = $trace;
+                $images[] = $entry;
+            } catch (AiRateLimitException $e) {
+                Log::warning("Vision AI unavailable for report#{$report->id} media#{$item->id}: " . $e->getMessage());
                 $images[] = [
                     'media_id' => $item->id,
                     'verdict' => 'unverifiable',
-                    'reason' => 'Vision model returned no usable data — could not verify image',
+                    'reason' => 'AI providers all unavailable (quota/rate limit)',
+                    'exif_trace' => $trace,
+                    'provider_used' => null,
                 ];
-            } catch (\Exception $fallbackError) {
-                Log::error("Image analysis failed for report#{$report->id} media#{$item->id}: Primary: " . $primaryError->getMessage() . " | Fallback: " . $fallbackError->getMessage());
-                $images[] = ['media_id' => $item->id, 'verdict' => 'unverifiable', 'reason' => 'Vision API error'];
+            } catch (\Throwable $e) {
+                Log::error("Image analysis failed for report#{$report->id} media#{$item->id}: " . $e->getMessage());
+                $images[] = [
+                    'media_id' => $item->id,
+                    'verdict' => 'unverifiable',
+                    'reason' => 'Vision API error',
+                    'exif_trace' => $trace,
+                    'provider_used' => null,
+                ];
             }
         }
 
@@ -431,6 +440,57 @@ class ReportAnalysisService
             . "- \"summary\" (string, 1 sentence)";
     }
 
+    /**
+     * Pure-code EXIF camera-trace classification (zero AI cost). Classifies an
+     * image as: 'camera' (real camera EXIF: Make/Model), 'screenshotish'
+     * (software stamp, no camera), 'no_camera_trace' (EXIF but nothing camera),
+     * 'no_metadata' (no EXIF at all), or 'unknown' (non-JPEG / no EXIF ext).
+     * This is a WEAK signal — never a hard reject on its own.
+     */
+    protected function checkCameraTrace(string $path): array
+    {
+        if (!function_exists('exif_read_data')) {
+            return ['kind' => 'unknown', 'reason' => 'EXIF extension missing on server'];
+        }
+
+        $mime = mime_content_type($path) ?: '';
+        if (!in_array($mime, ['image/jpeg', 'image/jpg'])) {
+            return ['kind' => 'unknown', 'reason' => 'Not a JPEG image (' . $mime . ')'];
+        }
+
+        $exif = @exif_read_data($path);
+        if (!$exif || !is_array($exif)) {
+            return ['kind' => 'no_metadata', 'reason' => 'No EXIF metadata at all'];
+        }
+
+        $make = trim((string) ($exif['Make'] ?? ''));
+        $model = trim((string) ($exif['Model'] ?? ''));
+        $software = trim((string) ($exif['Software'] ?? ''));
+        $hasLens = isset($exif['FNumber']) || isset($exif['FocalLength'])
+            || isset($exif['ExposureTime']) || isset($exif['ISOSpeedRatings']);
+
+        if ($make !== '' || $model !== '') {
+            return [
+                'kind' => 'camera',
+                'make' => $make,
+                'model' => $model,
+                'has_lens_data' => $hasLens,
+                'reason' => 'Real camera EXIF trace present',
+            ];
+        }
+
+        if ($software !== '') {
+            return [
+                'kind' => 'screenshotish',
+                'software' => $software,
+                'has_lens_data' => false,
+                'reason' => 'No camera trace; software stamp: ' . $software,
+            ];
+        }
+
+        return ['kind' => 'no_camera_trace', 'has_lens_data' => false, 'reason' => 'EXIF present but no camera or software trace'];
+    }
+
     protected function judgeImage(int $mediaId, array $result): array
     {
         $confidence = (float) ($result['confidence'] ?? 0);
@@ -468,6 +528,7 @@ class ReportAnalysisService
             'phishing' => (bool) ($result['phishing'] ?? false),
             'confidence' => $confidence,
             'reason' => $reason,
+            'provider_used' => $result['provider_used'] ?? null,
         ];
 
         if (($result['phishing'] ?? false) || ($result['inappropriate_abusive'] ?? false)) {
