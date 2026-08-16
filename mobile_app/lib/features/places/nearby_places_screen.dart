@@ -126,7 +126,7 @@ class _NearbyPlacesScreenState extends State<NearbyPlacesScreen> {
 if (mounted && _lat != null && _lng != null) {
         provider.fetchNearbyPlaces(lat: _lat!, lng: _lng!, radiusKm: _searchRadiusKm);
         provider.fetchFeaturedPlaces(lat: _lat, lng: _lng);
-        unawaited(context.read<AdProvider>().fetchActiveAds(adContext: 'nearby'));
+        unawaited(context.read<AdProvider>().fetchActiveAds(adContext: 'nearby', limit: 6));
         WidgetsBinding.instance.addPostFrameCallback((_) async {
           await Future.delayed(const Duration(milliseconds: 200));
           if (mounted && _lat != null && _lng != null) {
@@ -1006,6 +1006,7 @@ if (mounted && _lat != null && _lng != null) {
                     context.read<AdProvider>().fetchActiveAds(
                       adContext: adContextForCategory(cat.name),
                       category: adCategorySlugForCategory(cat.name),
+                      limit: 6,
                     );
                   },
                 ),
@@ -1954,7 +1955,7 @@ class _PlacesListShimmer extends StatelessWidget {
 }
 
 // ============ AD-ENABLED PLACES LIST ============
-class _AdPlacesList extends StatelessWidget {
+class _AdPlacesList extends StatefulWidget {
   final List<PlaceModel> places;
   final List<AdCampaignModel> ads;
   final ScrollController scrollController;
@@ -1971,13 +1972,20 @@ class _AdPlacesList extends StatelessWidget {
     required this.buildPlaceItem,
   });
 
+  @override
+  State<_AdPlacesList> createState() => _AdPlacesListState();
+}
+
+class _AdPlacesListState extends State<_AdPlacesList> {
+  // Random ad slot interval per screen load (3-6 places between ads)
+  late final int _adInterval = 3 + math.Random().nextInt(4);
+
   List<dynamic> _buildFeed() {
-    const int adInterval = 5;
     final feed = <dynamic>[];
     int p = 0, a = 0;
-    while (p < places.length) {
-      for (int i = 0; i < adInterval && p < places.length; i++) feed.add(places[p++]);
-      if (a < ads.length && p < places.length) feed.add(ads[a++]);
+    while (p < widget.places.length) {
+      for (int i = 0; i < _adInterval && p < widget.places.length; i++) feed.add(widget.places[p++]);
+      if (a < widget.ads.length && p < widget.places.length) feed.add(widget.ads[a++]);
     }
     return feed;
   }
@@ -1986,14 +1994,14 @@ class _AdPlacesList extends StatelessWidget {
   Widget build(BuildContext context) {
     final feed = _buildFeed();
     return ListView.builder(
-      controller: scrollController,
+      controller: widget.scrollController,
       padding: const EdgeInsets.only(left: 12, right: 12, top: 4, bottom: 8),
       itemCount: feed.length,
       itemBuilder: (context, index) {
         final item = feed[index];
         if (item is AdCampaignModel) return AdPlaceCard(ad: item);
         final place = item as PlaceModel;
-        return buildPlaceItem(place, selectedPlaceId == place.id);
+        return widget.buildPlaceItem(place, widget.selectedPlaceId == place.id);
       },
     );
   }

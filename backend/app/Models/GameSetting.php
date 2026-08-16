@@ -11,8 +11,15 @@ class GameSetting extends Model
     protected $fillable = ['key', 'value'];
     public $timestamps = true;
 
+    /** Per-process cache to avoid a DB round-trip per lookup (hot paths: ad serving, spend calc). */
+    protected static array $cache = [];
+
     public static function getValue(string $key, mixed $default = null): mixed
     {
+        if (array_key_exists($key, static::$cache)) {
+            return static::$cache[$key];
+        }
+
         if (! Schema::hasTable('game_settings')) {
             return $default;
         }
@@ -23,15 +30,13 @@ class GameSetting extends Model
         }
 
         if (is_numeric($setting->value)) {
-            return strpos($setting->value, '.') !== false ? (float) $setting->value : (int) $setting->value;
+            $value = strpos($setting->value, '.') !== false ? (float) $setting->value : (int) $setting->value;
+        } else {
+            $decoded = json_decode($setting->value, true);
+            $value = json_last_error() === JSON_ERROR_NONE ? $decoded : $setting->value;
         }
 
-        $decoded = json_decode($setting->value, true);
-        if (json_last_error() === JSON_ERROR_NONE) {
-            return $decoded;
-        }
-
-        return $setting->value;
+        return static::$cache[$key] = $value;
     }
 
     public static function setValue(string $key, mixed $value): static
@@ -39,9 +44,12 @@ class GameSetting extends Model
         if (! Schema::hasTable('game_settings')) {
             throw new \RuntimeException('game_settings table does not exist. Run migrations.');
         }
-        return static::updateOrCreate(
+        $setting = static::updateOrCreate(
             ['key' => $key],
             ['value' => is_array($value) ? json_encode($value) : (string) $value]
         );
+        static::$cache[$key] = $setting->value;
+
+        return $setting;
     }
 }

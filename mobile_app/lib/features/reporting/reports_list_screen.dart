@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
@@ -66,7 +67,7 @@ class _ReportsListScreenState extends State<ReportsListScreen>
     await provider.fetchEmergencyReports(lat: _userLat, lng: _userLng, radiusKm: 20.0);
     if (mounted) provider.startAutoRefresh();
     // Preload ad campaigns for feed injection
-    unawaited(context.read<AdProvider>().fetchActiveAds(adContext: 'report'));
+    unawaited(context.read<AdProvider>().fetchActiveAds(adContext: 'report', limit: 6));
   }
 
   @override
@@ -337,19 +338,26 @@ class _SearchFilterBarState extends State<_SearchFilterBar> {
 }
 
 // ============ RECENT REPORTS TAB ============
-class _RecentReportsTab extends StatelessWidget {
+class _RecentReportsTab extends StatefulWidget {
   final double? userLat;
   final double? userLng;
   final VoidCallback onStatusTap;
   const _RecentReportsTab({this.userLat, this.userLng, required this.onStatusTap});
 
-  /// Build merged feed: up to [adInterval] reports then one ad, repeating
+  @override
+  State<_RecentReportsTab> createState() => _RecentReportsTabState();
+}
+
+class _RecentReportsTabState extends State<_RecentReportsTab> {
+  // Random ad slot interval per screen load (3-6 reports between ads)
+  late final int _adInterval = 3 + math.Random().nextInt(4);
+
+  /// Build merged feed: up to [_adInterval] reports then one ad, repeating
   List<dynamic> _buildFeed(List<ReportModel> reports, List<AdCampaignModel> ads) {
-    const int adInterval = 4;
     final feed = <dynamic>[];
     int r = 0, a = 0;
     while (r < reports.length) {
-      for (int i = 0; i < adInterval && r < reports.length; i++) feed.add(reports[r++]);
+      for (int i = 0; i < _adInterval && r < reports.length; i++) feed.add(reports[r++]);
       if (a < ads.length && r < reports.length) feed.add(ads[a++]);
     }
     return feed;
@@ -367,14 +375,14 @@ class _RecentReportsTab extends StatelessWidget {
             const SizedBox(height: 16),
             Text(provider.errorMessage!, style: const TextStyle(color: AppTheme.textSecondary)),
             const SizedBox(height: 8),
-            ElevatedButton.icon(onPressed: () => provider.fetchReports(lat: userLat, lng: userLng, radiusKm: 20.0), icon: const Icon(Icons.refresh), label: const Text('Retry')),
+            ElevatedButton.icon(onPressed: () => provider.fetchReports(lat: widget.userLat, lng: widget.userLng, radiusKm: 20.0), icon: const Icon(Icons.refresh), label: const Text('Retry')),
           ]));
         }
         final filtered = provider.filteredReports;
-        if (filtered.isEmpty) return _emptyState(icon: Icons.assignment, message: 'No reports yet', subtitle: 'Be the first to submit a report', onTap: onStatusTap);
+        if (filtered.isEmpty) return _emptyState(icon: Icons.assignment, message: 'No reports yet', subtitle: 'Be the first to submit a report', onTap: widget.onStatusTap);
         final feed = _buildFeed(filtered, ads);
         return RefreshIndicator(
-          onRefresh: () => provider.fetchReports(lat: userLat, lng: userLng, radiusKm: 20.0),
+          onRefresh: () => provider.fetchReports(lat: widget.userLat, lng: widget.userLng, radiusKm: 20.0),
           child: NotificationListener<ScrollNotification>(
             onNotification: (notification) {
               if (notification is ScrollEndNotification && notification.metrics.pixels >= notification.metrics.maxScrollExtent - 100) provider.fetchMoreReports();
@@ -384,7 +392,7 @@ class _RecentReportsTab extends StatelessWidget {
               padding: const EdgeInsets.all(12),
               itemCount: feed.length + 2 + (provider.isLoadingMore ? 1 : 0),
               itemBuilder: (context, index) {
-                if (index == 0) return _StatusCard(onTap: onStatusTap);
+                if (index == 0) return _StatusCard(onTap: widget.onStatusTap);
                 if (index == 1) return Padding(padding: const EdgeInsets.only(bottom: 8, left: 4, top: 8), child: Text('${filtered.length} report${filtered.length == 1 ? '' : 's'} near you', style: const TextStyle(color: AppTheme.textSecondary)));
                 if (index > feed.length + 1) return const Padding(padding: EdgeInsets.all(16), child: Center(child: CircularProgressIndicator(strokeWidth: 2)));
                 final item = feed[index - 2];
@@ -429,6 +437,8 @@ class _EmergencyReportsTab extends StatefulWidget {
 
 class _EmergencyReportsTabState extends State<_EmergencyReportsTab> {
   final ScrollController _scrollController = ScrollController();
+  // Random ad slot interval per screen load (3-6 reports between ads)
+  late final int _adInterval = 3 + math.Random().nextInt(4);
 
   @override
   void initState() {
@@ -450,11 +460,10 @@ class _EmergencyReportsTabState extends State<_EmergencyReportsTab> {
   }
 
   List<dynamic> _buildFeed(List<ReportModel> reports, List<AdCampaignModel> ads) {
-    const int adInterval = 4;
     final feed = <dynamic>[];
     int r = 0, a = 0;
     while (r < reports.length) {
-      for (int i = 0; i < adInterval && r < reports.length; i++) feed.add(reports[r++]);
+      for (int i = 0; i < _adInterval && r < reports.length; i++) feed.add(reports[r++]);
       if (a < ads.length && r < reports.length) feed.add(ads[a++]);
     }
     return feed;

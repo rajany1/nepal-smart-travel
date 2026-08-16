@@ -20,6 +20,7 @@ import '../store/store_screen.dart';
 import '../bookings/my_bookings_screen.dart';
 import '../subscriptions/subscription_plans_screen.dart';
 import '../../widgets/ad_banner_carousel.dart';
+import '../../widgets/ad_inline_banner.dart';
 import '../offers/offers_screen.dart';
 import '../offers/offer_detail_screen.dart';
 import '../../core/models/offer_model.dart';
@@ -284,6 +285,8 @@ color: AppTheme.surfaceColor,
                 ),
               )),
 
+            const SizedBox(height: 24),
+            AdInlineBanner(adContext: 'home'),
             const SizedBox(height: 24),
 
             // Nearby Highlights

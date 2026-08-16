@@ -1056,6 +1056,7 @@ class AdminController extends Controller
             'xp_per_npr_ratio' => GameSetting::getValue('xp_per_npr_ratio', 1),
             'ad_cpm' => GameSetting::getValue('ad_cpm', 50),
             'ad_cpc' => GameSetting::getValue('ad_cpc', 10),
+            'ad_freq_cap' => GameSetting::getValue('ad_freq_cap', 3),
             'offer_commission_percent' => GameSetting::getValue('offer_commission_percent', 10),
             'payout_min_esewa' => GameSetting::getValue('payout_min_esewa', 100),
             'payout_min_khalti' => GameSetting::getValue('payout_min_khalti', 100),
@@ -1092,6 +1093,7 @@ class AdminController extends Controller
             'xp_per_npr_ratio' => 'required|numeric|min:0.01|max:100',
             'ad_cpm' => 'required|numeric|min:0|max:100000',
             'ad_cpc' => 'required|numeric|min:0|max:100000',
+            'ad_freq_cap' => 'required|integer|min:0|max:100',
             'offer_commission_percent' => 'required|numeric|min:0|max:100',
             'payout_min_esewa' => 'required|numeric|min:0|max:1000000',
             'payout_min_khalti' => 'required|numeric|min:0|max:1000000',
@@ -1117,6 +1119,7 @@ class AdminController extends Controller
         GameSetting::setValue('xp_per_npr_ratio', $validated['xp_per_npr_ratio']);
         GameSetting::setValue('ad_cpm', $validated['ad_cpm']);
         GameSetting::setValue('ad_cpc', $validated['ad_cpc']);
+        GameSetting::setValue('ad_freq_cap', $validated['ad_freq_cap']);
         GameSetting::setValue('offer_commission_percent', $validated['offer_commission_percent']);
         GameSetting::setValue('payout_min_esewa', $validated['payout_min_esewa']);
         GameSetting::setValue('payout_min_khalti', $validated['payout_min_khalti']);

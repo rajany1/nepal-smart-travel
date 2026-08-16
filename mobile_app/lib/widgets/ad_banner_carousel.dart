@@ -31,7 +31,7 @@ class _AdBannerCarouselState extends State<AdBannerCarousel> {
 
   Future<void> _load() async {
     try {
-      final res = await _api.getActiveAds(adContext: widget.adContext);
+      final res = await _api.getActiveAds(adContext: widget.adContext, limit: 5);
       _ads = (res.data['data'] as List<dynamic>?) ?? [];
       for (final ad in _ads) {
         if (ad is Map<String, dynamic> && ad['id'] is int) {

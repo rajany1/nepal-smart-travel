@@ -36,9 +36,9 @@ class AdProvider extends ChangeNotifier {
       final data = (res.data['data'] as List<dynamic>?) ?? [];
       _ads = data.map((e) => AdCampaignModel.fromJson(e as Map<String, dynamic>)).toList();
 
-      // Separate by ad_type (banner goes to place list only — FL-32: was duplicated)
-      _placeAds = _ads.where((a) => a.adType == 'promoted_place' || a.adType == 'banner').toList();
-      _reportAds = _ads.where((a) => a.adType == 'sponsored_card').toList();
+      // All ad types may appear in any feed slot
+      _placeAds = List.of(_ads);
+      _reportAds = List.of(_ads);
 
       _errorMessage = null;
     } catch (e) {

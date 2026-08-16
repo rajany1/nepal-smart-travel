@@ -37,7 +37,7 @@
                 <div class="border-t border-slate-200 pt-5">
                     <h3 class="text-base font-semibold text-slate-900 mb-1">Rewards & Ads</h3>
                     <p class="text-sm text-slate-500 mb-4">Offer XP price = discount value x ratio. Ad spend = impressions x CPM / 1000 + clicks x CPC (paid from partner budgets). Offer commission % is taken from each redemption value.</p>
-                    <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
+                    <div class="grid grid-cols-1 md:grid-cols-5 gap-4">
                         <div>
                             <label class="block text-sm font-medium text-slate-700">XP per NPR ratio (offer price)</label>
                             <input type="number" name="xp_per_npr_ratio" value="{{ old('xp_per_npr_ratio', $settings['xp_per_npr_ratio']) }}" step="0.01" min="0.01" max="100" class="mt-1 block w-full rounded-xl border-slate-300 shadow-sm focus:ring-primary-500 focus:border-primary-500" />
@@ -53,7 +53,12 @@
                             <input type="number" name="ad_cpc" value="{{ old('ad_cpc', $settings['ad_cpc']) }}" step="0.01" min="0" max="100000" class="mt-1 block w-full rounded-xl border-slate-300 shadow-sm focus:ring-primary-500 focus:border-primary-500" />
                             @error('ad_cpc')<p class="text-sm text-red-600 mt-1">{{ $message }}</p>@enderror
                         </div>
-<div>
+                        <div>
+                            <label class="block text-sm font-medium text-slate-700">Max ads per user/day</label>
+                            <input type="number" name="ad_freq_cap" value="{{ old('ad_freq_cap', $settings['ad_freq_cap']) }}" min="0" max="100" class="mt-1 block w-full rounded-xl border-slate-300 shadow-sm focus:ring-primary-500 focus:border-primary-500" />
+                            @error('ad_freq_cap')<p class="text-sm text-red-600 mt-1">{{ $message }}</p>@enderror
+                        </div>
+                        <div>
                             <label class="block text-sm font-medium text-slate-700">Offer Commission (%)</label>
                             <input type="number" name="offer_commission_percent" value="{{ old('offer_commission_percent', $settings['offer_commission_percent']) }}" step="0.1" min="0" max="100" class="mt-1 block w-full rounded-xl border-slate-300 shadow-sm focus:ring-primary-500 focus:border-primary-500" />
                             @error('offer_commission_percent')<p class="text-sm text-red-600 mt-1">{{ $message }}</p>@enderror
