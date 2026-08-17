@@ -515,12 +515,14 @@ class ApiClient {
     String? type,
     String? difficulty,
     String? search,
+    bool withTrack = false,
     int limit = 50,
   }) async {
     final params = <String, dynamic>{'limit': limit};
     if (type != null && type.isNotEmpty) params['type'] = type;
     if (difficulty != null && difficulty.isNotEmpty) params['difficulty'] = difficulty;
     if (search != null && search.isNotEmpty) params['q'] = search;
+    if (withTrack) params['with_track'] = 1;
     return _dio.get('/routes', queryParameters: params);
   }
 

@@ -25,9 +25,10 @@ class RouteController extends Controller
 
         $routes = $query->limit(min((int) ($request->get('limit') ?: 50), 100))->get();
 
+        $withTrack = $request->boolean('with_track');
         return response()->json([
             'success' => true,
-            'routes' => $routes->map(fn($r) => $this->publicRoute($r)),
+            'routes' => $routes->map(fn($r) => $this->publicRoute($r, $withTrack)),
         ]);
     }
 
@@ -58,9 +59,9 @@ class RouteController extends Controller
         return response()->json(['success' => true, 'route' => $data]);
     }
 
-    private function publicRoute(CuratedRoute $route): array
+    private function publicRoute(CuratedRoute $route, bool $withTrack = false): array
     {
-        return [
+        $data = [
             'id' => $route->id,
             'title' => $route->title,
             'slug' => $route->slug,
@@ -78,5 +79,9 @@ class RouteController extends Controller
             'ending_point' => $route->ending_point,
             'waypoint_count' => count($route->waypoints ?? []),
         ];
+        if ($withTrack) {
+            $data['track'] = $route->trackPoints();
+        }
+        return $data;
     }
 }

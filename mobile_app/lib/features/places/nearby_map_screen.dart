@@ -19,12 +19,14 @@ import '../../core/services/offline_db_service.dart';
 import '../../core/services/offline_tile_provider.dart';
 import '../../core/services/app_settings_service.dart';
 import '../../core/models/place.dart';
+import '../../core/models/route_model.dart';
 import '../../core/api/api_client.dart';
 import '../../providers/place_provider.dart';
 import '../../providers/map_view_provider.dart';
 import '../../providers/auth_provider.dart';
 import '../auth/login_screen.dart';
 import '../routes/routes_screen.dart';
+import '../routes/route_detail_screen.dart';
 import 'place_details_screen.dart';
 import 'add_place_screen.dart';
 import 'filter_places_sheet.dart';
@@ -75,6 +77,10 @@ class _NearbyMapScreenState extends State<NearbyMapScreen> {
   List<Map<String, dynamic>> _routes = [];
   bool _isLoadingRoute = false;
   bool _showFeaturedOnly = false;
+
+  // Trekking / curated route overlays on the map
+  List<CuratedRouteModel> _routeOverlays = [];
+  bool _isLoadingRouteOverlays = false;
   PlaceFilter? _activeFilter;
   double? _lastFetchLat;
   double? _lastFetchLng;
@@ -627,6 +633,7 @@ class _NearbyMapScreenState extends State<NearbyMapScreen> {
                   isSatellite: mapView.isSatellite,
                   placesVisible: mapView.showPlaces,
                   showWeather: mapView.showWeather,
+                  showRoutes: mapView.showRoutes,
                 ),
               );
             },
@@ -763,6 +770,7 @@ class _NearbyMapScreenState extends State<NearbyMapScreen> {
     required bool isSatellite,
     required bool placesVisible,
     required bool showWeather,
+    required bool showRoutes,
   }) {
     return FlutterMap(
       key: key,
@@ -837,6 +845,42 @@ class _NearbyMapScreenState extends State<NearbyMapScreen> {
                       : Colors.grey.withOpacity(0.5),
                   strokeWidth: i == 0 ? 5 : 3,
                 ),
+            ],
+          ),
+        // Trekking / curated routes overlay
+        if (showRoutes && _routeOverlays.isNotEmpty)
+          PolylineLayer(
+            polylines: [
+              for (final r in _routeOverlays)
+                if (r.track.length > 1)
+                  Polyline(
+                    points: r.track.map((p) => LatLng(p.lat, p.lng)).toList(),
+                    color: r.isTrekking
+                        ? const Color(0xFFB45309).withOpacity(0.9)
+                        : AppTheme.primaryColor.withOpacity(0.9),
+                    strokeWidth: 4,
+                  ),
+            ],
+          ),
+        if (showRoutes && _routeOverlays.isNotEmpty)
+          MarkerLayer(
+            markers: [
+              for (final r in _routeOverlays)
+                if (r.track.isNotEmpty) ...[
+                  Marker(
+                    point: LatLng(r.track.first.lat, r.track.first.lng),
+                    width: 34,
+                    height: 34,
+                    child: _buildRouteOverlayMarker(r, isStart: true),
+                  ),
+                  if (r.track.length > 1)
+                    Marker(
+                      point: LatLng(r.track.last.lat, r.track.last.lng),
+                      width: 34,
+                      height: 34,
+                      child: _buildRouteOverlayMarker(r, isStart: false),
+                    ),
+                ],
             ],
           ),
         // "You are here" indicator - always visible regardless of places toggle
@@ -964,6 +1008,56 @@ class _NearbyMapScreenState extends State<NearbyMapScreen> {
   void _resetRotationToNorth() {
     _rotationNotifier.value = 0;
     _activeMapController.rotate(0);
+  }
+
+  Future<void> _loadRouteOverlays() async {
+    if (_routeOverlays.isNotEmpty || _isLoadingRouteOverlays) return;
+    setState(() => _isLoadingRouteOverlays = true);
+    try {
+      final res = await ApiClient.instance.getRoutes(withTrack: true, limit: 50);
+      final data = (res.data['routes'] as List<dynamic>?) ?? [];
+      final overlays = data
+          .map((e) => CuratedRouteModel.fromJson(e as Map<String, dynamic>))
+          .where((r) => r.track.length > 1)
+          .toList();
+      if (mounted) setState(() => _routeOverlays = overlays);
+    } catch (e) {
+      debugPrint('Route overlays load failed: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(context.t('Could not load trekking routes')),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+    }
+    if (mounted) setState(() => _isLoadingRouteOverlays = false);
+  }
+
+  Widget _buildRouteOverlayMarker(CuratedRouteModel route, {required bool isStart}) {
+    return GestureDetector(
+      onTap: () => Navigator.push(
+        context,
+        MaterialPageRoute(builder: (_) => RouteDetailScreen(routeId: route.id)),
+      ),
+      child: Container(
+        decoration: BoxDecoration(
+          color: isStart ? const Color(0xFF2E7D32) : const Color(0xFFC62828),
+          shape: BoxShape.circle,
+          border: Border.all(color: Colors.white, width: 2),
+          boxShadow: const [
+            BoxShadow(color: Colors.black26, blurRadius: 3),
+          ],
+        ),
+        alignment: Alignment.center,
+        child: Icon(
+          isStart ? Icons.flag : Icons.sports_score,
+          size: 16,
+          color: Colors.white,
+        ),
+      ),
+    );
   }
 
   Widget _buildRoutesButton() {
@@ -1114,6 +1208,20 @@ class _NearbyMapScreenState extends State<NearbyMapScreen> {
             color: mapView.showWeather ? const Color(0xFF5C6BC0) : Colors.white,
             iconColor: mapView.showWeather ? Colors.white : const Color(0xFF5C6BC0),
             onTap: mapView.toggleWeather,
+          ),
+        ),
+        const SizedBox(height: 4),
+        Consumer<MapViewProvider>(
+          builder: (context, mapView, _) => _mapFAB(
+            icon: Icons.hiking,
+            color: mapView.showRoutes ? const Color(0xFFB45309) : Colors.white,
+            iconColor: mapView.showRoutes ? Colors.white : const Color(0xFFB45309),
+            onTap: () {
+              mapView.toggleRoutes();
+              if (mapView.showRoutes) {
+                _loadRouteOverlays();
+              }
+            },
           ),
         ),
         const SizedBox(height: 4),

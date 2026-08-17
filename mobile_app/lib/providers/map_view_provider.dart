@@ -8,12 +8,14 @@ class MapViewProvider extends ChangeNotifier {
   bool _showTraffic = false;
   bool _showClusters = true;
   bool _showWeather = false;
+  bool _showRoutes = false;
 
   MapViewMode get currentMode => _currentMode;
   bool get showPlaces => _showPlaces;
   bool get showTraffic => _showTraffic;
   bool get showClusters => _showClusters;
   bool get showWeather => _showWeather;
+  bool get showRoutes => _showRoutes;
   bool get isSatellite => _currentMode == MapViewMode.satellite;
 
   void toggleMapMode() {
@@ -45,6 +47,11 @@ class MapViewProvider extends ChangeNotifier {
 
   void toggleWeather() {
     _showWeather = !_showWeather;
+    notifyListeners();
+  }
+
+  void toggleRoutes() {
+    _showRoutes = !_showRoutes;
     notifyListeners();
   }
 }
