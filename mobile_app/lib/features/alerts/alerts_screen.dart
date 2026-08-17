@@ -1,9 +1,11 @@
 import 'dart:async';
+import "../../core/services/localization_service.dart";
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../config/themes/app_theme.dart';
 import '../../providers/alert_provider.dart';
 import '../../core/services/location_service.dart';
+import '../../core/services/localization_service.dart';
 import '../../core/widgets/shimmer_loading.dart';
 
 class AlertsScreen extends StatefulWidget {
@@ -53,8 +55,8 @@ class _AlertsScreenState extends State<AlertsScreen> {
 
   void _showNewItemAlert(NearbyItem item) {
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-      content: Text('${item.severityEmoji} New ${item.severity.toUpperCase()} ${item.isReport ? "report" : "alert"}: ${item.title}'),
-      action: SnackBarAction(label: 'View', onPressed: () {}),
+      content: Text('${item.severityEmoji} ${context.t('New')} ${item.severity.toUpperCase()} ${item.isReport ? context.t('report') : context.t('alert')}: ${item.title}'),
+      action: SnackBarAction(label: context.t('View'), onPressed: () {}),
       duration: const Duration(seconds: 6),
       backgroundColor: item.severity == 'critical'
           ? AppTheme.severityCritical
@@ -76,7 +78,7 @@ class _AlertsScreenState extends State<AlertsScreen> {
       builder: (context, provider, _) {
         return Scaffold(
           appBar: AppBar(
-            title: const Text('Live Alerts'),
+            title: Text(context.t('Live Alerts')),
             actions: [
               IconButton(
                 icon: const Icon(Icons.refresh),
@@ -99,10 +101,10 @@ class _AlertsScreenState extends State<AlertsScreen> {
                       child: Row(
                         mainAxisAlignment: MainAxisAlignment.spaceAround,
                         children: [
-                          _AlertStat(count: '${provider.criticalCount}', label: 'Critical', color: AppTheme.severityCritical),
-                          _AlertStat(count: '${provider.highCount}', label: 'High', color: AppTheme.severityHigh),
-                          _AlertStat(count: '${provider.mediumCount}', label: 'Medium', color: AppTheme.severityMedium),
-                          _AlertStat(count: '${provider.infoCount}', label: 'Info', color: AppTheme.severityInfo),
+                          _AlertStat(count: '${provider.criticalCount}', label: context.t('Critical'), color: AppTheme.severityCritical),
+                          _AlertStat(count: '${provider.highCount}', label: context.t('High'), color: AppTheme.severityHigh),
+                          _AlertStat(count: '${provider.mediumCount}', label: context.t('Medium'), color: AppTheme.severityMedium),
+                          _AlertStat(count: '${provider.infoCount}', label: context.t('Info'), color: AppTheme.severityInfo),
                         ],
                       ),
                     ),
@@ -114,18 +116,18 @@ class _AlertsScreenState extends State<AlertsScreen> {
                       child: ListView(
                         scrollDirection: Axis.horizontal,
                         children: [
-                          _FilterChip(label: 'All', selected: provider.activeFilter == null || provider.activeFilter == 'all', onSelected: () => provider.setFilter(null)),
-                          _FilterChip(label: 'Critical', selected: provider.activeFilter == 'critical', onSelected: () => provider.setFilter('critical')),
-                          _FilterChip(label: 'High', selected: provider.activeFilter == 'high', onSelected: () => provider.setFilter('high')),
-                          _FilterChip(label: 'Medium', selected: provider.activeFilter == 'medium', onSelected: () => provider.setFilter('medium')),
-                          _FilterChip(label: 'Info', selected: provider.activeFilter == 'info', onSelected: () => provider.setFilter('info')),
+                          _FilterChip(label: context.t('All'), selected: provider.activeFilter == null || provider.activeFilter == 'all', onSelected: () => provider.setFilter(null)),
+                          _FilterChip(label: context.t('Critical'), selected: provider.activeFilter == 'critical', onSelected: () => provider.setFilter('critical')),
+                          _FilterChip(label: context.t('High'), selected: provider.activeFilter == 'high', onSelected: () => provider.setFilter('high')),
+                          _FilterChip(label: context.t('Medium'), selected: provider.activeFilter == 'medium', onSelected: () => provider.setFilter('medium')),
+                          _FilterChip(label: context.t('Info'), selected: provider.activeFilter == 'info', onSelected: () => provider.setFilter('info')),
                         ],
                       ),
                     ),
                     // Alert List
                     Expanded(
                       child: provider.filteredItems.isEmpty
-                          ? const Center(child: Column(mainAxisSize: MainAxisSize.min, children: [Icon(Icons.notifications_off, size: 48, color: AppTheme.textSecondary), SizedBox(height: 12), Text('No alerts found', style: TextStyle(color: AppTheme.textSecondary)), SizedBox(height: 4), Text('Everything looks clear in your area', style: TextStyle(color: AppTheme.textSecondary, fontSize: AppTheme.textSm))]))
+                          ? Center(child: Column(mainAxisSize: MainAxisSize.min, children: [const Icon(Icons.notifications_off, size: 48, color: AppTheme.textSecondary), const SizedBox(height: 12), Text(context.t('No alerts found'), style: const TextStyle(color: AppTheme.textSecondary)), const SizedBox(height: 4), Text(context.t('Everything looks clear in your area'), style: const TextStyle(color: AppTheme.textSecondary, fontSize: AppTheme.textSm))]))
                           : ListView.builder(
                               padding: const EdgeInsets.all(12),
                               itemCount: provider.filteredItems.length,
@@ -168,7 +170,7 @@ class _AlertsScreenState extends State<AlertsScreen> {
                                                           color: severityColor.withOpacity(0.2),
                                                           borderRadius: BorderRadius.circular(4),
                                                         ),
-                                                        child: Text('REPORT', style: TextStyle(fontSize: AppTheme.textXs, fontWeight: FontWeight.w600, color: severityColor)),
+                                                        child: Text(context.t('REPORT'), style: TextStyle(fontSize: AppTheme.textXs, fontWeight: FontWeight.w600, color: severityColor)),
                                                       ),
                                                     Expanded(
                                                       child: Text(item.title, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: AppTheme.textBase)),
@@ -219,10 +221,10 @@ class _AlertsScreenState extends State<AlertsScreen> {
 
   String _timeAgo(DateTime date) {
     final diff = DateTime.now().difference(date);
-    if (diff.inMinutes < 1) return 'Just now';
-    if (diff.inMinutes < 60) return '${diff.inMinutes} min ago';
-    if (diff.inHours < 24) return '${diff.inHours} hour${diff.inHours > 1 ? 's' : ''} ago';
-    return '${diff.inDays} day${diff.inDays > 1 ? 's' : ''} ago';
+    if (diff.inMinutes < 1) return context.t('Just now');
+    if (diff.inMinutes < 60) return '${diff.inMinutes} ${context.t('min ago')}';
+    if (diff.inHours < 24) return '${diff.inHours} ${diff.inHours > 1 ? context.t('hours ago') : context.t('hour ago')}';
+    return '${diff.inDays} ${diff.inDays > 1 ? context.t('days ago') : context.t('day ago')}';
   }
 }
 

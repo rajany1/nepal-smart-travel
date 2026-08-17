@@ -4,8 +4,7 @@ namespace App\Services\Ai\Handlers;
 
 use App\Models\AiAgentTask;
 use App\Models\Place;
-use App\Models\PlaceReview;
-use Illuminate\Support\Facades\Log;
+use App\Services\HotelAnalyticsService;
 
 class HotelManagerHandler extends BaseHandler
 {
@@ -39,20 +38,21 @@ class HotelManagerHandler extends BaseHandler
     protected function handleAutoWork(AiAgentTask $task): AiAgentTask
     {
         $results = $this->autoWork();
-        $msg = count($results) . ' hotel performance report(s) generated';
+        $msg = count($results) . ' hotel performance report(s) generated (rules-based)';
         return $this->markComplete($task, ['analyzed' => count($results), 'items' => $results, 'message' => $msg]);
-    }    protected function autoWork(): array
+    }
+
+    protected function autoWork(): array
     {
         $results = [];
 
         $hotels = $this->hotelsQuery()
             ->orderByDesc('total_reviews')
-            ->take(5)
+            ->take(10)
             ->get();
 
         foreach ($hotels as $hotel) {
-            $report = $this->analyzeHotelData($hotel);
-            $results[] = $report;
+            $results[] = app(HotelAnalyticsService::class)->analyze($hotel);
         }
 
         return $results;
@@ -64,7 +64,7 @@ class HotelManagerHandler extends BaseHandler
         if (!$hotel) {
             return $this->markFailed($task, "Hotel place #{$placeId} not found");
         }
-        return $this->markComplete($task, $this->analyzeHotelData($hotel));
+        return $this->markComplete($task, app(HotelAnalyticsService::class)->analyze($hotel));
     }
 
     protected function hotelsQuery()
@@ -77,55 +77,5 @@ class HotelManagerHandler extends BaseHandler
                     ->orWhereRaw("LOWER(name) LIKE '%guesthouse%'");
             });
         });
-    }
-
-    protected function analyzeHotelData(Place $hotel): array
-    {
-        $reviews = PlaceReview::where('place_id', $hotel->id)
-            ->latest()
-            ->take(10)
-            ->get(['rating', 'title', 'description', 'created_at']);
-
-        $recent = PlaceReview::where('place_id', $hotel->id)
-            ->where('created_at', '>=', now()->subDays(30))
-            ->count();
-
-        $negative = PlaceReview::where('place_id', $hotel->id)
-            ->where('rating', '<=', 2)
-            ->where('created_at', '>=', now()->subDays(90))
-            ->count();
-
-        $llm = $this->ai();
-        $reviewJson = $reviews->map(fn($r) => [
-            'rating' => $r->rating,
-            'text' => trim(($r->title ? $r->title . ' — ' : '') . ($r->description ?? '')),
-        ])->values()->toJson(JSON_UNESCAPED_UNICODE);
-
-        $analysis = ['needs_attention' => $negative > 0 || ($hotel->average_rating ?? 0) < 3.5];
-        try {
-            $result = $llm->generateJson(
-                "You are a hotel performance analyst. Analyze this Nepal hotel.\nName: {$hotel->name}\nDistrict: {$hotel->district}\nAvg rating: {$hotel->average_rating} ({$hotel->total_reviews} reviews)\nRecent reviews (30d): {$recent}\n\nRecent reviews:\n{$reviewJson}\n\nReturn JSON: {\"summary\": \"string\", \"strengths\": [\"string\"], \"improvements\": [\"string\"], \"guest_sentiment\": \"positive|mixed|negative\"}"
-            );
-            $analysis['summary'] = $result['summary'] ?? '';
-            $analysis['strengths'] = $result['strengths'] ?? [];
-            $analysis['improvements'] = $result['improvements'] ?? [];
-            $analysis['guest_sentiment'] = $result['guest_sentiment'] ?? 'mixed';
-        } catch (\Exception $e) {
-            Log::warning("Hotel manager LLM failed for #{$hotel->id}: " . $e->getMessage());
-            $analysis['summary'] = 'AI analysis temporarily unavailable.';
-            $analysis['strengths'] = [];
-            $analysis['improvements'] = [];
-            $analysis['guest_sentiment'] = $negative > 0 ? 'mixed' : 'positive';
-        }
-
-        return [
-            'place_id' => $hotel->id,
-            'hotel' => $hotel->name,
-            'district' => $hotel->district,
-            'average_rating' => $hotel->average_rating,
-            'total_reviews' => $hotel->total_reviews,
-            'reviews_30d' => $recent,
-            'negative_90d' => $negative,
-        ] + $analysis;
     }
 }

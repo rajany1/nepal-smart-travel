@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import "../../core/services/localization_service.dart";
 import 'package:provider/provider.dart';
 import 'package:dio/dio.dart';
 import 'package:flutter/services.dart';
@@ -7,6 +8,7 @@ import '../../config/themes/app_theme.dart';
 import '../../core/models/offer_model.dart';
 import '../../providers/auth_provider.dart';
 import '../../providers/offer_provider.dart';
+import '../../core/services/localization_service.dart';
 import '../auth/login_screen.dart';
 
 class OfferDetailScreen extends StatefulWidget {
@@ -21,18 +23,18 @@ class OfferDetailScreen extends StatefulWidget {
 class _OfferDetailScreenState extends State<OfferDetailScreen> {
   bool _isClaiming = false;
 
-  String get _typeLabel {
+  String _typeLabel(BuildContext context) {
     switch (widget.offer.offerType) {
       case 'percentage_off':
-        return 'Percentage Off';
+        return context.t('Percentage Off');
       case 'fixed_off':
-        return 'Fixed Amount Off';
+        return context.t('Fixed Amount Off');
       case 'free_item':
-        return 'Free Item';
+        return context.t('Free Item');
       case 'buy_one_get_one':
-        return 'Buy One Get One';
+        return context.t('Buy One Get One');
       default:
-        return 'Special Offer';
+        return context.t('Special Offer');
     }
   }
 
@@ -42,13 +44,13 @@ class _OfferDetailScreenState extends State<OfferDetailScreen> {
       final goLogin = await showDialog<bool>(
         context: context,
         builder: (ctx) => AlertDialog(
-          title: const Text('Login required'),
-          content: const Text('Log in to claim this reward and get your unique code.'),
+          title: Text(ctx.t('Login required')),
+          content: Text(ctx.t('Log in to claim this reward and get your unique code.')),
           actions: [
-            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+            TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text(ctx.t('Cancel'))),
             FilledButton(
               onPressed: () => Navigator.pop(ctx, true),
-              child: const Text('Log in'),
+              child: Text(ctx.t('Log in')),
             ),
           ],
         ),
@@ -71,12 +73,12 @@ class _OfferDetailScreenState extends State<OfferDetailScreen> {
       final data = e.response?.data;
       final message = data is Map && data['message'] != null
           ? data['message'].toString()
-          : 'Could not claim offer. Try again.';
+          : context.t('Could not claim offer. Try again.');
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
     } catch (_) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Could not claim offer. Check your connection.')),
+        SnackBar(content: Text(context.t('Could not claim offer. Check your connection.'))),
       );
     } finally {
       if (mounted) setState(() => _isClaiming = false);
@@ -106,10 +108,13 @@ class _OfferDetailScreenState extends State<OfferDetailScreen> {
             ),
             const Icon(Icons.check_circle, color: Colors.green, size: 48),
             const SizedBox(height: 12),
-            const Text('Offer claimed!', style: TextStyle(fontSize: AppTheme.textXl, fontWeight: FontWeight.bold)),
+            Text(
+              context.t('Offer claimed!'),
+              style: const TextStyle(fontSize: AppTheme.textXl, fontWeight: FontWeight.bold),
+            ),
             const SizedBox(height: 4),
             Text(
-              'Show this code at ${widget.offer.business?.name ?? 'the business'}',
+              '${context.t('Show this code at')} ${widget.offer.business?.name ?? context.t('the business')}',
               textAlign: TextAlign.center,
               style: const TextStyle(color: Colors.grey, fontSize: AppTheme.textSm),
             ),
@@ -140,27 +145,28 @@ class _OfferDetailScreenState extends State<OfferDetailScreen> {
                 Expanded(
                   child: OutlinedButton.icon(
                     onPressed: () async {
+                      final copiedMsg = context.t('Code copied');
                       await Clipboard.setData(ClipboardData(text: redemption.code));
                       if (context.mounted) {
                         ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(content: Text('Code copied')),
+                          SnackBar(content: Text(copiedMsg)),
                         );
                       }
                     },
                     icon: const Icon(Icons.copy, size: 18),
-                    label: const Text('Copy'),
+                    label: Text(context.t('Copy')),
                   ),
                 ),
                 const SizedBox(width: 12),
                 Expanded(
                   child: FilledButton.icon(
                     onPressed: () => Share.share(
-                      'My Nepal Smart Travel reward code: ${redemption.code}\n'
-                      'Offer: ${widget.offer.title}\n'
-                      'Valid at: ${widget.offer.business?.name ?? ''}',
+                      '${context.t('My Nepal Smart Travel reward code:')} ${redemption.code}\n'
+                      '${context.t('Offer:')} ${widget.offer.title}\n'
+                      '${context.t('Valid at:')} ${widget.offer.business?.name ?? ''}',
                     ),
                     icon: const Icon(Icons.share, size: 18),
-                    label: const Text('Share'),
+                    label: Text(context.t('Share')),
                   ),
                 ),
               ],
@@ -180,7 +186,7 @@ class _OfferDetailScreenState extends State<OfferDetailScreen> {
     final canClaim = !alreadyClaimed && !offer.isExpired;
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Offer Details')),
+      appBar: AppBar(title: Text(context.t('Offer Details'))),
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(16),
         child: Column(
@@ -233,7 +239,7 @@ class _OfferDetailScreenState extends State<OfferDetailScreen> {
                   ),
                   const SizedBox(height: 6),
                   Text(
-                    _typeLabel,
+                    context.t(_typeLabel(context)),
                     style: const TextStyle(color: Colors.white70, fontSize: AppTheme.textSm),
                   ),
                 ],
@@ -286,7 +292,7 @@ class _OfferDetailScreenState extends State<OfferDetailScreen> {
             ],
 
             if (offer.description != null && offer.description!.isNotEmpty) ...[
-              Text('About this offer', style: Theme.of(context).textTheme.titleMedium),
+              Text(context.t('About this offer'), style: Theme.of(context).textTheme.titleMedium),
               const SizedBox(height: 8),
               Text(
                 offer.description!,
@@ -296,7 +302,7 @@ class _OfferDetailScreenState extends State<OfferDetailScreen> {
             ],
 
             if (offer.terms != null && offer.terms!.isNotEmpty) ...[
-              Text('Terms & Conditions', style: Theme.of(context).textTheme.titleMedium),
+              Text(context.t('Terms & Conditions'), style: Theme.of(context).textTheme.titleMedium),
               const SizedBox(height: 8),
               Container(
                 width: double.infinity,
@@ -317,29 +323,29 @@ class _OfferDetailScreenState extends State<OfferDetailScreen> {
             Row(
               children: [
                 _InfoChip(icon: Icons.event, label: offer.endsAt != null
-                    ? 'Valid till ${_fmtDate(offer.endsAt!)}'
-                    : 'No expiry'),
+                    ? '${context.t('Valid till')} ${_fmtDate(offer.endsAt!)}'
+                    : context.t('No expiry')),
                 const SizedBox(width: 8),
                 _InfoChip(
                   icon: Icons.people_outline,
-                  label: offer.isUnlimited ? 'Unlimited' : '${offer.usageLimit - offer.usedCount} left',
+                  label: offer.isUnlimited ? context.t('Unlimited') : '${offer.usageLimit - offer.usedCount} ${context.t('left')}',
                 ),
               ],
             ),
             const SizedBox(height: 24),
 
             if (offer.isExpired)
-              const Center(
+              Center(
                 child: Text(
-                  'This offer has expired',
-                  style: TextStyle(color: Colors.red, fontWeight: FontWeight.w600),
+                  context.t('This offer has expired'),
+                  style: const TextStyle(color: Colors.red, fontWeight: FontWeight.w600),
                 ),
               )
             else if (alreadyClaimed)
-              const Center(
+              Center(
                 child: Text(
-                  'You already claimed this offer — check My Codes',
-                  style: TextStyle(color: AppTheme.primaryColor, fontWeight: FontWeight.w600),
+                  context.t('You already claimed this offer — check My Codes'),
+                  style: const TextStyle(color: AppTheme.primaryColor, fontWeight: FontWeight.w600),
                 ),
               )
             else
@@ -355,7 +361,7 @@ class _OfferDetailScreenState extends State<OfferDetailScreen> {
                           child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
                         )
                       : const Icon(Icons.local_offer),
-                  label: Text(_isClaiming ? 'Claiming...' : 'Get Offer Code'),
+                  label: Text(_isClaiming ? context.t('Claiming...') : context.t('Get Offer Code')),
                   style: FilledButton.styleFrom(
                     backgroundColor: AppTheme.secondaryColor,
                     foregroundColor: Colors.white,
@@ -372,7 +378,11 @@ class _OfferDetailScreenState extends State<OfferDetailScreen> {
   String _fmtDate(String iso) {
     final dt = DateTime.tryParse(iso);
     if (dt == null) return iso;
-    const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    final months = [
+      context.t('Jan'), context.t('Feb'), context.t('Mar'), context.t('Apr'),
+      context.t('May'), context.t('Jun'), context.t('Jul'), context.t('Aug'),
+      context.t('Sep'), context.t('Oct'), context.t('Nov'), context.t('Dec'),
+    ];
     return '${dt.day} ${months[dt.month - 1]} ${dt.year}';
   }
 }

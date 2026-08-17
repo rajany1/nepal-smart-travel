@@ -1,4 +1,5 @@
 import 'package:flutter/foundation.dart';
+import "../../core/services/localization_service.dart";
 
 class AppConstants {
   AppConstants._();

@@ -1,8 +1,10 @@
 ﻿import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import "../../core/services/localization_service.dart";
 import 'package:dio/dio.dart';
 import '../../config/themes/app_theme.dart';
 import '../../core/services/location_service.dart';
+import '../../core/services/localization_service.dart';
 import '../../core/api/api_client.dart';
 import '../../providers/auth_provider.dart';
 import '../../providers/alert_provider.dart';
@@ -17,14 +19,17 @@ import '../profile/profile_screen.dart';
 import '../alerts/alerts_screen.dart';
 import '../leaderboard/leaderboard_screen.dart';
 import '../store/store_screen.dart';
-import '../bookings/my_bookings_screen.dart';
+import '../offers/offers_screen.dart';
+import '../offers/offer_detail_screen.dart';
 import '../subscriptions/subscription_plans_screen.dart';
 import '../../widgets/ad_banner_carousel.dart';
 import '../../widgets/ad_inline_banner.dart';
-import '../offers/offers_screen.dart';
-import '../offers/offer_detail_screen.dart';
+import '../routes/routes_screen.dart';
+import '../routes/route_detail_screen.dart';
 import '../../core/models/offer_model.dart';
+import '../../core/models/route_model.dart';
 import '../../providers/offer_provider.dart';
+import '../../providers/route_provider.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -84,27 +89,27 @@ class _HomeScreenState extends State<HomeScreen> {
     final availableTabs = <Map<String, dynamic>>[
       {
         'icon': Icons.explore,
-        'label': 'Explore',
+        'label': context.t('Explore'),
         'screen': const _ExploreTab(),
       },
       {
         'icon': Icons.place,
-        'label': 'Nearby',
+        'label': context.t('Nearby'),
         'screen': const NearbyMapScreen(),
       },
       {
         'icon': Icons.assignment,
-        'label': 'Reports',
+        'label': context.t('Reports'),
         'screen': const ReportsListScreen(),
       },
       {
         'icon': Icons.emergency,
-        'label': 'Emergency',
+        'label': context.t('Emergency'),
         'screen': const EmergencyScreen(),
       },
       {
         'icon': Icons.person,
-        'label': 'Profile',
+        'label': context.t('Profile'),
         'screen': const ProfileScreen(),
       },
     ];
@@ -147,7 +152,7 @@ class _ExploreTab extends StatelessWidget {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Nepal Smart Travel'),
+        title: Text(context.t('Nepal Smart Travel')),
         actions: [
           IconButton(
             icon: const Icon(Icons.notifications_outlined),
@@ -183,7 +188,7 @@ class _ExploreTab extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    'Welcome${user != null ? ', ${user.name.split(' ').first}' : ''}!',
+                    '${context.t('Welcome')}${user != null ? ', ${user.name.split(' ').first}' : ''}!',
                     style: const TextStyle(
 color: AppTheme.surfaceColor,
                       fontSize: AppTheme.text3xl,
@@ -191,9 +196,9 @@ color: AppTheme.surfaceColor,
                     ),
                   ),
                   const SizedBox(height: 8),
-                  const Text(
-                    'Discover Nepal\'s hidden gems, real-time travel conditions, and community insights',
-                    style: TextStyle(color: Colors.white70, fontSize: AppTheme.textBase),
+                  Text(
+                    context.t('Discover Nepal\'s hidden gems, real-time travel conditions, and community insights'),
+                    style: const TextStyle(color: Colors.white70, fontSize: AppTheme.textBase),
                   ),
                 ],
               ),
@@ -201,7 +206,7 @@ color: AppTheme.surfaceColor,
             const SizedBox(height: 20),
 
             // Quick Actions Grid
-            Text('Quick Actions', style: Theme.of(context).textTheme.titleLarge),
+            Text(context.t('Quick Actions'), style: Theme.of(context).textTheme.titleLarge),
             const SizedBox(height: 12),
             GridView.count(
               crossAxisCount: 4,
@@ -211,37 +216,24 @@ color: AppTheme.surfaceColor,
               crossAxisSpacing: 12,
               childAspectRatio: 0.85,
               children: [
-                _QuickActionItem(icon: Icons.emoji_events, label: 'Leaderboard', color: AppTheme.secondaryColor, onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const LeaderboardScreen()))),
-                _QuickActionItem(icon: Icons.add_circle, label: 'New Report', color: AppTheme.warningColor, onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const ReportsListScreen()))),
-                _QuickActionItem(icon: Icons.emergency, label: 'SOS', color: AppTheme.errorColor, onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const EmergencyScreen()))),
-                _QuickActionItem(icon: Icons.chat, label: 'AI Help', color: AppTheme.infoColor, onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const AssistantScreen()))),
+                _QuickActionItem(icon: Icons.emoji_events, label: context.t('Leaderboard'), color: AppTheme.secondaryColor, onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const LeaderboardScreen()))),
+                _QuickActionItem(icon: Icons.hiking, label: context.t('Routes'), color: const Color(0xFFB45309), onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const RoutesScreen()))),
+                _QuickActionItem(icon: Icons.add_circle, label: context.t('New Report'), color: AppTheme.warningColor, onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const ReportsListScreen()))),
+                _QuickActionItem(icon: Icons.emergency, label: context.t('SOS'), color: AppTheme.errorColor, onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const EmergencyScreen()))),
+                _QuickActionItem(icon: Icons.chat, label: context.t('AI Help'), color: AppTheme.infoColor, onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const AssistantScreen()))),
               ],
             ),
             const SizedBox(height: 4),
-            SizedBox(
-              width: double.infinity,
-              child: OutlinedButton.icon(
-                onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const MyBookingsScreen())),
-                icon: const Icon(Icons.book_online, size: 18),
-                label: const Text('My Bookings'),
-                style: OutlinedButton.styleFrom(
-                  foregroundColor: AppTheme.primaryColor,
-                  side: const BorderSide(color: AppTheme.primaryColor),
-                  padding: const EdgeInsets.symmetric(vertical: 12),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                ),
-              ),
-            ),
             const SizedBox(height: 24),
 
             // Rewards
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                Text('Rewards', style: Theme.of(context).textTheme.titleLarge),
+                Text(context.t('Rewards'), style: Theme.of(context).textTheme.titleLarge),
                 TextButton(
                   onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const OffersScreen())),
-                  child: const Text('See All'),
+                  child: Text(context.t('See All')),
                 ),
               ],
             ),
@@ -249,22 +241,37 @@ color: AppTheme.surfaceColor,
             const _RewardsStrip(),
             const SizedBox(height: 24),
 
+            // Trekking & Curated Routes
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text(context.t('Routes & Treks'), style: Theme.of(context).textTheme.titleLarge),
+                TextButton(
+                  onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const RoutesScreen())),
+                  child: Text(context.t('See All')),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            const _RoutesStrip(),
+            const SizedBox(height: 24),
+
             // Live Alerts
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                Text('Live Alerts', style: Theme.of(context).textTheme.titleLarge),
-                TextButton(onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const AlertsScreen())), child: const Text('See All')),
+                Text(context.t('Live Alerts'), style: Theme.of(context).textTheme.titleLarge),
+                TextButton(onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const AlertsScreen())), child: Text(context.t('See All'))),
               ],
             ),
             const SizedBox(height: 8),
             if (recentAlerts.isEmpty)
-              const Card(
+              Card(
                 margin: EdgeInsets.zero,
                 child: ListTile(
-                  leading: Icon(Icons.check_circle, color: AppTheme.successColor),
-                  title: Text('No active alerts'),
-                  subtitle: Text('All clear in your area'),
+                  leading: const Icon(Icons.check_circle, color: AppTheme.successColor),
+                  title: Text(context.t('No active alerts')),
+                  subtitle: Text(context.t('All clear in your area')),
                 ),
               )
             else
@@ -293,15 +300,15 @@ color: AppTheme.surfaceColor,
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                Text('Nearby Highlights', style: Theme.of(context).textTheme.titleLarge),
-                TextButton(onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const NearbyMapScreen())), child: const Text('View All')),
+                Text(context.t('Nearby Highlights'), style: Theme.of(context).textTheme.titleLarge),
+                TextButton(onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const NearbyMapScreen())), child: Text(context.t('View All'))),
               ],
             ),
             const SizedBox(height: 8),
             SizedBox(
               height: 160,
               child: highlightPlaces.isEmpty
-                  ? const Center(child: Text('No nearby places found'))
+                  ? Center(child: Text(context.t('No nearby places found')))
                   : ListView.builder(
                       scrollDirection: Axis.horizontal,
                       itemCount: highlightPlaces.length,
@@ -309,7 +316,7 @@ color: AppTheme.surfaceColor,
                         final place = highlightPlaces[index];
                         return _PlaceCard(
                           name: place.name,
-                          category: place.category ?? 'Place',
+                          category: place.category ?? context.t('Place'),
                           rating: place.averageRating ?? 0,
                           image: Icons.place,
                         );
@@ -342,7 +349,7 @@ color: AppTheme.surfaceColor,
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Text('Level ${user.currentLevel} - ${user.levelName}', style: const TextStyle(fontWeight: FontWeight.bold)),
+                          Text('${context.t('Level')} ${user.currentLevel} - ${user.levelName}', style: const TextStyle(fontWeight: FontWeight.bold)),
                           const SizedBox(height: 4),
                           ClipRRect(
                             borderRadius: BorderRadius.circular(4),
@@ -354,7 +361,7 @@ color: AppTheme.surfaceColor,
                             ),
                           ),
                           const SizedBox(height: 4),
-                          Text('${user.totalXp} XP \u2022 ${user.approvedReports} approved reports', style: const TextStyle(color: AppTheme.textSecondary, fontSize: AppTheme.textSm)),
+                          Text('${user.totalXp} XP \u2022 ${user.approvedReports} ${context.t('approved reports')}', style: const TextStyle(color: AppTheme.textSecondary, fontSize: AppTheme.textSm)),
                         ],
                       ),
                     ),
@@ -392,15 +399,15 @@ class _RewardsStrip extends StatelessWidget {
                     children: [
                       const Icon(Icons.card_giftcard, color: AppTheme.primaryColor),
                       const SizedBox(width: 12),
-                      const Expanded(
+                      Expanded(
                         child: Text(
-                          'Exclusive business offers & discounts',
-                          style: TextStyle(color: Colors.grey, fontSize: AppTheme.textSm),
+                          context.t('Exclusive business offers & discounts'),
+                          style: const TextStyle(color: Colors.grey, fontSize: AppTheme.textSm),
                         ),
                       ),
                       TextButton(
                         onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const OffersScreen())),
-                        child: const Text('Explore'),
+                        child: Text(context.t('Explore')),
                       ),
                     ],
                   ),
@@ -411,6 +418,149 @@ class _RewardsStrip extends StatelessWidget {
                   separatorBuilder: (_, __) => const SizedBox(width: 12),
                   itemBuilder: (context, i) => _MiniOfferCard(offer: offers[i]),
                 ),
+    );
+  }
+}
+
+class _RoutesStrip extends StatefulWidget {
+  const _RoutesStrip();
+
+  @override
+  State<_RoutesStrip> createState() => _RoutesStripState();
+}
+
+class _RoutesStripState extends State<_RoutesStrip> {
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final provider = context.read<RouteProvider>();
+      if (provider.routes.isEmpty && !provider.isLoading) {
+        provider.fetchRoutes();
+      }
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final provider = context.watch<RouteProvider>();
+    final routes = provider.routes;
+
+    return SizedBox(
+      height: 140,
+      child: provider.isLoading && routes.isEmpty
+          ? const Center(child: CircularProgressIndicator())
+          : routes.isEmpty
+              ? Container(
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: AppTheme.primaryColor.withOpacity(0.06),
+                    borderRadius: BorderRadius.circular(16),
+                  ),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.hiking, color: AppTheme.primaryColor),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Text(
+                          context.t('Hand-picked treks & itineraries to explore Nepal'),
+                          style: const TextStyle(color: Colors.grey, fontSize: AppTheme.textSm),
+                        ),
+                      ),
+                      TextButton(
+                        onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const RoutesScreen())),
+                        child: Text(context.t('Explore')),
+                      ),
+                    ],
+                  ),
+                )
+              : ListView.separated(
+                  scrollDirection: Axis.horizontal,
+                  itemCount: routes.length,
+                  separatorBuilder: (_, __) => const SizedBox(width: 12),
+                  itemBuilder: (context, i) => _MiniRouteCard(route: routes[i]),
+                ),
+    );
+  }
+}
+
+class _MiniRouteCard extends StatelessWidget {
+  final CuratedRouteModel route;
+
+  const _MiniRouteCard({required this.route});
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: () => Navigator.push(
+        context,
+        MaterialPageRoute(builder: (_) => RouteDetailScreen(routeId: route.id)),
+      ),
+      child: Container(
+        width: 210,
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          gradient: route.isTrekking
+              ? const LinearGradient(
+                  colors: [Color(0xFFB45309), Color(0xFF78350F)],
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                )
+              : const LinearGradient(
+                  colors: [AppTheme.primaryColor, AppTheme.primaryLight],
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                ),
+          borderRadius: BorderRadius.circular(16),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Row(
+              children: [
+                Icon(
+                  route.isTrekking ? Icons.hiking : Icons.route,
+                  color: Colors.white,
+                  size: 18,
+                ),
+                const SizedBox(width: 6),
+                Text(
+                  route.isTrekking ? context.t('Trekking') : context.t('Itinerary'),
+                  style: const TextStyle(color: Colors.white70, fontSize: AppTheme.textXs, fontWeight: FontWeight.w600),
+                ),
+                const Spacer(),
+                Text(
+                  '${route.durationDays} ${context.t('days')}',
+                  style: const TextStyle(color: Colors.white, fontSize: AppTheme.textXs, fontWeight: FontWeight.bold),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Text(
+              route.title,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: AppTheme.textLg,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              [
+                if (route.difficultyLabel.isNotEmpty) route.difficultyLabel,
+                if (route.totalDistanceKm != null) '${route.totalDistanceKm!.round()} km',
+                if (route.maxAltitudeM != null) '${route.maxAltitudeM} m',
+              ].join(' · '),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(color: Colors.white70, fontSize: AppTheme.textXs),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }
@@ -461,7 +611,7 @@ class _MiniOfferCard extends StatelessWidget {
             ),
             const SizedBox(height: 6),
             Text(
-              offer.business?.name ?? 'Local business',
+              offer.business?.name ?? context.t('Local business'),
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: const TextStyle(color: Colors.white, fontSize: AppTheme.textXs, fontWeight: FontWeight.w600),

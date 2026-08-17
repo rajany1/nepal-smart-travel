@@ -141,16 +141,6 @@
                             @elseif($b->offerRedemption->applied_at)
                             <p class="text-[10px] text-amber-500 mt-0.5">Applied</p>
                             @endif
-                            @elseif($b->shopCode)
-                            <span class="inline-flex items-center gap-1 text-xs bg-purple-100 text-purple-700 px-2 py-0.5 rounded-full font-medium">
-                                <i class="fas fa-tag"></i>
-                                {{ $b->shopCode->shopItem?->name ?? 'Coupon' }}
-                            </span>
-                            @if($b->shopCode->consumed_at)
-                            <p class="text-[10px] text-green-600 mt-0.5"><i class="fas fa-check"></i> Consumed</p>
-                            @elseif($b->shopCode->applied_at)
-                            <p class="text-[10px] text-amber-500 mt-0.5">Applied</p>
-                            @endif
                             @else
                             <span class="text-xs text-slate-300">—</span>
                             @endif
@@ -162,6 +152,11 @@
                                 @case('completed')<span class="text-xs bg-green-100 text-green-700 px-2.5 py-0.5 rounded-full font-medium"><i class="fas fa-check-double mr-1"></i>Completed</span>@break
                                 @case('cancelled')<span class="text-xs bg-red-100 text-red-700 px-2.5 py-0.5 rounded-full font-medium"><i class="fas fa-times mr-1"></i>Cancelled</span>@break
                             @endswitch
+                            @if($b->bookingPayment)
+                            <p class="mt-1 text-[10px] @if($b->bookingPayment->status === 'success') text-green-600 @elseif($b->bookingPayment->status === 'pending') text-amber-500 @else text-red-500 @endif">
+                                @if($b->bookingPayment->status === 'success')<i class="fas fa-check-circle mr-0.5"></i>Paid ({{ $b->bookingPayment->gateway }})@else{{ ucfirst($b->bookingPayment->status) }} ({{ $b->bookingPayment->gateway }})@endif
+                            </p>
+                            @endif
                         </td>
                         <td class="px-4 py-3 text-sm text-slate-500 whitespace-nowrap">{{ $b->booked_at->format('M d, Y') }}</td>
                         <td class="px-4 py-3 text-right">
@@ -238,17 +233,6 @@
                                                 @if($b->discount_amount > 0)<p><span class="text-slate-500">Discount:</span> <span class="font-semibold text-green-600">Rs. {{ number_format($b->discount_amount, 2) }}</span></p>@endif
                                                 @if($b->offerRedemption->applied_at)<p><span class="text-slate-500">Applied:</span> {{ $b->offerRedemption->applied_at->format('M d, Y') }}</p>@endif
                                                 @if($b->offerRedemption->consumed_at)<p><span class="text-slate-500">Consumed:</span> {{ $b->offerRedemption->consumed_at->format('M d, Y') }}</p>@endif
-                                            </div>
-                                        </div>
-                                        @endif
-                                        @if($b->shopCode)
-                                        <div class="mt-3 pt-3 border-t border-slate-200">
-                                            <h5 class="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2"><i class="fas fa-tag mr-1"></i> Coupon Details</h5>
-                                            <div class="space-y-1 text-sm">
-                                                <p><span class="text-slate-500">Code:</span> <code class="bg-slate-200 px-1.5 py-0.5 rounded text-xs font-mono">{{ $b->shopCode->code }}</code></p>
-                                                @if($b->shopCode->shopItem)<p><span class="text-slate-500">Reward:</span> {{ $b->shopCode->shopItem->name }}</p>@endif
-                                                @if($b->shopCode->applied_at)<p><span class="text-slate-500">Applied:</span> {{ $b->shopCode->applied_at->format('M d, Y') }}</p>@endif
-                                                @if($b->shopCode->consumed_at)<p><span class="text-slate-500">Consumed:</span> {{ $b->shopCode->consumed_at->format('M d, Y') }}</p>@endif
                                             </div>
                                         </div>
                                         @endif

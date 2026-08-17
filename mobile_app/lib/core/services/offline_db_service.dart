@@ -1,4 +1,6 @@
 import 'dart:convert';
+import "../../core/services/localization_service.dart";
+import 'dart:typed_data';
 import 'package:sqflite/sqflite.dart';
 import 'package:path/path.dart' as p;
 import 'package:shared_preferences/shared_preferences.dart';
@@ -234,6 +236,73 @@ class OfflineDbService {
     final db = await database;
     final now = DateTime.now().millisecondsSinceEpoch;
     await db.delete('cached_places', where: 'expires_at <= ?', whereArgs: [now]);
+  }
+
+  // ===================== MAP TILE CACHE =====================
+
+  Future<Uint8List?> getCachedTile({
+    required int z,
+    required int x,
+    required int y,
+    String tileType = 'default',
+  }) async {
+    final db = await database;
+    final rows = await db.query(
+      'tile_cache',
+      where: 'z = ? AND x = ? AND y = ? AND tile_type = ?',
+      whereArgs: [z, x, y, tileType],
+      limit: 1,
+    );
+    if (rows.isEmpty) return null;
+    final blob = rows.first['blob_data'];
+    if (blob is Uint8List) return blob;
+    if (blob is List<int>) return Uint8List.fromList(blob);
+    return null;
+  }
+
+  Future<void> saveTile({
+    required int z,
+    required int x,
+    required int y,
+    required Uint8List bytes,
+    String tileType = 'default',
+  }) async {
+    final db = await database;
+    await db.insert(
+      'tile_cache',
+      {
+        'z': z,
+        'x': x,
+        'y': y,
+        'tile_type': tileType,
+        'blob_data': bytes,
+        'cached_at': DateTime.now().millisecondsSinceEpoch,
+      },
+      conflictAlgorithm: ConflictAlgorithm.replace,
+    );
+  }
+
+  Future<bool> hasTile({required int z, required int x, required int y, String tileType = 'default'}) async {
+    final db = await database;
+    final rows = await db.query(
+      'tile_cache',
+      columns: ['z'],
+      where: 'z = ? AND x = ? AND y = ? AND tile_type = ?',
+      whereArgs: [z, x, y, tileType],
+      limit: 1,
+    );
+    return rows.isNotEmpty;
+  }
+
+  /// Approximate on-disk size (bytes) of all cache tables
+  Future<int> cacheSizeBytes() async {
+    final db = await database;
+    final tile = await db.rawQuery('SELECT COALESCE(SUM(LENGTH(blob_data)), 0) AS total FROM tile_cache');
+    final places = await db.rawQuery('SELECT COALESCE(SUM(LENGTH(json_data)), 0) AS total FROM cached_places');
+    final queue = await db.rawQuery('SELECT COALESCE(SUM(LENGTH(payload)), 0) AS total FROM sync_queue');
+    return (Sqflite.firstIntValue(tile) ?? 0) +
+        (Sqflite.firstIntValue(places) ?? 0) +
+        (Sqflite.firstIntValue(queue) ?? 0);
   }
 
   // ===================== SYNC QUEUE =====================

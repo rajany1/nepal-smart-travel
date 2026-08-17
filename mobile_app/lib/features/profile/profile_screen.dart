@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import "../../core/services/localization_service.dart";
 import 'package:provider/provider.dart';
 import '../../config/themes/app_theme.dart';
 import '../../providers/auth_provider.dart';
@@ -110,17 +111,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     _showFullActivity(context, profileProv);
                   },
                 ),
-
-              // My Bookings
-              ListTile(
-                leading: const Icon(Icons.book_online, color: Colors.green),
-                title: const Text('My Bookings'),
-                trailing: const Icon(Icons.chevron_right),
-                onTap: () {
-                  Navigator.pop(ctx);
-                  Navigator.of(context).pushNamed('/bookings');
-                },
-              ),
 
               // Reward Store
               ListTile(

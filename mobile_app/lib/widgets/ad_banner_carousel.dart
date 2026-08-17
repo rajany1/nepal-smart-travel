@@ -1,5 +1,6 @@
 ﻿import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
+import "../../core/services/localization_service.dart";
 import '../core/api/api_client.dart';
 
 class AdBannerCarousel extends StatefulWidget {
@@ -33,13 +34,18 @@ class _AdBannerCarouselState extends State<AdBannerCarousel> {
     try {
       final res = await _api.getActiveAds(adContext: widget.adContext, limit: 5);
       _ads = (res.data['data'] as List<dynamic>?) ?? [];
-      for (final ad in _ads) {
-        if (ad is Map<String, dynamic> && ad['id'] is int) {
-          _api.trackAdImpression(ad['id'] as int).then((_) {}).catchError((_) {});
-        }
-      }
     } catch (_) {}
-    if (mounted) setState(() { _loaded = true; });
+    if (mounted) {
+      setState(() { _loaded = true; });
+      WidgetsBinding.instance.addPostFrameCallback((_) => _trackVisible());
+    }
+  }
+
+  void _trackVisible() {
+    final ad = _ads.isEmpty ? null : _ads[_currentPage];
+    if (ad is Map<String, dynamic> && ad['id'] is int) {
+      _api.trackAdImpression(ad['id'] as int).then((_) {}).catchError((_) {});
+    }
   }
 
   Future<void> _onTap(dynamic ad) async {
@@ -67,7 +73,10 @@ class _AdBannerCarouselState extends State<AdBannerCarousel> {
           Expanded(
             child: PageView.builder(
               controller: _pageCtrl,
-              onPageChanged: (i) => setState(() { _currentPage = i; }),
+              onPageChanged: (i) {
+                setState(() { _currentPage = i; });
+                _trackVisible();
+              },
               itemCount: _ads.length,
               itemBuilder: (_, i) {
                 final ad = _ads[i] as Map<String, dynamic>;

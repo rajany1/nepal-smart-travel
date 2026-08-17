@@ -9,7 +9,6 @@ use App\Models\CommissionTransaction;
 use App\Models\OfferRedemption;
 use App\Models\User;
 use App\Services\ModeratorService;
-use App\Services\ShopService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
@@ -18,7 +17,6 @@ class TravelPartnerController extends Controller
 {
     public function __construct(
         private ModeratorService $moderatorService,
-        private ShopService $shopService,
     ) {}
 
     private function requireAdmin(Request $request): void
@@ -114,7 +112,7 @@ class TravelPartnerController extends Controller
         $status = $request->get('status');
         $search = $request->get('search');
 
-        $query = Booking::with(['travelPartner', 'user', 'shopCode.shopItem', 'offerRedemption.offer.business', 'commissionTransaction']);
+        $query = Booking::with(['travelPartner', 'user', 'bookingPayment', 'offerRedemption.offer.business', 'commissionTransaction']);
 
         if ($status) $query->where('status', $status);
 
@@ -246,10 +244,6 @@ class TravelPartnerController extends Controller
             $booking->offerRedemption->update(['consumed_at' => now(), 'status' => 'used']);
         }
 
-        if ($booking->shopCode) {
-            $booking->shopCode->update(['consumed_at' => now()]);
-        }
-
         $this->moderatorService->log(Auth::user(), 'booking.confirmed', 'booking', $booking->id, 'Confirmed booking #' . $booking->id);
         return redirect()->route('admin.bookings')->with('success', 'Booking confirmed.');
     }
@@ -272,8 +266,8 @@ class TravelPartnerController extends Controller
         if ($booking->commissionTransaction) {
             $booking->commissionTransaction->update(['status' => 'cancelled']);
         }
-        if ($booking->shopCode) {
-            $this->shopService->releaseFromBooking($booking->shopCode);
+        if ($booking->bookingPayment) {
+            $booking->bookingPayment->update(['status' => 'failed']);
         }
         if ($booking->offerRedemption) {
             $redemption = $booking->offerRedemption;

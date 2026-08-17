@@ -1,4 +1,5 @@
 import 'dart:async';
+import "../../core/services/localization_service.dart";
 import 'dart:io';
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
@@ -14,8 +15,10 @@ import '../../core/models/report.dart';
 import '../../core/models/report_comment.dart';
 import '../../core/models/ad_campaign.dart';
 import '../../core/services/location_service.dart';
+import '../../core/services/offline_tile_provider.dart';
 import '../../core/services/camera_service.dart';
 import '../../core/services/exif_embedder_service.dart';
+import '../../core/services/localization_service.dart';
 import '../../core/widgets/dynamic_form_field.dart';
 import '../../widgets/image_carousel_widget.dart';
 import '../../core/widgets/shimmer_loading.dart';
@@ -67,7 +70,7 @@ class _ReportsListScreenState extends State<ReportsListScreen>
     await provider.fetchEmergencyReports(lat: _userLat, lng: _userLng, radiusKm: 20.0);
     if (mounted) provider.startAutoRefresh();
     // Preload ad campaigns for feed injection
-    unawaited(context.read<AdProvider>().fetchActiveAds(adContext: 'report', limit: 6));
+    unawaited(context.read<AdProvider>().fetchActiveAds(feed: AdFeed.report, adContext: 'report', limit: 6));
   }
 
   @override
@@ -92,9 +95,9 @@ class _ReportsListScreenState extends State<ReportsListScreen>
                 indicatorColor: AppTheme.primaryColor,
                 labelColor: AppTheme.textPrimary,
                 unselectedLabelColor: AppTheme.textSecondary,
-                tabs: const [
-                  Tab(text: 'Recent', icon: Icon(Icons.history, size: 18)),
-                  Tab(text: 'Emergency', icon: Icon(Icons.warning, size: 18)),
+                tabs: [
+                  Tab(text: context.t('Recent'), icon: const Icon(Icons.history, size: 18)),
+                  Tab(text: context.t('Emergency'), icon: const Icon(Icons.warning, size: 18)),
                 ],
               ),
             ),
@@ -113,7 +116,7 @@ class _ReportsListScreenState extends State<ReportsListScreen>
                     userLng: _userLng,
                     onStatusTap: () => _showSubmitReportSheet(context),
                   ),
-                ],
+],
               ),
             ),
           ],
@@ -202,7 +205,7 @@ class _StatusCard extends StatelessWidget {
                           color: AppTheme.dividerColor.withOpacity(0.2),
                           borderRadius: BorderRadius.circular(24),
                         ),
-                        child: const Text('What\'s on your mind?', style: TextStyle(color: AppTheme.textSecondary, fontSize: AppTheme.textBase + 1)),
+                        child: Text(context.t('What\'s on your mind?'), style: const TextStyle(color: AppTheme.textSecondary, fontSize: AppTheme.textBase + 1)),
                       ),
                     ),
                   ],
@@ -213,9 +216,9 @@ class _StatusCard extends StatelessWidget {
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                   children: [
-                    _actionButton(Icons.photo_camera, 'Photo', AppTheme.successColor, onTap),
-                    _actionButton(Icons.location_on, 'Location', AppTheme.errorColor, onTap),
-                    _actionButton(Icons.priority_high, 'Emergency', AppTheme.warningColor, onTap),
+                    _actionButton(Icons.photo_camera, context.t('Photo'), AppTheme.successColor, onTap),
+                    _actionButton(Icons.location_on, context.t('Location'), AppTheme.errorColor, onTap),
+                    _actionButton(Icons.priority_high, context.t('Emergency'), AppTheme.warningColor, onTap),
                   ],
                 ),
               ],
@@ -276,7 +279,7 @@ class _SearchFilterBarState extends State<_SearchFilterBar> {
                     controller: _searchController,
                     onChanged: (value) => widget.onFilterChanged(value, null),
                     decoration: InputDecoration(
-                      hintText: 'Search reports...',
+                      hintText: context.t('Search reports...'),
                       hintStyle: const TextStyle(fontSize: AppTheme.textBase, color: AppTheme.textSecondary),
                       prefixIcon: const Icon(Icons.search, size: 20, color: AppTheme.textSecondary),
                       contentPadding: const EdgeInsets.symmetric(vertical: 8),
@@ -319,7 +322,7 @@ class _SearchFilterBarState extends State<_SearchFilterBar> {
                       itemCount: provider.categories.length + 1,
                       separatorBuilder: (_, __) => const SizedBox(width: 6),
                       itemBuilder: (context, index) {
-                        if (index == 0) return _CategoryChip(label: 'All', icon: Icons.all_inclusive, selected: provider.selectedCategoryId == null, onTap: () { provider.setCategoryFilter(null); widget.onFilterChanged(_searchController.text, null); });
+                        if (index == 0) return _CategoryChip(label: context.t('All'), icon: Icons.all_inclusive, selected: provider.selectedCategoryId == null, onTap: () { provider.setCategoryFilter(null); widget.onFilterChanged(_searchController.text, null); });
                         final cat = provider.categories[index - 1];
                         return _CategoryChip(label: cat.name, icon: _getCategoryIcon(cat.icon), selected: provider.selectedCategoryId == cat.id, onTap: () { provider.setCategoryFilter(cat.id); widget.onFilterChanged(_searchController.text, cat.id); });
                       },
@@ -375,11 +378,11 @@ class _RecentReportsTabState extends State<_RecentReportsTab> {
             const SizedBox(height: 16),
             Text(provider.errorMessage!, style: const TextStyle(color: AppTheme.textSecondary)),
             const SizedBox(height: 8),
-            ElevatedButton.icon(onPressed: () => provider.fetchReports(lat: widget.userLat, lng: widget.userLng, radiusKm: 20.0), icon: const Icon(Icons.refresh), label: const Text('Retry')),
+            ElevatedButton.icon(onPressed: () => provider.fetchReports(lat: widget.userLat, lng: widget.userLng, radiusKm: 20.0), icon: const Icon(Icons.refresh), label: Text(context.t('Retry'))),
           ]));
         }
         final filtered = provider.filteredReports;
-        if (filtered.isEmpty) return _emptyState(icon: Icons.assignment, message: 'No reports yet', subtitle: 'Be the first to submit a report', onTap: widget.onStatusTap);
+        if (filtered.isEmpty) return _emptyState(context, icon: Icons.assignment, message: context.t('No reports yet'), subtitle: context.t('Be the first to submit a report'), onTap: widget.onStatusTap);
         final feed = _buildFeed(filtered, ads);
         return RefreshIndicator(
           onRefresh: () => provider.fetchReports(lat: widget.userLat, lng: widget.userLng, radiusKm: 20.0),
@@ -393,10 +396,10 @@ class _RecentReportsTabState extends State<_RecentReportsTab> {
               itemCount: feed.length + 2 + (provider.isLoadingMore ? 1 : 0),
               itemBuilder: (context, index) {
                 if (index == 0) return _StatusCard(onTap: widget.onStatusTap);
-                if (index == 1) return Padding(padding: const EdgeInsets.only(bottom: 8, left: 4, top: 8), child: Text('${filtered.length} report${filtered.length == 1 ? '' : 's'} near you', style: const TextStyle(color: AppTheme.textSecondary)));
+                if (index == 1) return Padding(padding: const EdgeInsets.only(bottom: 8, left: 4, top: 8), child: Text('${filtered.length} ${filtered.length == 1 ? context.t('report') : context.t('reports')} ${context.t('near you')}', style: const TextStyle(color: AppTheme.textSecondary)));
                 if (index > feed.length + 1) return const Padding(padding: EdgeInsets.all(16), child: Center(child: CircularProgressIndicator(strokeWidth: 2)));
                 final item = feed[index - 2];
-                if (item is AdCampaignModel) return AdReportCard(ad: item);
+                if (item is AdCampaignModel) return AdReportCard(key: ValueKey('ad-report-${item.id}'), ad: item);
                 return _ReportCard(report: item as ReportModel, showStatusBadge: true);
               },
             ),
@@ -476,7 +479,7 @@ class _EmergencyReportsTabState extends State<_EmergencyReportsTab> {
       builder: (context, provider, child) {
         if (provider.isLoading && provider.emergencyReports.isEmpty) return const _RecentReportsShimmer();
         final emergencyReports = provider.emergencyReports;
-        if (emergencyReports.isEmpty && !provider.isLoading) return _emptyState(icon: Icons.check_circle, message: 'No emergencies reported', subtitle: 'Everything looks safe in your area', iconColor: AppTheme.successColor.withOpacity(0.5), iconSize: 80, messageStyle: const TextStyle(fontSize: AppTheme.textXl, fontWeight: FontWeight.w600, color: AppTheme.textPrimary), onTap: widget.onStatusTap);
+        if (emergencyReports.isEmpty && !provider.isLoading) return _emptyState(context, icon: Icons.check_circle, message: context.t('No emergencies reported'), subtitle: context.t('Everything looks safe in your area'), iconColor: AppTheme.successColor.withOpacity(0.5), iconSize: 80, messageStyle: const TextStyle(fontSize: AppTheme.textXl, fontWeight: FontWeight.w600, color: AppTheme.textPrimary), onTap: widget.onStatusTap);
         final feed = _buildFeed(emergencyReports, ads);
         return RefreshIndicator(
           onRefresh: () => provider.fetchEmergencyReports(lat: widget.userLat, lng: widget.userLng, radiusKm: 20.0, refresh: true),
@@ -486,9 +489,9 @@ class _EmergencyReportsTabState extends State<_EmergencyReportsTab> {
             itemCount: feed.length + 2,
             itemBuilder: (context, index) {
               if (index == 0) return _StatusCard(onTap: widget.onStatusTap);
-              if (index == 1) return Padding(padding: const EdgeInsets.only(bottom: 12, left: 4, top: 8), child: Row(children: [const Icon(Icons.warning_amber, color: AppTheme.errorColor, size: 20), const SizedBox(width: 8), Text('${emergencyReports.length} emergency report${emergencyReports.length == 1 ? '' : 's'}', style: const TextStyle(color: AppTheme.errorColor, fontWeight: FontWeight.w600))]));
+              if (index == 1) return Padding(padding: const EdgeInsets.only(bottom: 12, left: 4, top: 8), child: Row(children: [const Icon(Icons.warning_amber, color: AppTheme.errorColor, size: 20), const SizedBox(width: 8), Text('${emergencyReports.length} ${emergencyReports.length == 1 ? context.t('emergency report') : context.t('emergency reports')}', style: const TextStyle(color: AppTheme.errorColor, fontWeight: FontWeight.w600))]));
               final item = feed[index - 2];
-              if (item is AdCampaignModel) return AdReportCard(ad: item);
+              if (item is AdCampaignModel) return AdReportCard(key: ValueKey('ad-emergency-${item.id}'), ad: item);
               return _ReportCard(report: item as ReportModel, highlightEmergency: true);
             },
           ),
@@ -520,12 +523,12 @@ class _CategoryChip extends StatelessWidget {
 }
 
 // ============ HELPERS ============
-String _formatTimeAgo(DateTime dateTime) {
+String _formatTimeAgo(BuildContext context, DateTime dateTime) {
   final now = DateTime.now(); final diff = now.difference(dateTime);
-  if (diff.inMinutes < 1) return 'Just now';
-  if (diff.inMinutes < 60) return '${diff.inMinutes}m ago';
-  if (diff.inHours < 24) return '${diff.inHours}h ago';
-  if (diff.inDays < 7) return '${diff.inDays}d ago';
+  if (diff.inMinutes < 1) return context.t('Just now');
+  if (diff.inMinutes < 60) return '${diff.inMinutes}${context.t('m ago')}';
+  if (diff.inHours < 24) return '${diff.inHours}${context.t('h ago')}';
+  if (diff.inDays < 7) return '${diff.inDays}${context.t('d ago')}';
   return '${dateTime.day}/${dateTime.month}/${dateTime.year}';
 }
 
@@ -574,7 +577,7 @@ class _ReportCard extends StatelessWidget {
                   Text(report.reporterName, style: const TextStyle(fontSize: AppTheme.textBase + 1, fontWeight: FontWeight.w600)),
                   const SizedBox(height: 4),
                   Row(children: [
-                    Text(report.timeAgo.isNotEmpty ? report.timeAgo : _formatTimeAgo(report.createdAt), style: const TextStyle(color: AppTheme.textSecondary, fontSize: AppTheme.textSm)),
+                    Text(report.timeAgo.isNotEmpty ? report.timeAgo : _formatTimeAgo(context, report.createdAt), style: const TextStyle(color: AppTheme.textSecondary, fontSize: AppTheme.textSm)),
                     const SizedBox(width: 6), Text('·', style: TextStyle(color: AppTheme.textSecondary.withOpacity(0.7))), const SizedBox(width: 6),
                     Text(report.categoryName, style: const TextStyle(color: AppTheme.textSecondary, fontSize: AppTheme.textSm)),
                   ]),
@@ -603,7 +606,7 @@ class _ReportCard extends StatelessWidget {
               const SizedBox(width: 16),
               GestureDetector(onTap: () => _shareReport(context, report), child: Container(padding: const EdgeInsets.all(6), decoration: BoxDecoration(color: AppTheme.primaryLight.withOpacity(0.1), borderRadius: BorderRadius.circular(8)), child: const Icon(Icons.share, size: 16, color: AppTheme.primaryColor))),
               const Spacer(),
-              GestureDetector(onTap: () => _showOnMap(context, report), child: Container(padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4), decoration: BoxDecoration(color: AppTheme.infoColor.withOpacity(0.1), borderRadius: BorderRadius.circular(8)), child: Row(mainAxisSize: MainAxisSize.min, children: [Icon(Icons.navigation, size: 14, color: AppTheme.infoColor), const SizedBox(width: 4), Text(report.latitude != null && report.longitude != null ? '${report.latitude!.toStringAsFixed(4)}, ${report.longitude!.toStringAsFixed(4)}' : 'No location', style: const TextStyle(fontSize: AppTheme.textXs, color: AppTheme.infoColor))]))),
+              GestureDetector(onTap: () => _showOnMap(context, report), child: Container(padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4), decoration: BoxDecoration(color: AppTheme.infoColor.withOpacity(0.1), borderRadius: BorderRadius.circular(8)), child: Row(mainAxisSize: MainAxisSize.min, children: [Icon(Icons.navigation, size: 14, color: AppTheme.infoColor), const SizedBox(width: 4), Text(report.latitude != null && report.longitude != null ? '${report.latitude!.toStringAsFixed(4)}, ${report.longitude!.toStringAsFixed(4)}' : context.t('No location'), style: const TextStyle(fontSize: AppTheme.textXs, color: AppTheme.infoColor))]))),
             ]),
           ]),
         ),
@@ -633,10 +636,11 @@ class _ReportCard extends StatelessWidget {
   }
 
   Future<void> _shareReport(BuildContext context, ReportModel report) async {
+    final copiedMsg = context.t('Report link copied to clipboard!');
     final text = '📍 ${report.title}\n\n${report.description}';
     final uri = Uri.parse('https://api.whatsapp.com/send?text=${Uri.encodeComponent(text)}');
     if (await canLaunchUrl(uri)) { await launchUrl(uri); }
-    else { await Clipboard.setData(ClipboardData(text: text)); if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Report link copied to clipboard!'))); }
+    else { await Clipboard.setData(ClipboardData(text: text)); if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(copiedMsg))); }
   }
 
   void _showOnMap(BuildContext context, ReportModel report) {
@@ -696,9 +700,9 @@ class _ReactionButtonState extends State<_ReactionButton> {
                   boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.15), blurRadius: 12, offset: const Offset(0, 4))],
                 ),
                 child: Row(mainAxisSize: MainAxisSize.min, children: [
-                  GestureDetector(onTap: () { _removeOverlay(); widget.onTapHelpful(); }, child: Container(padding: const EdgeInsets.all(10), child: Column(mainAxisSize: MainAxisSize.min, children: [Icon(Icons.thumb_up, size: 28, color: isLiked ? AppTheme.infoColor : AppTheme.textSecondary), Text('Like', style: TextStyle(fontSize: AppTheme.textXs + 1, color: isLiked ? AppTheme.infoColor : AppTheme.textSecondary, fontWeight: isLiked ? FontWeight.bold : FontWeight.normal))]))),
+                  GestureDetector(onTap: () { _removeOverlay(); widget.onTapHelpful(); }, child: Container(padding: const EdgeInsets.all(10), child: Column(mainAxisSize: MainAxisSize.min, children: [Icon(Icons.thumb_up, size: 28, color: isLiked ? AppTheme.infoColor : AppTheme.textSecondary), Text(context.t('Like'), style: TextStyle(fontSize: AppTheme.textXs + 1, color: isLiked ? AppTheme.infoColor : AppTheme.textSecondary, fontWeight: isLiked ? FontWeight.bold : FontWeight.normal))]))),
                   Container(width: 1, height: 40, color: AppTheme.dividerColor),
-                  GestureDetector(onTap: () { _removeOverlay(); widget.onTapUnhelpful(); }, child: Container(padding: const EdgeInsets.all(10), child: Column(mainAxisSize: MainAxisSize.min, children: [Icon(Icons.thumb_down, size: 28, color: isDisliked ? AppTheme.errorColor : AppTheme.textSecondary), Text('Dislike', style: TextStyle(fontSize: AppTheme.textXs + 1, color: isDisliked ? AppTheme.errorColor : AppTheme.textSecondary, fontWeight: isDisliked ? FontWeight.bold : FontWeight.normal))]))),
+                  GestureDetector(onTap: () { _removeOverlay(); widget.onTapUnhelpful(); }, child: Container(padding: const EdgeInsets.all(10), child: Column(mainAxisSize: MainAxisSize.min, children: [Icon(Icons.thumb_down, size: 28, color: isDisliked ? AppTheme.errorColor : AppTheme.textSecondary), Text(context.t('Dislike'), style: TextStyle(fontSize: AppTheme.textXs + 1, color: isDisliked ? AppTheme.errorColor : AppTheme.textSecondary, fontWeight: isDisliked ? FontWeight.bold : FontWeight.normal))]))),
                 ]),
               ),
             ),
@@ -738,6 +742,7 @@ class _ReportMapScreen extends StatefulWidget {
 
 class _ReportMapScreenState extends State<_ReportMapScreen> {
   final MapController _mapController = MapController();
+  final OfflineTileProvider _offlineTiles = OfflineTileProvider();
   final LocationService _locationService = LocationService();
   double? _myLat; double? _myLng;
 
@@ -753,7 +758,7 @@ class _ReportMapScreenState extends State<_ReportMapScreen> {
     if (report.latitude == null || report.longitude == null) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('This report has no location data')),
+          SnackBar(content: Text(context.t('This report has no location data'))),
         );
       }
       return;
@@ -767,7 +772,7 @@ class _ReportMapScreenState extends State<_ReportMapScreen> {
     final report = widget.report;
     final hasCoords = report.latitude != null && report.longitude != null;
     return Scaffold(
-      appBar: AppBar(title: Text('Report Location'), actions: [IconButton(icon: const Icon(Icons.directions), tooltip: 'Get Directions', onPressed: _openDirections)]),
+      appBar: AppBar(title: Text(context.t('Report Location')), actions: [IconButton(icon: const Icon(Icons.directions), tooltip: context.t('Get Directions'), onPressed: _openDirections)]),
       body: Column(children: [
         Container(width: double.infinity, padding: const EdgeInsets.all(16), decoration: BoxDecoration(color: Colors.white, border: Border(bottom: BorderSide(color: AppTheme.dividerColor))),
           child: Row(children: [
@@ -779,18 +784,18 @@ class _ReportMapScreenState extends State<_ReportMapScreen> {
         ),
         if (hasCoords)
           Expanded(child: FlutterMap(mapController: _mapController, options: MapOptions(initialCenter: LatLng(report.latitude!, report.longitude!), initialZoom: 15.0, interactionOptions: const InteractionOptions(flags: InteractiveFlag.all)), children: [
-            TileLayer(urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png', userAgentPackageName: 'np.com.nepalsmarttravel'),
+            TileLayer(urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png', userAgentPackageName: 'np.com.nepalsmarttravel', tileProvider: _offlineTiles),
             MarkerLayer(markers: [
-              Marker(point: LatLng(report.latitude!, report.longitude!), child: const Column(mainAxisSize: MainAxisSize.min, children: [Icon(Icons.location_on, size: 40, color: AppTheme.errorColor), Text('Report', style: TextStyle(fontSize: AppTheme.textXs, fontWeight: FontWeight.bold))])),
+              Marker(point: LatLng(report.latitude!, report.longitude!), child: Column(mainAxisSize: MainAxisSize.min, children: [const Icon(Icons.location_on, size: 40, color: AppTheme.errorColor), Text(context.t('Report'), style: const TextStyle(fontSize: AppTheme.textXs, fontWeight: FontWeight.bold))])),
               if (_myLat != null && _myLng != null) Marker(point: LatLng(_myLat!, _myLng!), child: Column(mainAxisSize: MainAxisSize.min, children: [Container(padding: const EdgeInsets.all(6), decoration: const BoxDecoration(color: AppTheme.infoColor, shape: BoxShape.circle), child: const Icon(Icons.person, size: 16, color: Colors.white))])),
             ]),
           ]))
         else
-          const Expanded(child: Center(child: Text('No location data for this report', style: TextStyle(color: AppTheme.textSecondary)))),
+          Expanded(child: Center(child: Text(context.t('No location data for this report'), style: const TextStyle(color: AppTheme.textSecondary)))),
         Container(padding: const EdgeInsets.all(16), decoration: BoxDecoration(color: Colors.white, border: Border(top: BorderSide(color: AppTheme.dividerColor))),
           child: SafeArea(top: false, child: Row(children: [
-            Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [const Text('Location', style: TextStyle(fontWeight: FontWeight.w600, fontSize: AppTheme.textBase)), const SizedBox(height: 4), Text(hasCoords ? '${report.latitude!.toStringAsFixed(6)}, ${report.longitude!.toStringAsFixed(6)}' : 'Unknown', style: const TextStyle(fontSize: AppTheme.textSm, color: AppTheme.textSecondary)), if (report.district != null) Text(report.district!, style: const TextStyle(fontSize: AppTheme.textSm, color: AppTheme.textSecondary))])),
-            ElevatedButton.icon(onPressed: _openDirections, icon: const Icon(Icons.directions, size: 18), label: const Text('Directions'), style: ElevatedButton.styleFrom(backgroundColor: AppTheme.primaryColor, foregroundColor: Colors.white)),
+            Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text(context.t('Location'), style: const TextStyle(fontWeight: FontWeight.w600, fontSize: AppTheme.textBase)), const SizedBox(height: 4), Text(hasCoords ? '${report.latitude!.toStringAsFixed(6)}, ${report.longitude!.toStringAsFixed(6)}' : context.t('Unknown'), style: const TextStyle(fontSize: AppTheme.textSm, color: AppTheme.textSecondary)), if (report.district != null) Text(report.district!, style: const TextStyle(fontSize: AppTheme.textSm, color: AppTheme.textSecondary))])),
+            ElevatedButton.icon(onPressed: _openDirections, icon: const Icon(Icons.directions, size: 18), label: Text(context.t('Directions')), style: ElevatedButton.styleFrom(backgroundColor: AppTheme.primaryColor, foregroundColor: Colors.white)),
           ])),
         ),
       ]),
@@ -817,7 +822,7 @@ class _ReportDetailsSheet extends StatelessWidget {
               Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                 Text(report.title, style: const TextStyle(fontSize: AppTheme.textXl, fontWeight: FontWeight.bold)),
                 const SizedBox(height: 4),
-                Row(children: [Icon(Icons.person, size: 14, color: AppTheme.textSecondary), const SizedBox(width: 4), Text(report.reporterName, style: const TextStyle(fontSize: AppTheme.textSm, color: AppTheme.textSecondary)), const SizedBox(width: 12), Icon(Icons.access_time, size: 14, color: AppTheme.textSecondary), const SizedBox(width: 4), Text(report.timeAgo.isNotEmpty ? report.timeAgo : _formatTimeAgo(report.createdAt), style: const TextStyle(fontSize: AppTheme.textSm, color: AppTheme.textSecondary))]),
+                Row(children: [Icon(Icons.person, size: 14, color: AppTheme.textSecondary), const SizedBox(width: 4), Text(report.reporterName, style: const TextStyle(fontSize: AppTheme.textSm, color: AppTheme.textSecondary)), const SizedBox(width: 12), Icon(Icons.access_time, size: 14, color: AppTheme.textSecondary), const SizedBox(width: 4),                 Text(report.timeAgo.isNotEmpty ? report.timeAgo : _formatTimeAgo(context, report.createdAt), style: const TextStyle(fontSize: AppTheme.textSm, color: AppTheme.textSecondary))]),
               ])),
             ]),
             const SizedBox(height: 16), const Divider(), const SizedBox(height: 8),
@@ -828,21 +833,38 @@ class _ReportDetailsSheet extends StatelessWidget {
             ]),
             const SizedBox(height: 16),
             if (report.imageUrls.isNotEmpty) ...[ClipRRect(borderRadius: BorderRadius.circular(16), child: ImageCarouselWidget(images: report.imageUrls, height: 240)), const SizedBox(height: 16)],
-            GestureDetector(onTap: () { Navigator.pop(context); Navigator.push(context, MaterialPageRoute(builder: (context) => _ReportMapScreen(report: report))); }, child: Row(children: [const Icon(Icons.location_on, size: 16, color: AppTheme.textSecondary), const SizedBox(width: 6), Text(report.district ?? 'Unknown location', style: const TextStyle(color: AppTheme.textSecondary)), const SizedBox(width: 16), Text(report.latitude != null && report.longitude != null ? '${report.latitude!.toStringAsFixed(4)}, ${report.longitude!.toStringAsFixed(4)}' : 'No location data', style: const TextStyle(fontSize: AppTheme.textXs + 1, color: AppTheme.textSecondary)), const Spacer(), const Icon(Icons.chevron_right, size: 16, color: AppTheme.primaryColor)])),
+            GestureDetector(onTap: () { Navigator.pop(context); Navigator.push(context, MaterialPageRoute(builder: (context) => _ReportMapScreen(report: report))); }, child: Row(children: [const Icon(Icons.location_on, size: 16, color: AppTheme.textSecondary), const SizedBox(width: 6), Text(report.district ?? context.t('Unknown location'), style: const TextStyle(color: AppTheme.textSecondary)), const SizedBox(width: 16), Text(report.latitude != null && report.longitude != null ? '${report.latitude!.toStringAsFixed(4)}, ${report.longitude!.toStringAsFixed(4)}' : context.t('No location data'), style: const TextStyle(fontSize: AppTheme.textXs + 1, color: AppTheme.textSecondary)), const Spacer(), const Icon(Icons.chevron_right, size: 16, color: AppTheme.primaryColor)])),
             const SizedBox(height: 12),
             Text(report.description, style: const TextStyle(fontSize: AppTheme.textBase + 1, height: 1.5)),
             const SizedBox(height: 20),
-            Row(children: [Icon(Icons.thumb_up, size: 16, color: AppTheme.textSecondary), const SizedBox(width: 4), Text('${report.helpfulCount} helpful', style: const TextStyle(fontSize: AppTheme.textSm + 1, color: AppTheme.textSecondary)), const SizedBox(width: 24), GestureDetector(onTap: () { Navigator.pop(context); _showCommentsSheet(context, report); }, child: Row(mainAxisSize: MainAxisSize.min, children: [Icon(Icons.chat_bubble_outline, size: 16, color: AppTheme.textSecondary), const SizedBox(width: 4), Text('${report.commentsCount} comments', style: const TextStyle(fontSize: AppTheme.textSm + 1, color: AppTheme.textSecondary))])), const Spacer(), GestureDetector(onTap: () => _shareReport(context, report), child: Container(padding: const EdgeInsets.all(6), decoration: BoxDecoration(color: AppTheme.primaryLight.withOpacity(0.1), borderRadius: BorderRadius.circular(8)), child: const Icon(Icons.share, size: 16, color: AppTheme.primaryColor)))]),
-            const SizedBox(height: 20),
-            Row(children: [Expanded(child: OutlinedButton.icon(onPressed: () { _toggleHelpful(context, report); }, icon: const Icon(Icons.thumb_up, size: 18), label: const Text('Helpful'))), const SizedBox(width: 12), Expanded(child: OutlinedButton.icon(onPressed: () => _shareReport(context, report), icon: const Icon(Icons.share, size: 18), label: const Text('Share')))]),
-          ]),
+            Row(children: [Icon(Icons.thumb_up, size: 16, color: AppTheme.textSecondary), const SizedBox(width: 4), Text('${report.helpfulCount} ${context.t('helpful')}', style: const TextStyle(fontSize: AppTheme.textSm + 1, color: AppTheme.textSecondary)), const SizedBox(width: 24), GestureDetector(onTap: () { Navigator.pop(context); _showCommentsSheet(context, report); }, child: Row(mainAxisSize: MainAxisSize.min, children: [Icon(Icons.chat_bubble_outline, size: 16, color: AppTheme.textSecondary), const SizedBox(width: 4), Text('${report.commentsCount} ${context.t('comments')}', style: const TextStyle(fontSize: AppTheme.textSm + 1, color: AppTheme.textSecondary))])), const Spacer(), GestureDetector(onTap: () => _shareReport(context, report), child: Container(padding: const EdgeInsets.all(6), decoration: BoxDecoration(color: AppTheme.primaryLight.withOpacity(0.1), borderRadius: BorderRadius.circular(8)), child: const Icon(Icons.share, size: 16, color: AppTheme.primaryColor)))]),
+const SizedBox(height: 20),
+            Row(children: [
+              Expanded(
+                child: OutlinedButton.icon(
+                  onPressed: () => _toggleHelpful(context, report),
+                  icon: const Icon(Icons.thumb_up, size: 18),
+                  label: Text(context.t('Helpful')),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: OutlinedButton.icon(
+                  onPressed: () => _shareReport(context, report),
+                  icon: const Icon(Icons.share, size: 18),
+                  label: Text(context.t('Share')),
+                ),
+),
+          ]), 
+        ]),
         );
       },
     );
   }
 
   void _toggleHelpful(BuildContext context, ReportModel report) {
-    ApiClient.instance.dio.post('/reports/${report.id}/reactions', data: {'reaction_type': 'helpful'}).then((_) { if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Marked as helpful'), duration: Duration(seconds: 1))); }).catchError((_) {});
+    final helpfulMsg = context.t('Marked as helpful');
+    ApiClient.instance.dio.post('/reports/${report.id}/reactions', data: {'reaction_type': 'helpful'}).then((_) { if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(helpfulMsg), duration: const Duration(seconds: 1))); }).catchError((_) {});
   }
 
   void _showCommentsSheet(BuildContext context, ReportModel report) {
@@ -850,10 +872,11 @@ class _ReportDetailsSheet extends StatelessWidget {
   }
 
   Future<void> _shareReport(BuildContext context, ReportModel report) async {
+    final copiedMsg = context.t('Report link copied to clipboard!');
     final text = '📍 ${report.title}\n\n${report.description}';
     final uri = Uri.parse('https://api.whatsapp.com/send?text=${Uri.encodeComponent(text)}');
     if (await canLaunchUrl(uri)) await launchUrl(uri);
-    else { await Clipboard.setData(ClipboardData(text: text)); if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Report link copied to clipboard!'))); }
+    else { await Clipboard.setData(ClipboardData(text: text)); if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(copiedMsg))); }
   }
 }
 
@@ -922,6 +945,7 @@ class _CommentsSheetState extends State<_CommentsSheet> {
   Future<void> _submitComment() async {
     final content = _commentController.text.trim();
     if (content.isEmpty) return;
+    final failMsg = context.t('Failed to post comment. Please try again.');
     setState(() => _isSubmitting = true);
     try {
       final api = ApiClient.instance;
@@ -938,7 +962,7 @@ class _CommentsSheetState extends State<_CommentsSheet> {
       });
       if (context.mounted) context.read<ReportProvider>().fetchReports(refresh: false, lat: context.read<ReportProvider>().lastFetchLat, lng: context.read<ReportProvider>().lastFetchLng, radiusKm: 20.0);
     } catch (e) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Failed to post comment. Please try again.'), backgroundColor: AppTheme.errorColor));
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(failMsg), backgroundColor: AppTheme.errorColor));
     }
     if (mounted) setState(() => _isSubmitting = false);
   }
@@ -955,7 +979,7 @@ class _CommentsSheetState extends State<_CommentsSheet> {
             const SizedBox(width: 8),
             Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
               Row(children: [
-                if (comment.isAuthor) Container(margin: const EdgeInsets.only(right: 4), padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1), decoration: BoxDecoration(color: AppTheme.primaryColor.withOpacity(0.1), borderRadius: BorderRadius.circular(4)), child: const Text('Author', style: TextStyle(fontSize: AppTheme.textXs, color: AppTheme.primaryColor, fontWeight: FontWeight.w700))),
+                if (comment.isAuthor) Container(margin: const EdgeInsets.only(right: 4), padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1), decoration: BoxDecoration(color: AppTheme.primaryColor.withOpacity(0.1), borderRadius: BorderRadius.circular(4)), child: Text(context.t('Author'), style: const TextStyle(fontSize: AppTheme.textXs, color: AppTheme.primaryColor, fontWeight: FontWeight.w700))),
                 Text(comment.userName, style: const TextStyle(fontSize: AppTheme.textSm + 1, fontWeight: FontWeight.w600)),
                 const SizedBox(width: 6),
                 Text(comment.timeAgo, style: const TextStyle(fontSize: AppTheme.textXs, color: AppTheme.textSecondary)),
@@ -967,7 +991,7 @@ class _CommentsSheetState extends State<_CommentsSheet> {
               const SizedBox(height: 2),
               GestureDetector(
                 onTap: () => _startReply(comment.id, comment.userName),
-                child: Text('Reply', style: TextStyle(fontSize: AppTheme.textXs + 1, color: AppTheme.primaryColor.withOpacity(0.7), fontWeight: FontWeight.w600)),
+                child: Text(context.t('Reply'), style: TextStyle(fontSize: AppTheme.textXs + 1, color: AppTheme.primaryColor.withOpacity(0.7), fontWeight: FontWeight.w600)),
               ),
             ])),
           ]),
@@ -995,7 +1019,7 @@ class _CommentsSheetState extends State<_CommentsSheet> {
               Row(children: [
                 const Icon(Icons.comment, size: 20, color: AppTheme.infoColor),
                 const SizedBox(width: 8),
-                Text('Comments (${_comments.length})', style: const TextStyle(fontSize: AppTheme.textXl, fontWeight: FontWeight.bold)),
+                Text('${context.t('Comments')} (${_comments.length})', style: const TextStyle(fontSize: AppTheme.textXl, fontWeight: FontWeight.bold)),
                 const Spacer(),
                 Text('${widget.report.title}', style: const TextStyle(fontSize: AppTheme.textSm, color: AppTheme.textSecondary), maxLines: 1, overflow: TextOverflow.ellipsis),
               ]),
@@ -1004,7 +1028,7 @@ class _CommentsSheetState extends State<_CommentsSheet> {
                 child: _isLoading
                     ? const Center(child: CircularProgressIndicator())
                     : _comments.isEmpty
-                        ? Center(child: Column(mainAxisSize: MainAxisSize.min, children: [Icon(Icons.chat_bubble_outline, size: 48, color: AppTheme.textSecondary.withOpacity(0.3)), const SizedBox(height: 8), const Text('No comments yet', style: TextStyle(color: AppTheme.textSecondary)), const SizedBox(height: 4), const Text('Be the first to comment!', style: TextStyle(color: AppTheme.textSecondary, fontSize: AppTheme.textSm))]))
+                        ? Center(child: Column(mainAxisSize: MainAxisSize.min, children: [Icon(Icons.chat_bubble_outline, size: 48, color: AppTheme.textSecondary.withOpacity(0.3)), const SizedBox(height: 8), Text(context.t('No comments yet'), style: const TextStyle(color: AppTheme.textSecondary)), const SizedBox(height: 4), Text(context.t('Be the first to comment!'), style: const TextStyle(color: AppTheme.textSecondary, fontSize: AppTheme.textSm))]))
                         : ListView.builder(
                             controller: _scrollController,
                             itemCount: _comments.length,
@@ -1020,7 +1044,7 @@ class _CommentsSheetState extends State<_CommentsSheet> {
                   child: Row(children: [
                     Icon(Icons.reply, size: 14, color: AppTheme.primaryColor),
                     const SizedBox(width: 4),
-                    Text('Replying to $_replyingToUserName', style: TextStyle(fontSize: AppTheme.textSm, color: AppTheme.primaryColor)),
+                    Text('${context.t('Replying to')} $_replyingToUserName', style: TextStyle(fontSize: AppTheme.textSm, color: AppTheme.primaryColor)),
                     const Spacer(),
                     GestureDetector(onTap: _cancelReply, child: const Icon(Icons.close, size: 16, color: AppTheme.textSecondary)),
                   ]),
@@ -1032,7 +1056,7 @@ class _CommentsSheetState extends State<_CommentsSheet> {
                     controller: _commentController,
                     focusNode: _commentFocusNode,
                     decoration: InputDecoration(
-                      hintText: _replyingToCommentId != null ? 'Write a reply...' : 'Write a comment...',
+                      hintText: _replyingToCommentId != null ? context.t('Write a reply...') : context.t('Write a comment...'),
                       hintStyle: const TextStyle(fontSize: AppTheme.textBase),
                       contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
                       border: OutlineInputBorder(borderRadius: BorderRadius.circular(24), borderSide: BorderSide(color: AppTheme.dividerColor)),
@@ -1053,10 +1077,11 @@ class _CommentsSheetState extends State<_CommentsSheet> {
                         ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
                         : const Icon(Icons.send, color: Colors.white, size: 20),
                   ),
-                ),
-              ]),
-            ]),
-          );
+),
+]),
+],
+      ),
+    );
         },
       ),
     );
@@ -1112,13 +1137,16 @@ class _SubmitReportSheetState extends State<_SubmitReportSheet> {
   @override void dispose() { super.dispose(); }
 
   Future<void> _capturePhoto() async {
+    final locRequiredMsg = context.t('Location access is required to take a photo. Please enable GPS and location permission.');
+    final tooLargeMsg = context.t('Photo is too large. Max 5MB.');
+    final captureFailMsg = context.t('Failed to capture photo.');
     setState(() => _isCapturingPhoto = true);
     try {
       final loc = LocationService();
       final pos = await loc.getAccurateLocationForReport();
       if (pos == null) {
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Location access is required to take a photo. Please enable GPS and location permission.'), backgroundColor: AppTheme.errorColor));
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(locRequiredMsg), backgroundColor: AppTheme.errorColor));
           setState(() => _isCapturingPhoto = false);
         }
         return;
@@ -1131,10 +1159,10 @@ class _SubmitReportSheetState extends State<_SubmitReportSheet> {
           await _captureLocationService.captureLocationAfterPhoto();
         } else {
           await CameraService.cleanUp(photo);
-          if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Photo is too large. Max 5MB.'), backgroundColor: AppTheme.errorColor));
+          if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(tooLargeMsg), backgroundColor: AppTheme.errorColor));
         }
       }
-    } catch (e) { if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Failed to capture photo.'), backgroundColor: AppTheme.errorColor)); }
+    } catch (e) { if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(captureFailMsg), backgroundColor: AppTheme.errorColor)); }
     if (mounted) setState(() => _isCapturingPhoto = false);
   }
 
@@ -1143,8 +1171,12 @@ class _SubmitReportSheetState extends State<_SubmitReportSheet> {
   Future<void> _submitReport() async {
     if (!_formKey.currentState!.validate()) return;
     final provider = context.read<ReportProvider>();
-    if (_capturedPhoto == null) { ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Please capture a live photo.'), backgroundColor: AppTheme.errorColor)); return; }
-    if (!await File(_capturedPhoto!.path).exists()) { ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Photo file missing.'), backgroundColor: AppTheme.errorColor)); return; }
+    final captureMsg = context.t('Please capture a live photo.');
+    final fileMissingMsg = context.t('Photo file missing.');
+    final locUnavailableMsg = context.t('Location unavailable. Please enable GPS and try again.');
+    final successMsg = context.t('Report submitted!');
+    if (_capturedPhoto == null) { ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(captureMsg), backgroundColor: AppTheme.errorColor)); return; }
+    if (!await File(_capturedPhoto!.path).exists()) { ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(fileMissingMsg), backgroundColor: AppTheme.errorColor)); return; }
     setState(() => _isSubmitting = true);
     final loc = LocationService(); final pos = await loc.getAccurateLocationForReport();
     if (pos != null) { _lat = pos.latitude; _lng = pos.longitude; }
@@ -1152,8 +1184,8 @@ class _SubmitReportSheetState extends State<_SubmitReportSheet> {
       if (mounted) {
         setState(() => _isSubmitting = false);
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Location unavailable. Please enable GPS and try again.'),
+          SnackBar(
+            content: Text(locUnavailableMsg),
             backgroundColor: AppTheme.errorColor,
           ),
         );
@@ -1164,7 +1196,7 @@ class _SubmitReportSheetState extends State<_SubmitReportSheet> {
     _captureLocationService.clear();
     if (mounted) {
       setState(() => _isSubmitting = false);
-      if (success) { if (_capturedPhoto != null) CameraService.cleanUp(_capturedPhoto!); Navigator.pop(context); ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Report submitted!'), backgroundColor: AppTheme.successColor)); provider.fetchReports(lat: _lat, lng: _lng, radiusKm: 20.0); provider.fetchMyReports(); }
+      if (success) { if (_capturedPhoto != null) CameraService.cleanUp(_capturedPhoto!); Navigator.pop(context); ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(successMsg), backgroundColor: AppTheme.successColor)); provider.fetchReports(lat: _lat, lng: _lng, radiusKm: 20.0); provider.fetchMyReports(); }
     }
   }
 
@@ -1173,15 +1205,15 @@ class _SubmitReportSheetState extends State<_SubmitReportSheet> {
     final provider = context.watch<ReportProvider>(); final formConfig = provider.formConfig;
     return Padding(padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom, left: 20, right: 20, top: 20),
       child: Form(key: _formKey, child: SingleChildScrollView(child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, mainAxisSize: MainAxisSize.min, children: [
-        Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [Text(formConfig != null ? '${formConfig.submitButtonText}' : 'Submit Report', style: const TextStyle(fontSize: AppTheme.text2xl, fontWeight: FontWeight.bold)), IconButton(onPressed: () => Navigator.pop(context), icon: const Icon(Icons.close))]),
+        Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [Text(formConfig != null ? '${formConfig.submitButtonText}' : context.t('Submit Report'), style: const TextStyle(fontSize: AppTheme.text2xl, fontWeight: FontWeight.bold)), IconButton(onPressed: () => Navigator.pop(context), icon: const Icon(Icons.close))]),
         const SizedBox(height: 16),
-        if (formConfig == null || !_configReady) const Padding(padding: EdgeInsets.symmetric(vertical: 24), child: Center(child: Column(children: [CircularProgressIndicator(strokeWidth: 2), SizedBox(height: 12), Text('Loading...', style: TextStyle(color: AppTheme.textSecondary))])))
+        if (formConfig == null || !_configReady) Padding(padding: const EdgeInsets.symmetric(vertical: 24), child: Center(child: Column(children: [const CircularProgressIndicator(strokeWidth: 2), const SizedBox(height: 12), Text(context.t('Loading...'), style: const TextStyle(color: AppTheme.textSecondary))])))
         else ...[
           ...formConfig.fields.map((field) => Padding(padding: const EdgeInsets.only(bottom: 12), child: DynamicFormField(config: field, currentValue: _formValues[field.name], categories: provider.categories, onChanged: (v) => setState(() => _formValues[field.name] = v)))),
           if (_capturedPhoto != null) ...[ClipRRect(borderRadius: BorderRadius.circular(8), child: Stack(children: [Image.file(File(_capturedPhoto!.path), height: 160, width: double.infinity, fit: BoxFit.cover), Positioned(top: 8, right: 8, child: GestureDetector(onTap: _retakePhoto, child: Container(padding: const EdgeInsets.all(6), decoration: BoxDecoration(color: Colors.black54, borderRadius: BorderRadius.circular(20)), child: const Icon(Icons.refresh, color: Colors.white, size: 18))))])), const SizedBox(height: 8)]
-          else SizedBox(height: 44, child: OutlinedButton.icon(onPressed: _isCapturingPhoto ? null : _capturePhoto, icon: _isCapturingPhoto ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2)) : const Icon(Icons.camera_alt, size: 18), label: Text(_isCapturingPhoto ? 'Opening camera...' : 'Take Photo'))),
+          else SizedBox(height: 44, child: OutlinedButton.icon(onPressed: _isCapturingPhoto ? null : _capturePhoto, icon: _isCapturingPhoto ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2)) : const Icon(Icons.camera_alt, size: 18), label: Text(_isCapturingPhoto ? context.t('Opening camera...') : context.t('Take Photo')))),
           const SizedBox(height: 8),
-          SizedBox(height: 48, child: ElevatedButton(onPressed: _isSubmitting ? null : _submitReport, child: _isSubmitting ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white)) : Text(formConfig?.submitButtonText ?? 'Submit'))),
+          SizedBox(height: 48, child: ElevatedButton(onPressed: _isSubmitting ? null : _submitReport, child: _isSubmitting ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white)) : Text(formConfig?.submitButtonText ?? context.t('Submit')))),
         ],
       ]))),
     );
@@ -1189,7 +1221,7 @@ class _SubmitReportSheetState extends State<_SubmitReportSheet> {
 }
 
 // ============ EMPTY STATE ============
-Widget _emptyState({required IconData icon, required String message, String? subtitle, Color? iconColor, double iconSize = 64, TextStyle? messageStyle, VoidCallback? onTap}) {
+Widget _emptyState(BuildContext context, {required IconData icon, required String message, String? subtitle, Color? iconColor, double iconSize = 64, TextStyle? messageStyle, VoidCallback? onTap}) {
   return Center(child: Column(mainAxisSize: MainAxisSize.min, children: [
     Icon(icon, size: iconSize, color: iconColor ?? AppTheme.textSecondary.withOpacity(0.3)),
     const SizedBox(height: 16),
@@ -1200,7 +1232,7 @@ Widget _emptyState({required IconData icon, required String message, String? sub
       ElevatedButton.icon(
         onPressed: onTap,
         icon: const Icon(Icons.add),
-        label: const Text('Create Report'),
+        label: Text(context.t('Create Report')),
         style: ElevatedButton.styleFrom(
           padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
         ),

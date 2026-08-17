@@ -1,4 +1,5 @@
 import 'package:dio/dio.dart';
+import "../../core/services/localization_service.dart";
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import '../../config/constants/app_constants.dart';
 import '../services/session_manager.dart';
@@ -372,23 +373,7 @@ class ApiClient {
   }
   // ✅ Profile Completion endpoints
 
-  // Partners
-  Future<Response> getPartners({String? district, String? type}) async {
-    final params = <String, dynamic>{};
-    if (district != null) params['district'] = district;
-    if (type != null) params['type'] = type;
-    return _dio.get('/partners', queryParameters: params);
-  }
-
-  Future<Response> getPartnerDetail(int id) => _dio.get('/partners/$id');
-
   // Sponsors removed — replaced by ad campaigns (2026-08)
-
-  // User Bookings
-  Future<Response> createBooking(Map<String, dynamic> data) => _dio.post('/bookings', data: data);
-  Future<Response> getMyBookings() => _dio.get('/bookings/my');
-  Future<Response> removeBookingCoupon(int bookingId) => _dio.delete('/bookings/$bookingId/coupon');
-  Future<Response> cancelBooking(int bookingId) => _dio.post('/bookings/$bookingId/cancel');
 
   // Reward Offer codes available for booking auto-apply
   Future<Response> getAvailableOfferCodes() => _dio.get('/offers/available');
@@ -450,6 +435,11 @@ class ApiClient {
   /// Update user settings
   Future<Response> updateUserSettings(Map<String, dynamic> settings) async {
     return _dio.put('/profile/settings', data: settings);
+  }
+
+  /// UI translation dictionary (English -> Nepali), public
+  Future<Response> getTranslations() async {
+    return _dio.get('/translations');
   }
 
   // ============ Dynamic Profile Fields ============
@@ -517,6 +507,25 @@ class ApiClient {
 
   Future<Response> getMyOffers() async {
     return _dio.get('/offers/my');
+  }
+
+  // ============ Curated Routes (trekking + itineraries) ============
+
+  Future<Response> getRoutes({
+    String? type,
+    String? difficulty,
+    String? search,
+    int limit = 50,
+  }) async {
+    final params = <String, dynamic>{'limit': limit};
+    if (type != null && type.isNotEmpty) params['type'] = type;
+    if (difficulty != null && difficulty.isNotEmpty) params['difficulty'] = difficulty;
+    if (search != null && search.isNotEmpty) params['q'] = search;
+    return _dio.get('/routes', queryParameters: params);
+  }
+
+  Future<Response> getRouteById(int id) async {
+    return _dio.get('/routes/$id');
   }
 }
 

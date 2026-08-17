@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import "../../core/services/localization_service.dart";
 import 'package:cached_network_image/cached_network_image.dart';
 import '../config/themes/app_theme.dart';
 import 'image_viewer_widget.dart';

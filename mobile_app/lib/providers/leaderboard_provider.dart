@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import "../../core/services/localization_service.dart";
 import '../core/api/api_client.dart';
 
 class LeaderboardUser {

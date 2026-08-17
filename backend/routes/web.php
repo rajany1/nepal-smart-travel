@@ -11,6 +11,7 @@ use App\Http\Controllers\Admin\SubscriptionController;
 use App\Http\Controllers\Admin\AdCampaignController;
 use App\Http\Controllers\Admin\AiAgentController;
 use App\Http\Controllers\Admin\AiAgentTaskController;
+use App\Http\Controllers\Admin\TranslatorController;
 
 // ============ PUBLIC TOURIST WEB ============
 Route::prefix('/')->name('web.')->group(function () {
@@ -238,4 +239,12 @@ Route::prefix('admin')->name('admin.')->middleware(['auth', 'status'])->group(fu
     Route::get('/ai/tasks', [AiAgentTaskController::class, 'index'])->name('ai.tasks');
     Route::post('/ai/tasks', [AiAgentTaskController::class, 'store'])->name('ai.tasks.store');
     Route::get('/ai/tasks/{task}/retry', [AiAgentTaskController::class, 'retry'])->name('ai.tasks.retry');
+
+    // Translator (word dictionary for the mobile app UI)
+    Route::get('/translator', [TranslatorController::class, 'index'])->name('translator');
+    Route::post('/translator', [TranslatorController::class, 'store'])->name('translator.store');
+    Route::post('/translator/import', [TranslatorController::class, 'bulkImport'])->name('translator.import');
+    Route::post('/translator/{translation}/update', [TranslatorController::class, 'update'])->name('translator.update');
+    Route::post('/translator/{translation}/toggle', [TranslatorController::class, 'toggle'])->name('translator.toggle');
+    Route::post('/translator/{translation}/delete', [TranslatorController::class, 'destroy'])->name('translator.delete');
 });

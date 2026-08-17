@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import "../../core/services/localization_service.dart";
 
 /// Manages the map view mode (Standard / Satellite)
 class MapViewProvider extends ChangeNotifier {

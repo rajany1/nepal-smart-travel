@@ -4,6 +4,7 @@ namespace App\Services\Ai\Handlers;
 
 use App\Models\AiAgentTask;
 use App\Models\PlaceReview;
+use App\Services\Rules\ReviewScoringService;
 use Illuminate\Support\Facades\Log;
 
 class ReviewModeratorHandler extends BaseHandler
@@ -24,7 +25,7 @@ class ReviewModeratorHandler extends BaseHandler
         }
 
         if ($action === 'moderate' && isset($input['review_id'])) {
-            return $this->moderateReview($task, $input['review_id']);
+            return $this->moderateReview($task, (int) $input['review_id']);
         }
 
         return $this->markFailed($task, 'Unknown action: ' . $action);
@@ -33,50 +34,23 @@ class ReviewModeratorHandler extends BaseHandler
     protected function handleAutoModerate(AiAgentTask $task): AiAgentTask
     {
         $results = $this->autoWork();
-        $msg = count($results) . ' review(s) moderated';
+        $msg = count($results) . ' review(s) moderated (rules-based)';
         return $this->markComplete($task, ['moderated' => count($results), 'items' => $results, 'message' => $msg]);
     }
 
     protected function autoWork(): array
     {
-        $llm = $this->ai();
         $results = [];
 
         $reviews = PlaceReview::whereNull('moderated_at')
             ->whereNot('rating', 0)
-            ->inRandomOrder()
-            ->take(10)
+            ->orderBy('created_at')
+            ->take(20)
             ->get();
 
         foreach ($reviews as $review) {
             try {
-                $text = $review->description ?: $review->title ?: '';
-                if (empty($text)) {
-                    $review->update(['moderated_at' => now(), 'moderation_status' => 'approved']);
-                    $results[] = "review#{$review->id}: approved (empty)";
-                    continue;
-                }
-
-                $result = $llm->generateJson(
-                    "Analyze this place review and return JSON with: spam (bool), toxic (bool), reason (string).\n\nReview: {$text}"
-                );
-
-                $isSpam = $result['spam'] ?? false;
-                $isToxic = $result['toxic'] ?? false;
-
-                if ($isSpam || $isToxic) {
-                    $review->update([
-                        'moderated_at' => now(),
-                        'moderation_status' => 'rejected',
-                    ]);
-                    $results[] = "review#{$review->id}: rejected (" . ($result['reason'] ?? 'spam/toxic') . ")";
-                } else {
-                    $review->update([
-                        'moderated_at' => now(),
-                        'moderation_status' => 'approved',
-                    ]);
-                    $results[] = "review#{$review->id}: approved";
-                }
+                $results[] = $this->applyVerdict($review);
             } catch (\Exception $e) {
                 Log::error("Review moderation failed for review#{$review->id}: " . $e->getMessage());
             }
@@ -92,24 +66,37 @@ class ReviewModeratorHandler extends BaseHandler
             return $this->markFailed($task, "Review #{$reviewId} not found");
         }
 
-        $llm = $this->ai();
-        $text = $review->description ?: $review->title ?: '';
+        $result = $this->applyVerdict($review);
 
-        try {
-            $result = $llm->generateJson("Analyze this review: spam/toxicity check. Return JSON with spam, toxic, reason.\n\n{$text}");
+        return $this->markComplete($task, [
+            'review_id' => $reviewId,
+            'status' => $review->moderation_status,
+            'score' => $result['score'],
+            'reasons' => $result['reasons'],
+        ]);
+    }
 
-            $review->update([
-                'moderated_at' => now(),
-                'moderation_status' => ($result['spam'] ?? false) || ($result['toxic'] ?? false) ? 'rejected' : 'approved',
-            ]);
+    protected function applyVerdict(PlaceReview $review): array
+    {
+        $scored = app(ReviewScoringService::class)->score($review);
 
-            return $this->markComplete($task, [
-                'review_id' => $reviewId,
-                'status' => $review->moderation_status,
-                'reason' => $result['reason'] ?? '',
-            ]);
-        } catch (\Exception $e) {
-            return $this->markFailed($task, $e->getMessage());
-        }
+        // 'review' verdict: keep the review visible (moderation_status stays
+        // null) but mark it moderated so it is not re-scanned every run —
+        // the flag is recorded in the task output for human follow-up.
+        $review->update([
+            'moderated_at' => now(),
+            'moderation_status' => match ($scored['verdict']) {
+                'reject' => 'rejected',
+                'approve' => 'approved',
+                default => null,
+            },
+        ]);
+
+        return [
+            'review_id' => $review->id,
+            'verdict' => $scored['verdict'],
+            'score' => $scored['score'],
+            'reasons' => $scored['reasons'],
+        ];
     }
 }

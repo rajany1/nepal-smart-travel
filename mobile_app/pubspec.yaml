@@ -33,9 +33,13 @@ dependencies:
   # Media
   image_picker: ^1.1.2
   cached_network_image: ^3.4.1
+  flutter_cache_manager: ^3.4.1
 
   # Authentication & Security
   flutter_secure_storage: ^9.2.4
+
+  # Payments
+  webview_flutter: ^4.10.0
 
   # UI & Design
   flutter_screenutil: ^5.9.3

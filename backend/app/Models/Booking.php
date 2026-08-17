@@ -43,14 +43,19 @@ class Booking extends Model
         return $this->hasOne(CommissionTransaction::class);
     }
 
-    public function shopCode(): HasOne
-    {
-        return $this->hasOne(ShopCode::class);
-    }
-
     public function offerRedemption()
     {
         return $this->hasOne(OfferRedemption::class);
+    }
+
+    public function bookingPayment(): HasOne
+    {
+        return $this->hasOne(BookingPayment::class)->latestOfMany();
+    }
+
+    public function isPaid(): bool
+    {
+        return $this->bookingPayment?->status === 'success';
     }
 
     public function isPending(): bool { return $this->status === 'pending'; }

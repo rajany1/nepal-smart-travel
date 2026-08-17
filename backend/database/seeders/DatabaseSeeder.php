@@ -90,6 +90,13 @@ class DatabaseSeeder extends Seeder
         // Seed AI agents
         $this->call(\Database\Seeders\AiAgentSeeder::class);
 
+        // Seed translation glossary (rules-based translator)
+        $this->call(\Database\Seeders\TranslationGlossarySeeder::class);
+$this->call(\Database\Seeders\AppUiWordSeeder::class);
+
+        // Seed curated routes (trekking + itineraries)
+        $this->call(\Database\Seeders\CuratedRouteSeeder::class);
+
         // Seed default moderator permissions (deprecated — replaced by RolePermissionSeeder)
         // $this->call(\Database\Seeders\PermissionSeeder::class);
     }

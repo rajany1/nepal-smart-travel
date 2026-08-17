@@ -1,5 +1,6 @@
 ﻿import 'dart:async';
 import 'dart:convert';
+import "../../core/services/localization_service.dart";
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -13,13 +14,17 @@ import 'package:geolocator/geolocator.dart';
 import '../../config/constants/app_constants.dart';
 import '../../config/themes/app_theme.dart';
 import '../../core/services/location_service.dart';
+import '../../core/services/localization_service.dart';
 import '../../core/services/offline_db_service.dart';
+import '../../core/services/offline_tile_provider.dart';
+import '../../core/services/app_settings_service.dart';
 import '../../core/models/place.dart';
 import '../../core/api/api_client.dart';
 import '../../providers/place_provider.dart';
 import '../../providers/map_view_provider.dart';
 import '../../providers/auth_provider.dart';
 import '../auth/login_screen.dart';
+import '../routes/routes_screen.dart';
 import 'place_details_screen.dart';
 import 'add_place_screen.dart';
 import 'filter_places_sheet.dart';
@@ -46,6 +51,7 @@ class _NearbyMapScreenState extends State<NearbyMapScreen> {
       DraggableScrollableController();
   final TextEditingController _searchController = TextEditingController();
   final OfflineDbService _offlineDb = OfflineDbService.instance;
+  final OfflineTileProvider _offlineTiles = OfflineTileProvider();
 
   double? _lat;
   double? _lng;
@@ -55,6 +61,7 @@ class _NearbyMapScreenState extends State<NearbyMapScreen> {
   bool _isFetchingPlaces = false;
   PlaceModel? _selectedPlace;
   Timer? _debounceTimer;
+  Timer? _autoDownloadTimer;
   StreamSubscription? _positionStream;
   StreamController<int>? _syncStreamController;
 
@@ -109,6 +116,7 @@ class _NearbyMapScreenState extends State<NearbyMapScreen> {
   @override
   void dispose() {
     _debounceTimer?.cancel();
+    _autoDownloadTimer?.cancel();
     _positionStream?.cancel();
     _syncStreamController?.close();
     _weatherDebounceTimer?.cancel();
@@ -253,6 +261,23 @@ class _NearbyMapScreenState extends State<NearbyMapScreen> {
     _weatherDebounceTimer = Timer(const Duration(milliseconds: 300), () {
       _fetchWeatherForViewport();
     });
+
+    // Auto-download maps: background-cache the visible area once the map
+    // settles, so the region works offline later.
+    if (_currentZoom >= 8 && _lat != null && _lng != null) {
+      _autoDownloadTimer?.cancel();
+      _autoDownloadTimer = Timer(const Duration(seconds: 2), () async {
+        if (!await AppSettingsService.autoDownloadMaps) return;
+        OfflineTileDownloader.downloadRegion(
+          minLat: _lat! - 0.15,
+          maxLat: _lat! + 0.15,
+          minLng: _lng! - 0.2,
+          maxLng: _lng! + 0.2,
+          minZoom: 8,
+          maxZoom: 16,
+        );
+      });
+    }
   }
 
   Future<void> _fetchPlacesForViewport({String? search}) async {
@@ -383,10 +408,10 @@ class _NearbyMapScreenState extends State<NearbyMapScreen> {
       showDialog(
         context: context,
         builder: (ctx) => AlertDialog(
-          title: const Text('Login required'),
-          content: Text('Log in to save "${place.name}" to our local database.'),
+          title: Text(ctx.t('Login required')),
+          content: Text('${ctx.t('Log in to save')} "${place.name}" ${ctx.t('to our local database.')}'),
           actions: [
-            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+            TextButton(onPressed: () => Navigator.pop(ctx), child: Text(ctx.t('Cancel'))),
             FilledButton(
               onPressed: () {
                 Navigator.pop(ctx);
@@ -395,7 +420,7 @@ class _NearbyMapScreenState extends State<NearbyMapScreen> {
                   MaterialPageRoute(builder: (_) => const LoginScreen()),
                 );
               },
-              child: const Text('Log in'),
+              child: Text(ctx.t('Log in')),
             ),
           ],
         ),
@@ -406,10 +431,10 @@ class _NearbyMapScreenState extends State<NearbyMapScreen> {
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Save to Database'),
-        content: Text('Add "${place.name}" to our local database?'),
+        title: Text(ctx.t('Save to Database')),
+        content: Text('${ctx.t('Add')} "${place.name}" ${ctx.t('to our local database?')}'),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          TextButton(onPressed: () => Navigator.pop(ctx), child: Text(ctx.t('Cancel'))),
           FilledButton.icon(
             onPressed: () async {
               Navigator.pop(ctx);
@@ -438,7 +463,7 @@ class _NearbyMapScreenState extends State<NearbyMapScreen> {
               }
             },
             icon: const Icon(Icons.save, size: 18),
-            label: const Text('Save'),
+            label: Text(ctx.t('Save')),
           ),
         ],
       ),
@@ -454,11 +479,11 @@ class _NearbyMapScreenState extends State<NearbyMapScreen> {
     final bool isPending = status == 'pending';
     final String tooltip;
     if (status == 'rejected') {
-      tooltip = 'Re-submit (was rejected)';
+      tooltip = context.t('Re-submit (was rejected)');
     } else if (isPending) {
-      tooltip = 'Pending review';
+      tooltip = context.t('Pending review');
     } else {
-      tooltip = 'Save to database';
+      tooltip = context.t('Save to database');
     }
     return Tooltip(
       message: tooltip,
@@ -507,6 +532,11 @@ class _NearbyMapScreenState extends State<NearbyMapScreen> {
   }
 
   Future<void> _getDirections(PlaceModel place) async {
+    final msgNoRoutes = context.t('No valid routes found');
+    final msgRouteServerError = context.t('Route server error');
+    final msgUnknown = context.t('unknown');
+    final msgServerReturned = context.t('Server returned');
+    final msgFetchFailed = context.t('Could not fetch route. Please try again.');
     final originLat = _currentLocation?.latitude ?? _lat;
     final originLng = _currentLocation?.longitude ?? _lng;
     if (originLat == null || originLng == null) return;
@@ -551,17 +581,17 @@ class _NearbyMapScreenState extends State<NearbyMapScreen> {
             final cameraFit = CameraFit.bounds(bounds: bounds, padding: const EdgeInsets.all(60));
             _activeMapController.fitCamera(cameraFit);
           } else {
-            _showRouteError('No valid routes found');
+            _showRouteError(msgNoRoutes);
           }
         } else {
-          _showRouteError('Route server error: ${data['message'] ?? 'unknown'}');
+          _showRouteError('$msgRouteServerError: ${data['message'] ?? msgUnknown}');
         }
       } else {
-        _showRouteError('Server returned ${response.statusCode}');
+        _showRouteError('$msgServerReturned ${response.statusCode}');
       }
     } catch (e) {
       debugPrint('Route error: $e');
-      _showRouteError('Could not fetch route. Please try again.');
+      _showRouteError(msgFetchFailed);
     }
     if (mounted) setState(() => _isLoadingRoute = false);
   }
@@ -607,6 +637,13 @@ class _NearbyMapScreenState extends State<NearbyMapScreen> {
             top: MediaQuery.of(context).padding.top + 50,
             left: 16,
             child: _buildMapModeToggle(),
+          ),
+
+          // Trekking & curated routes button
+          Positioned(
+            top: MediaQuery.of(context).padding.top + 104,
+            left: 16,
+            child: _buildRoutesButton(),
           ),
 
           // Compass (N) indicator - top right, shows north direction
@@ -655,16 +692,16 @@ class _NearbyMapScreenState extends State<NearbyMapScreen> {
                       ),
                     ],
                   ),
-                  child: const Row(
+                  child: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      SizedBox(
+                      const SizedBox(
                           width: 18,
                           height: 18,
                           child: CircularProgressIndicator(strokeWidth: 2)),
-                      SizedBox(width: 10),
-                      Text('Updating places...',
-                          style: TextStyle(
+                      const SizedBox(width: 10),
+                      Text(context.t('Updating places...'),
+                          style: const TextStyle(
                               fontSize: 13, color: AppTheme.textSecondary)),
                     ],
                   ),
@@ -690,13 +727,13 @@ class _NearbyMapScreenState extends State<NearbyMapScreen> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Row(
-                        children: const [
-                          Icon(Icons.my_location, color: AppTheme.errorColor),
-                          SizedBox(width: 10),
+                        children: [
+                          const Icon(Icons.my_location, color: AppTheme.errorColor),
+                          const SizedBox(width: 10),
                           Expanded(
                             child: Text(
-                              'Waiting for your current location... Please enable GPS and allow location permission.',
-                              style: TextStyle(fontSize: 13, color: AppTheme.textSecondary),
+                              context.t('Waiting for your current location... Please enable GPS and allow location permission.'),
+                              style: const TextStyle(fontSize: 13, color: AppTheme.textSecondary),
                             ),
                           ),
                         ],
@@ -706,7 +743,7 @@ class _NearbyMapScreenState extends State<NearbyMapScreen> {
                         child: TextButton.icon(
                           onPressed: _retryLocation,
                           icon: const Icon(Icons.refresh, size: 16),
-                          label: const Text('Try Again'),
+                          label: Text(context.t('Try Again')),
                         ),
                       ),
                     ],
@@ -764,6 +801,7 @@ class _NearbyMapScreenState extends State<NearbyMapScreen> {
             urlTemplate: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
             userAgentPackageName: 'np.com.nepalsmarttravel',
             maxZoom: 19,
+            tileProvider: _offlineTiles,
           ),
           ColorFiltered(
             colorFilter: const ColorFilter.matrix(<double>[
@@ -776,6 +814,7 @@ class _NearbyMapScreenState extends State<NearbyMapScreen> {
               urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
               userAgentPackageName: 'np.com.nepalsmarttravel',
               maxZoom: 20,
+              tileProvider: _offlineTiles,
             ),
           ),
         ] else
@@ -783,6 +822,7 @@ class _NearbyMapScreenState extends State<NearbyMapScreen> {
             urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
             userAgentPackageName: 'np.com.nepalsmarttravel',
             maxZoom: 19,
+            tileProvider: _offlineTiles,
           ),
         if (showWeather && _weatherGrid.isNotEmpty)
           PolygonLayer(polygons: _buildWeatherPolygons()),
@@ -850,9 +890,9 @@ class _NearbyMapScreenState extends State<NearbyMapScreen> {
                           ),
                         ],
                       ),
-                      child: const Text(
-                        'You are here',
-                        style: TextStyle(
+                      child: Text(
+                        context.t('You are here'),
+                        style: const TextStyle(
                           fontSize: 9,
                           fontWeight: FontWeight.w600,
                           color: Colors.blue,
@@ -926,6 +966,43 @@ class _NearbyMapScreenState extends State<NearbyMapScreen> {
     _activeMapController.rotate(0);
   }
 
+  Widget _buildRoutesButton() {
+    return Material(
+      elevation: 3,
+      color: Colors.white,
+      borderRadius: BorderRadius.circular(24),
+      shadowColor: Colors.black26,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(24),
+        onTap: () {
+          HapticFeedback.lightImpact();
+          Navigator.push(
+            context,
+            MaterialPageRoute(builder: (_) => const RoutesScreen()),
+          );
+        },
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.hiking, size: 20, color: Color(0xFFB45309)),
+              const SizedBox(width: 6),
+              Text(
+                context.t('Routes'),
+                style: const TextStyle(
+                  fontSize: AppTheme.textSm,
+                  fontWeight: FontWeight.w600,
+                  color: AppTheme.textPrimary,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget _buildMapModeToggle() {
     return Consumer<MapViewProvider>(
       builder: (context, mapView, _) {
@@ -963,7 +1040,7 @@ class _NearbyMapScreenState extends State<NearbyMapScreen> {
                     ),
                     const SizedBox(width: 6),
                     Text(
-                      mapView.isSatellite ? 'Standard' : 'Satellite',
+                      mapView.isSatellite ? context.t('Standard') : context.t('Satellite'),
                       style: const TextStyle(
                         fontSize: 13,
                         fontWeight: FontWeight.w600,
@@ -1090,23 +1167,24 @@ class _NearbyMapScreenState extends State<NearbyMapScreen> {
   }
 
   Future<void> _requestLocationAndRecenter() async {
+    final msgGettingLocation = context.t('Getting your exact location...');
+    final msgLocationFailed = context.t('Could not get your location. Please enable GPS and allow location permission, then try again.');
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('Getting your exact location...'),
+      SnackBar(
+        content: Text(msgGettingLocation),
         behavior: SnackBarBehavior.floating,
-        duration: Duration(seconds: 2),
+        duration: const Duration(seconds: 2),
       ),
     );
     final loc = await _locationService.getCurrentLocation();
     if (!mounted) return;
     if (loc == null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(
-              'Could not get your location. Please enable GPS and allow location permission, then try again.'),
+        SnackBar(
+          content: Text(msgLocationFailed),
           backgroundColor: AppTheme.errorColor,
           behavior: SnackBarBehavior.floating,
-          duration: Duration(seconds: 4),
+          duration: const Duration(seconds: 4),
         ),
       );
       return;
@@ -1122,16 +1200,16 @@ class _NearbyMapScreenState extends State<NearbyMapScreen> {
   }
 
   Future<void> _retryLocation() async {
+    final msgLocationFailed = context.t('Could not get your location. Please enable GPS and allow location permission, then try again.');
     final loc = await _locationService.getCurrentLocation();
     if (!mounted) return;
     if (loc == null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(
-              'Could not get your location. Please enable GPS and allow location permission, then try again.'),
+        SnackBar(
+          content: Text(msgLocationFailed),
           backgroundColor: AppTheme.errorColor,
           behavior: SnackBarBehavior.floating,
-          duration: Duration(seconds: 4),
+          duration: const Duration(seconds: 4),
         ),
       );
       return;
@@ -1226,7 +1304,7 @@ class _NearbyMapScreenState extends State<NearbyMapScreen> {
                 ),
                 const SizedBox(width: 6),
                 Text(
-                  '$count pending sync',
+                  '$count ${context.t('pending sync')}',
                   style: TextStyle(fontSize: 11, color: Colors.orange.shade800),
                 ),
               ],
@@ -1261,7 +1339,7 @@ class _NearbyMapScreenState extends State<NearbyMapScreen> {
       child: TextField(
         controller: _searchController,
         decoration: InputDecoration(
-          hintText: 'Search places in Nepal...',
+          hintText: context.t('Search places in Nepal...'),
           hintStyle: TextStyle(color: Colors.grey.shade500, fontSize: AppTheme.textBase),
           prefixIcon:
               Icon(Icons.search, color: AppTheme.primaryColor, size: 22),
@@ -1404,7 +1482,7 @@ class _NearbyMapScreenState extends State<NearbyMapScreen> {
                           mainAxisAlignment: MainAxisAlignment.spaceBetween,
                           children: [
                             Text(
-                              'Nearby Places',
+                              context.t('Nearby Places'),
                               style: TextStyle(
                                 fontSize: 17,
                                 fontWeight: FontWeight.w600,
@@ -1415,7 +1493,7 @@ class _NearbyMapScreenState extends State<NearbyMapScreen> {
                               children: [
                                 if (displayPlaces.isNotEmpty)
                                   Text(
-                                    '${displayPlaces.length} found',
+                                    '${displayPlaces.length} ${context.t('found')}',
                                     style: TextStyle(
                                         fontSize: 13, color: Colors.grey.shade500),
                                   ),
@@ -1444,7 +1522,7 @@ class _NearbyMapScreenState extends State<NearbyMapScreen> {
                               color: Colors.grey.shade300),
                           const SizedBox(height: 8),
                           Text(
-                            _showFeaturedOnly ? 'No featured places' : 'No places found',
+                            _showFeaturedOnly ? context.t('No featured places') : context.t('No places found'),
                             style: TextStyle(
                                 color: Colors.grey.shade500,
                                 fontSize: AppTheme.textBase),
@@ -1452,7 +1530,7 @@ class _NearbyMapScreenState extends State<NearbyMapScreen> {
                           const SizedBox(height: 4),
                           if (!_showFeaturedOnly)
                             Text(
-                              'Try zooming in or moving the map',
+                              context.t('Try zooming in or moving the map'),
                               style: TextStyle(
                                   color: Colors.grey.shade400,
                                   fontSize: AppTheme.textSm),
@@ -1736,7 +1814,7 @@ class _NearbyMapScreenState extends State<NearbyMapScreen> {
                 Expanded(
                   child: OutlinedButton.icon(
                     icon: const Icon(Icons.directions, size: 16),
-                    label: Text(_isLoadingRoute ? 'Loading...' : 'Directions', style: const TextStyle(fontSize: 12)),
+                    label: Text(_isLoadingRoute ? context.t('Loading...') : context.t('Directions'), style: const TextStyle(fontSize: 12)),
                     style: OutlinedButton.styleFrom(
                       foregroundColor: const Color(0xFF4285F4),
                       side: const BorderSide(color: Color(0xFF4285F4)),
@@ -1753,7 +1831,7 @@ class _NearbyMapScreenState extends State<NearbyMapScreen> {
                     constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
                     padding: EdgeInsets.zero,
                     onPressed: _clearRoute,
-                    tooltip: 'Clear route',
+                    tooltip: context.t('Clear route'),
                   ),
                 ],
               ],
@@ -1792,7 +1870,7 @@ class _NearbyMapScreenState extends State<NearbyMapScreen> {
                             mainAxisSize: MainAxisSize.min,
                             children: [
                               Text(
-                                'Route ${i + 1}',
+                                '${context.t('Route')} ${i + 1}',
                                 style: TextStyle(
                                   fontSize: 11,
                                   fontWeight: FontWeight.w600,
@@ -1896,7 +1974,7 @@ class _NearbyMapScreenState extends State<NearbyMapScreen> {
                   Expanded(
                     child: OutlinedButton.icon(
                       icon: const Icon(Icons.directions, size: 16),
-                      label: Text(_isLoadingRoute ? 'Loading...' : 'Directions', style: const TextStyle(fontSize: 12)),
+                      label: Text(_isLoadingRoute ? context.t('Loading...') : context.t('Directions'), style: const TextStyle(fontSize: 12)),
                       style: OutlinedButton.styleFrom(
                         foregroundColor: const Color(0xFF4285F4),
                         side: const BorderSide(color: Color(0xFF4285F4)),
@@ -1913,7 +1991,7 @@ class _NearbyMapScreenState extends State<NearbyMapScreen> {
                       constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
                       padding: EdgeInsets.zero,
                       onPressed: _clearRoute,
-                      tooltip: 'Clear route',
+                      tooltip: context.t('Clear route'),
                     ),
                   ],
                 ],
@@ -1952,7 +2030,7 @@ class _NearbyMapScreenState extends State<NearbyMapScreen> {
                               mainAxisSize: MainAxisSize.min,
                               children: [
                                 Text(
-                                  'Route ${i + 1}',
+                                  '${context.t('Route')} ${i + 1}',
                                   style: TextStyle(
                                     fontSize: 11,
                                     fontWeight: FontWeight.w600,

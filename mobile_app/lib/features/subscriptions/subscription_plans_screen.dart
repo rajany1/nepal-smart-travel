@@ -1,6 +1,8 @@
 import 'dart:convert';
+import "../../core/services/localization_service.dart";
 import 'package:flutter/material.dart';
 import '../../core/api/api_client.dart';
+import '../../core/services/localization_service.dart';
 
 class SubscriptionPlansScreen extends StatefulWidget {
   const SubscriptionPlansScreen({super.key});
@@ -58,10 +60,10 @@ class _SubscriptionPlansScreenState extends State<SubscriptionPlansScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Subscription Plans')),
+      appBar: AppBar(title: Text(context.t('Subscription Plans'))),
       body: _loading ? const Center(child: CircularProgressIndicator())
-          : _error != null ? Center(child: Text('Error: $_error'))
-          : _plans.isEmpty ? const Center(child: Text('No plans available'))
+          : _error != null ? Center(child: Text('${context.t('Error:')} $_error'))
+          : _plans.isEmpty ? Center(child: Text(context.t('No plans available')))
           : ListView.builder(
               padding: const EdgeInsets.all(16),
               itemCount: _plans.length,
@@ -93,7 +95,7 @@ class _SubscriptionPlansScreenState extends State<SubscriptionPlansScreen> {
                               Container(
                                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                                 decoration: BoxDecoration(color: Colors.green.shade50, borderRadius: BorderRadius.circular(12), border: Border.all(color: Colors.green.shade300)),
-                                child: Text('Current', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: Colors.green.shade700)),
+                                child: Text(context.t('Current'), style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: Colors.green.shade700)),
                               ),
                             ],
                           ],
@@ -102,7 +104,7 @@ class _SubscriptionPlansScreenState extends State<SubscriptionPlansScreen> {
                         Row(
                           mainAxisAlignment: MainAxisAlignment.center,
                           children: [
-                            Text('${p['currency'] ?? 'NPR'} ', style: const TextStyle(fontSize: 14, color: Colors.grey)),
+                            Text('${p['currency'] ?? context.t('NPR')} ', style: const TextStyle(fontSize: 14, color: Colors.grey)),
                             Text('${p['price'] ?? 0}', style: TextStyle(fontSize: 36, fontWeight: FontWeight.bold, color: Colors.blue.shade700)),
                             Text('/${p['billing_interval'] ?? ''}', style: const TextStyle(fontSize: 14, color: Colors.grey)),
                           ],
@@ -129,7 +131,7 @@ class _SubscriptionPlansScreenState extends State<SubscriptionPlansScreen> {
                             onPressed: isCurrentPlan
                                 ? null
                                 : () => ScaffoldMessenger.of(context).showSnackBar(
-                                      const SnackBar(content: Text('Payment integration coming soon')),
+                                      SnackBar(content: Text(context.t('Payment integration coming soon'))),
                                     ),
                             style: ElevatedButton.styleFrom(
                               backgroundColor: isCurrentPlan ? Colors.green.shade50 : Colors.blue,
@@ -137,7 +139,7 @@ class _SubscriptionPlansScreenState extends State<SubscriptionPlansScreen> {
                               padding: const EdgeInsets.symmetric(vertical: 14),
                               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                             ),
-                            child: Text(isCurrentPlan ? 'Current Plan' : 'Upgrade'),
+                            child: Text(isCurrentPlan ? context.t('Current Plan') : context.t('Upgrade')),
                           ),
                         ),
                       ],

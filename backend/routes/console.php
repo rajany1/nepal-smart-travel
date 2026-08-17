@@ -15,3 +15,6 @@ Artisan::command('inspire', function () {
 
 // Auto-expire reward offers whose end time passed (also runs lazily on list/API calls)
 Schedule::command('offers:expire')->everyMinute()->withoutOverlapping();
+
+// Auto-pause ad campaigns whose end time passed (also guarded lazily by isServable)
+Schedule::command('ads:expire')->everyMinute()->withoutOverlapping();

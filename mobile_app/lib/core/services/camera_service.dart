@@ -1,4 +1,5 @@
 import 'dart:io';
+import "../../core/services/localization_service.dart";
 import 'package:image_picker/image_picker.dart';
 
 /// Service that ONLY allows in-app camera capture for reports.

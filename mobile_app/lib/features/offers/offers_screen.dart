@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import "../../core/services/localization_service.dart";
 import 'package:provider/provider.dart';
 import 'package:flutter/services.dart';
 import 'package:share_plus/share_plus.dart';
@@ -7,6 +8,7 @@ import '../../core/models/offer_model.dart';
 import '../../providers/offer_provider.dart';
 import '../auth/login_screen.dart';
 import '../../providers/auth_provider.dart';
+import '../../core/services/localization_service.dart';
 import 'offer_detail_screen.dart';
 
 class OffersScreen extends StatefulWidget {
@@ -37,12 +39,12 @@ class _OffersScreenState extends State<OffersScreen> {
       length: 2,
       child: Scaffold(
         appBar: AppBar(
-          title: const Text('Rewards'),
+          title: Text(context.t('Rewards')),
           bottom: TabBar(
             onTap: (i) => setState(() => _tab = i),
-            tabs: const [
-              Tab(icon: Icon(Icons.local_offer_outlined), text: 'Explore'),
-              Tab(icon: Icon(Icons.confirmation_number_outlined), text: 'My Codes'),
+            tabs: [
+              Tab(icon: const Icon(Icons.local_offer_outlined), text: context.t('Explore')),
+              Tab(icon: const Icon(Icons.confirmation_number_outlined), text: context.t('My Codes')),
             ],
           ),
         ),
@@ -75,16 +77,16 @@ class ExploreOffersView extends StatelessWidget {
               const SizedBox(height: 16),
               const Text('No offers available right now', style: TextStyle(fontSize: AppTheme.textLg, fontWeight: FontWeight.w600)),
               const SizedBox(height: 8),
-              const Text(
-                'Businesses post exclusive discounts here. Check back soon!',
+              Text(
+                context.t('Businesses post exclusive discounts here. Check back soon!'),
                 textAlign: TextAlign.center,
-                style: TextStyle(color: Colors.grey),
+                style: const TextStyle(color: Colors.grey),
               ),
               const SizedBox(height: 16),
               OutlinedButton.icon(
                 onPressed: () => context.read<OfferProvider>().fetchOffers(),
                 icon: const Icon(Icons.refresh),
-                label: const Text('Refresh'),
+                label: Text(context.t('Refresh')),
               ),
             ],
           ),
@@ -122,18 +124,18 @@ class OfferCard extends StatelessWidget {
     }
   }
 
-  String get _typeLabel {
+  String _typeLabel(BuildContext context) {
     switch (offer.offerType) {
       case 'percentage_off':
-        return 'PERCENT OFF';
+        return context.t('PERCENT OFF');
       case 'fixed_off':
-        return 'AMOUNT OFF';
+        return context.t('AMOUNT OFF');
       case 'free_item':
-        return 'FREE ITEM';
+        return context.t('FREE ITEM');
       case 'buy_one_get_one':
-        return 'BUY 1 GET 1';
+        return context.t('BUY 1 GET 1');
       default:
-        return 'OFFER';
+        return context.t('OFFER');
     }
   }
 
@@ -195,7 +197,7 @@ class OfferCard extends StatelessWidget {
                         borderRadius: BorderRadius.circular(6),
                       ),
                       child: Text(
-                        _typeLabel,
+                        context.t(_typeLabel(context)),
                         style: const TextStyle(
                           color: Colors.white,
                           fontSize: 10,
@@ -222,7 +224,7 @@ class OfferCard extends StatelessWidget {
                         const SizedBox(width: 4),
                         Expanded(
                           child: Text(
-                            offer.business?.name ?? 'Local business',
+                            offer.business?.name ?? context.t('Local business'),
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                             style: const TextStyle(color: Colors.white70, fontSize: AppTheme.textXs),
@@ -247,7 +249,7 @@ class OfferCard extends StatelessWidget {
                       const Icon(Icons.star, size: 12, color: Colors.black87),
                       const SizedBox(width: 3),
                       Text(
-                        '${offer.priceXp} XP',
+                        '${offer.priceXp} ${context.t('XP')}',
                         style: const TextStyle(
                           color: Colors.black87,
                           fontSize: 11,
@@ -289,7 +291,7 @@ class MyCodesView extends StatelessWidget {
               FilledButton.icon(
                 onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const LoginScreen())),
                 icon: const Icon(Icons.login),
-                label: const Text('Log in'),
+                label: Text(context.t('Log in')),
               ),
             ],
           ),
@@ -312,12 +314,15 @@ class MyCodesView extends StatelessWidget {
             children: [
               Icon(Icons.confirmation_number_outlined, size: 64, color: AppTheme.primaryColor.withOpacity(0.4)),
               const SizedBox(height: 16),
-              const Text('No codes yet', style: TextStyle(fontSize: AppTheme.textLg, fontWeight: FontWeight.w600)),
+              Text(
+                context.t('No codes yet'),
+                style: const TextStyle(fontSize: AppTheme.textLg, fontWeight: FontWeight.w600),
+              ),
               const SizedBox(height: 8),
-              const Text(
-                'Claim an offer from the Explore tab to get a unique code.',
+              Text(
+                context.t('Claim an offer from the Explore tab to get a unique code.'),
                 textAlign: TextAlign.center,
-                style: TextStyle(color: Colors.grey),
+                style: const TextStyle(color: Colors.grey),
               ),
             ],
           ),
@@ -363,10 +368,13 @@ class CodeCard extends StatelessWidget {
               margin: const EdgeInsets.only(bottom: 16),
               decoration: BoxDecoration(color: Colors.grey.shade300, borderRadius: BorderRadius.circular(2)),
             ),
-            const Text('Your Reward Code', style: TextStyle(fontSize: AppTheme.textLg, fontWeight: FontWeight.bold)),
+            Text(
+              context.t('Your Reward Code'),
+              style: const TextStyle(fontSize: AppTheme.textLg, fontWeight: FontWeight.bold),
+            ),
             const SizedBox(height: 6),
             Text(
-              redemption.offer?.title ?? 'Offer',
+              redemption.offer?.title ?? context.t('Offer'),
               textAlign: TextAlign.center,
               style: const TextStyle(color: Colors.grey, fontSize: AppTheme.textSm),
             ),
@@ -393,7 +401,7 @@ class CodeCard extends StatelessWidget {
             ),
             const SizedBox(height: 6),
             Text(
-              'Show this code at ${redemption.offer?.business?.name ?? 'the business'} to redeem.',
+              '${context.t('Show this code at')} ${redemption.offer?.business?.name ?? context.t('the business')} ${context.t('to redeem.')}',
               textAlign: TextAlign.center,
               style: const TextStyle(color: Colors.grey, fontSize: AppTheme.textXs),
             ),
@@ -403,15 +411,16 @@ class CodeCard extends StatelessWidget {
                 Expanded(
                   child: OutlinedButton.icon(
                     onPressed: () async {
+                      final copiedMsg = context.t('Code copied to clipboard');
                       await Clipboard.setData(ClipboardData(text: redemption.code));
                       if (context.mounted) {
                         ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(content: Text('Code copied to clipboard')),
+                          SnackBar(content: Text(copiedMsg)),
                         );
                       }
                     },
                     icon: const Icon(Icons.copy, size: 18),
-                    label: const Text('Copy'),
+                    label: Text(context.t('Copy')),
                   ),
                 ),
                 const SizedBox(width: 12),
@@ -419,13 +428,13 @@ class CodeCard extends StatelessWidget {
                   child: FilledButton.icon(
                     onPressed: () async {
                       await Share.share(
-                        'My Nepal Smart Travel reward code: ${redemption.code}\n'
-                        'Offer: ${redemption.offer?.title ?? ''}\n'
-                        'Valid at: ${redemption.offer?.business?.name ?? ''}',
+                        '${context.t('My Nepal Smart Travel reward code:')} ${redemption.code}\n'
+                        '${context.t('Offer:')} ${redemption.offer?.title ?? ''}\n'
+                        '${context.t('Valid at:')} ${redemption.offer?.business?.name ?? ''}',
                       );
                     },
                     icon: const Icon(Icons.share, size: 18),
-                    label: const Text('Share'),
+                    label: Text(context.t('Share')),
                   ),
                 ),
               ],
@@ -470,7 +479,7 @@ class CodeCard extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      redemption.offer?.title ?? 'Offer',
+                      redemption.offer?.title ?? context.t('Offer'),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: const TextStyle(fontWeight: FontWeight.bold, fontSize: AppTheme.textBase),
@@ -509,7 +518,7 @@ class CodeCard extends StatelessWidget {
                       borderRadius: BorderRadius.circular(8),
                     ),
                     child: Text(
-                      used ? 'USED' : expired ? 'EXPIRED' : 'ACTIVE',
+                      used ? context.t('USED') : expired ? context.t('EXPIRED') : context.t('ACTIVE'),
                       style: TextStyle(
                         fontSize: 10,
                         fontWeight: FontWeight.w800,
@@ -519,7 +528,7 @@ class CodeCard extends StatelessWidget {
                   ),
                   const SizedBox(height: 6),
                   Text(
-                    'Tap to view',
+                    context.t('Tap to view'),
                     style: TextStyle(fontSize: 10, color: Colors.grey.shade500),
                   ),
                 ],

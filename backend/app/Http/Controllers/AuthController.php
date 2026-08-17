@@ -182,11 +182,12 @@ class AuthController extends Controller
         $user->xpTransactions()->delete();
         $user->achievements()->detach();
         $user->subscription()->delete();
-        $user->purchases()->delete();
 
         $user->tokens()->delete();
 
-        // Anonymize the account so reports/comments/reviews keep valid refs
+        // Anonymize the account so reports/comments/reviews keep valid refs.
+        // (password stays — the column is NOT NULL; status stays — ENUM has no
+        // 'deleted'; all tokens are revoked so login is impossible anyway)
         $user->update([
             'name' => 'Deleted User',
             'email' => 'deleted_' . $user->id . '@deleted.local',
@@ -195,9 +196,7 @@ class AuthController extends Controller
             'bio' => null,
             'gender' => null,
             'interest' => null,
-            'password' => null,
             'profile_completed' => false,
-            'status' => 'deleted',
         ]);
 
         return response()->json([

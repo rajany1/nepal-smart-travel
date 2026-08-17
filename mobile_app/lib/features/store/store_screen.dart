@@ -1,8 +1,9 @@
 import 'package:flutter/material.dart';
+import "../../core/services/localization_service.dart";
 import 'package:provider/provider.dart';
 import '../../providers/offer_provider.dart';
 import '../../providers/auth_provider.dart';
-import '../bookings/my_bookings_screen.dart';
+import '../../core/services/localization_service.dart';
 import '../offers/offers_screen.dart';
 import 'widgets/store_xp_header.dart';
 
@@ -31,30 +32,25 @@ class _StoreScreenState extends State<StoreScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('XP Rewards')),
+      appBar: AppBar(title: Text(context.t('XP Rewards'))),
       body: IndexedStack(
         index: _tabIndex,
         children: const [
           _BuildRewardsTab(),
           MyCodesView(),
-          MyBookingsScreen(inTab: true),
         ],
       ),
       bottomNavigationBar: BottomNavigationBar(
         currentIndex: _tabIndex,
         onTap: (i) => setState(() => _tabIndex = i),
-        items: const [
+        items: [
           BottomNavigationBarItem(
-            icon: Icon(Icons.local_offer_outlined),
-            label: 'Rewards',
+            icon: const Icon(Icons.local_offer_outlined),
+            label: context.t('Rewards'),
           ),
           BottomNavigationBarItem(
-            icon: Icon(Icons.confirmation_number_outlined),
-            label: 'My Codes',
-          ),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.book_online_outlined),
-            label: 'Bookings',
+            icon: const Icon(Icons.confirmation_number_outlined),
+            label: context.t('My Codes'),
           ),
         ],
       ),

@@ -1,4 +1,5 @@
 import 'dart:async';
+import "../../core/services/localization_service.dart";
 import 'dart:convert';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import '../api/api_client.dart';

@@ -7,8 +7,8 @@ use App\Models\Booking;
 use App\Models\CommissionTransaction;
 use App\Models\OfferRedemption;
 use App\Models\TravelPartner;
-use App\Services\ShopService;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 
 class ConsumerController extends Controller
 {
@@ -32,10 +32,6 @@ class ConsumerController extends Controller
 
     // ==================== BOOKINGS (User-facing) ====================
 
-    public function __construct(
-        private ShopService $shopService,
-    ) {}
-
     function createBooking(Request $request)
     {
         $user = $request->user();
@@ -44,7 +40,7 @@ class ConsumerController extends Controller
             'customer_name' => 'required|string|max:255',
             'customer_phone' => 'nullable|string|max:50',
             'customer_email' => 'nullable|email|max:255',
-            'amount' => 'nullable|numeric|min:0',
+            'amount' => 'required|numeric|min:0.01',
             'notes' => 'nullable|string',
             'booked_at' => 'nullable|date',
             'offer_code' => 'nullable|string|max:32',
@@ -53,43 +49,50 @@ class ConsumerController extends Controller
         $partner = TravelPartner::findOrFail($data['travel_partner_id']);
         abort_if(!$partner->is_active, 400, 'Partner is not active');
 
-        $data['user_id'] = $user->id;
-        $data['status'] = 'pending';
-        $data['booked_at'] = $data['booked_at'] ?? now();
+        try {
+            return DB::transaction(function () use ($user, $partner, $data) {
+            $booking = Booking::create([
+                'travel_partner_id' => $data['travel_partner_id'],
+                'user_id' => $user->id,
+                'customer_name' => $data['customer_name'],
+                'customer_phone' => $data['customer_phone'] ?? null,
+                'customer_email' => $data['customer_email'] ?? null,
+                'amount' => $data['amount'],
+                'notes' => $data['notes'] ?? null,
+                'booked_at' => $data['booked_at'] ?? now(),
+                'status' => 'pending',
+            ]);
 
-        $booking = Booking::create($data);
-
-        if (!empty($data['offer_code'])) {
-            try {
-                $this->applyOfferToBooking($user, $data['offer_code'], $booking);
-            } catch (\RuntimeException $e) {
-                $booking->delete();
-                return response()->json(['success' => false, 'message' => $e->getMessage()], 422);
+            if (!empty($data['offer_code'])) {
+                $this->applyOfferToBooking($booking, $data['offer_code']);
             }
+
+            // Commission on post-discount amount, canonical split: 25% reward pool
+            $commission = ($booking->amount * $partner->commission_rate / 100) + ($partner->commission_fixed ?? 0);
+            $rewardShare = $commission * 0.25;
+            $platformShare = $commission - $rewardShare;
+
+            $booking->update([
+                'commission_earned' => $commission,
+                'reward_pool_share' => $rewardShare,
+            ]);
+
+            CommissionTransaction::create([
+                'booking_id' => $booking->id,
+                'total_commission' => $commission,
+                'reward_pool_contribution' => $rewardShare,
+                'platform_revenue' => $platformShare,
+                'status' => 'pending',
+            ]);
+
+            return response()->json([
+                'success' => true,
+                'data' => $booking->load('travelPartner', 'offerRedemption.offer.business'),
+            ], 201);
+            });
+        } catch (\RuntimeException $e) {
+            return response()->json(['success' => false, 'message' => $e->getMessage()], 422);
         }
-
-        // Commission on post-discount amount, canonical split: 25% reward pool
-        $commission = ($booking->amount * $partner->commission_rate / 100) + ($partner->commission_fixed ?? 0);
-        $rewardShare = $commission * 0.25;
-        $platformShare = $commission - $rewardShare;
-
-        $booking->update([
-            'commission_earned' => $commission,
-            'reward_pool_share' => $rewardShare,
-        ]);
-
-        CommissionTransaction::create([
-            'booking_id' => $booking->id,
-            'total_commission' => $commission,
-            'reward_pool_contribution' => $rewardShare,
-            'platform_revenue' => $platformShare,
-            'status' => 'pending',
-        ]);
-
-        return response()->json([
-            'success' => true,
-            'data' => $booking->load('travelPartner', 'offerRedemption.offer.business'),
-        ], 201);
     }
 
     private function applyOfferToBooking(Booking $booking, string $code): void
@@ -100,6 +103,7 @@ class ConsumerController extends Controller
             ->where('status', 'claimed')
             ->whereNull('booking_id')
             ->whereNull('consumed_at')
+            ->lockForUpdate()
             ->first();
 
         if (!$redemption) {
@@ -137,7 +141,7 @@ class ConsumerController extends Controller
 
     function myBookings(Request $request)
     {
-        $bookings = Booking::with('travelPartner', 'offerRedemption.offer.business')
+        $bookings = Booking::with('travelPartner', 'offerRedemption.offer.business', 'bookingPayment')
             ->where('user_id', $request->user()->id)
             ->orderByDesc('created_at')
             ->paginate(20);
@@ -154,14 +158,26 @@ class ConsumerController extends Controller
             return response()->json(['message' => 'Only pending bookings can be cancelled.'], 422);
         }
 
-        $booking->update(['status' => 'cancelled']);
+        return DB::transaction(function () use ($booking) {
+            $payment = $booking->bookingPayment;
+            if ($payment && $payment->status === 'success') {
+                return response()->json(['message' => 'Paid bookings cannot be cancelled online. Contact support.'], 422);
+            }
 
-        $this->releaseOfferFromBooking($booking);
-        if ($booking->shopCode) {
-            $this->shopService->releaseFromBooking($booking->shopCode);
-        }
+            $booking->update(['status' => 'cancelled']);
 
-        return response()->json(['success' => true, 'message' => 'Booking cancelled.']);
+            $this->releaseOfferFromBooking($booking);
+
+            if ($payment && $payment->status === 'pending') {
+                $payment->update(['status' => 'failed']);
+            }
+
+            CommissionTransaction::where('booking_id', $booking->id)
+                ->where('status', 'pending')
+                ->update(['status' => 'cancelled']);
+
+            return response()->json(['success' => true, 'message' => 'Booking cancelled.']);
+        });
     }
 
     function removeCoupon(Request $request, Booking $booking)
@@ -177,11 +193,6 @@ class ConsumerController extends Controller
         if ($booking->offerRedemption) {
             $this->releaseOfferFromBooking($booking);
             return response()->json(['success' => true, 'message' => 'Offer code removed from booking.']);
-        }
-
-        if ($booking->shopCode) {
-            $this->shopService->releaseFromBooking($booking->shopCode);
-            return response()->json(['success' => true, 'message' => 'Coupon removed.']);
         }
 
         return response()->json(['message' => 'No code applied to this booking.'], 422);

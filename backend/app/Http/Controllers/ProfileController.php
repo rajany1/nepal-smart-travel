@@ -416,7 +416,7 @@ class ProfileController extends Controller
             'email_notifications' => 'boolean',
             'push_notifications' => 'boolean',
             'language' => 'string|in:en,ne',
-            'theme' => 'string|in:light,dark',
+            'theme' => 'string|in:light,dark,system',
             'show_on_map' => 'boolean',
         ]);
         

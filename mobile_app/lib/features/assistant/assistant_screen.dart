@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import "../../core/services/localization_service.dart";
+import 'package:provider/provider.dart';
 import '../../config/themes/app_theme.dart';
 import '../../core/api/api_client.dart';
 import '../../config/constants/app_constants.dart';
@@ -6,6 +8,7 @@ import '../../core/services/location_service.dart';
 import '../places/nearby_places_screen.dart';
 import '../places/place_details_screen.dart';
 import '../../core/models/place.dart';
+import '../../core/services/localization_service.dart';
 
 class AssistantScreen extends StatefulWidget {
   const AssistantScreen({super.key});
@@ -17,12 +20,7 @@ class AssistantScreen extends StatefulWidget {
 class _AssistantScreenState extends State<AssistantScreen> {
   final _messageController = TextEditingController();
   final _scrollController = ScrollController();
-  final List<ChatMessage> _messages = [
-    ChatMessage(
-      text: 'Namaste! 👋 I\'m your AI Travel Assistant for Nepal. Ask me about places to visit, road conditions, safety tips, or anything about traveling in Nepal!',
-      isUser: false,
-    ),
-  ];
+  final List<ChatMessage> _messages = [];
   bool _isTyping = false;
 
   final List<String> _suggestions = [
@@ -33,6 +31,17 @@ class _AssistantScreenState extends State<AssistantScreen> {
     'Weather in Pokhara today?',
     'Emergency numbers in Nepal?',
   ];
+
+  @override
+  void initState() {
+    super.initState();
+    _messages.add(ChatMessage(
+      text: context.read<LocalizationService>().t(
+        'Namaste! 👋 I\'m your AI Travel Assistant for Nepal. Ask me about places to visit, road conditions, safety tips, or anything about traveling in Nepal!',
+      ),
+      isUser: false,
+    ));
+  }
 
   @override
   void dispose() {
@@ -94,7 +103,7 @@ class _AssistantScreenState extends State<AssistantScreen> {
       setState(() {
         _isTyping = false;
         _messages.add(ChatMessage(
-          text: 'Sorry, I couldn\'t reach the server. Please check your connection and try again.',
+          text: context.t('Sorry, I couldn\'t reach the server. Please check your connection and try again.'),
           isUser: false,
         ));
       });
@@ -118,13 +127,13 @@ class _AssistantScreenState extends State<AssistantScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('AI Travel Assistant'),
+        title: Text(context.t('AI Travel Assistant')),
         actions: [
           IconButton(icon: const Icon(Icons.delete_outline), onPressed: () {
             setState(() {
               _messages.clear();
               _messages.add(ChatMessage(
-                text: 'Namaste! 👋 I\'m your AI Travel Assistant for Nepal. Ask me about places to visit, road conditions, safety tips, or anything about traveling in Nepal!',
+                text: context.t('Namaste! 👋 I\'m your AI Travel Assistant for Nepal. Ask me about places to visit, road conditions, safety tips, or anything about traveling in Nepal!'),
                 isUser: false,
               ));
             });
@@ -141,17 +150,17 @@ class _AssistantScreenState extends State<AssistantScreen> {
               itemCount: _messages.length + (_isTyping ? 1 : 0),
               itemBuilder: (context, index) {
                 if (index == _messages.length) {
-                  return const Padding(
-                    padding: EdgeInsets.symmetric(vertical: 8),
+                  return Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 8),
                     child: Row(
                       children: [
-                        SizedBox(width: 48),
-                        SizedBox(
+                        const SizedBox(width: 48),
+                        const SizedBox(
                           width: 24, height: 24,
                           child: CircularProgressIndicator(strokeWidth: 2),
                         ),
-                        SizedBox(width: 8),
-                        Text('Thinking...', style: TextStyle(color: AppTheme.textSecondary)),
+                        const SizedBox(width: 8),
+                        Text(context.t('Thinking...'), style: const TextStyle(color: AppTheme.textSecondary)),
                       ],
                     ),
                   );
@@ -200,7 +209,7 @@ class _AssistantScreenState extends State<AssistantScreen> {
                     child: TextField(
                       controller: _messageController,
                       decoration: InputDecoration(
-                        hintText: 'Ask about Nepal travel...',
+                        hintText: context.t('Ask about Nepal travel...'),
                         border: OutlineInputBorder(
                           borderRadius: BorderRadius.circular(24),
                           borderSide: BorderSide.none,
@@ -310,7 +319,7 @@ class _MessageBubble extends StatelessWidget {
                 spacing: 6,
                 runSpacing: 4,
                 children: message.actions!.map((a) {
-                  final label = a['label'] ?? 'Open';
+                  final label = a['label'] ?? context.t('Open');
                   final type = a['type'] ?? 'nearby';
                       return ActionChip(
                     label: Text(label, style: const TextStyle(fontSize: 12)),

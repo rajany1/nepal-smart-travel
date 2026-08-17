@@ -8,6 +8,7 @@ use App\Models\Place;
 use App\Models\Alert;
 use App\Models\Report;
 use App\Models\PlaceReview;
+use App\Services\GlossaryTranslator;
 use Illuminate\Support\Facades\Log;
 
 class TranslationHandler extends BaseHandler
@@ -36,13 +37,13 @@ class TranslationHandler extends BaseHandler
     protected function handleAutoWork(AiAgentTask $task): AiAgentTask
     {
         $results = $this->autoWork();
-        $msg = count($results) . ' item(s) translated to Nepali';
+        $msg = count($results) . ' item(s) translated to Nepali (glossary)';
         return $this->markComplete($task, ['translated' => count($results), 'items' => $results, 'message' => $msg]);
     }
 
     protected function autoWork(): array
     {
-        $llm = $this->ai();
+        $translator = app(GlossaryTranslator::class);
         $results = [];
 
         $sources = $this->getTranslationSources();
@@ -52,9 +53,11 @@ class TranslationHandler extends BaseHandler
 
             foreach ($items as $item) {
                 $field = $source['field'];
-                $text = $item->$field;
+                $text = trim((string) $item->$field);
 
-                if (empty($text)) continue;
+                if ($text === '') {
+                    continue;
+                }
 
                 $exists = ModelTranslation::where('translatable_type', $source['type'])
                     ->where('translatable_id', $item->id)
@@ -62,12 +65,26 @@ class TranslationHandler extends BaseHandler
                     ->where('field', $field)
                     ->exists();
 
-                if ($exists) continue;
+                if ($exists) {
+                    continue;
+                }
 
                 try {
-                    $translated = $llm->generate(
-                        "Translate this {$source['lang_hint']} text to Nepali language. Return ONLY the translated text, no explanation, no quotes:\n\n{$text}"
-                    );
+                    if ($field === 'name' || $translator->containsDevanagari($text)) {
+                        // Names: glossary hit first, else best-effort
+                        // transliteration (only for non-Devanagari input).
+                        $translated = $this->translateName($translator, $text);
+                        if ($translated === null) {
+                            continue;
+                        }
+                    } else {
+                        // Free text: glossary term replacement; text that is
+                        // already Nepali stays untouched.
+                        $translated = $translator->translateText($text)['text'];
+                        if ($translated === $text) {
+                            continue;
+                        }
+                    }
 
                     ModelTranslation::create([
                         'translatable_type' => $source['type'],
@@ -75,7 +92,7 @@ class TranslationHandler extends BaseHandler
                         'locale' => 'ne',
                         'field' => $field,
                         'value' => $translated,
-                        'source' => 'gemini',
+                        'source' => 'rules',
                     ]);
 
                     $results[] = "{$source['type']}#{$item->id}.{$field}";
@@ -86,6 +103,21 @@ class TranslationHandler extends BaseHandler
         }
 
         return $results;
+    }
+
+    protected function translateName(GlossaryTranslator $translator, string $text): ?string
+    {
+        if ($translator->containsDevanagari($text)) {
+            return null;
+        }
+
+        $glossed = $translator->translateText($text);
+        if ($glossed['text'] !== $text) {
+            return $glossed['text'];
+        }
+
+        $transliterated = $translator->transliterate($text);
+        return $transliterated !== mb_strtolower(trim($text)) ? $transliterated : null;
     }
 
     protected function getTranslationSources(): array

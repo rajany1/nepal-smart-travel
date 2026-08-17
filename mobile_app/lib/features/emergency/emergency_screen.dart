@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
+import "../../core/services/localization_service.dart";
 import 'package:url_launcher/url_launcher.dart';
 import '../../config/constants/app_constants.dart';
 import '../../config/themes/app_theme.dart';
+import '../../core/services/localization_service.dart';
 
 class EmergencyScreen extends StatelessWidget {
   const EmergencyScreen({super.key});
@@ -10,7 +12,7 @@ class EmergencyScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Emergency Support'),
+        title: Text(context.t('Emergency Support')),
         backgroundColor: AppTheme.errorColor,
       ),
       body: SingleChildScrollView(
@@ -25,7 +27,7 @@ class EmergencyScreen extends StatelessWidget {
               child: ElevatedButton.icon(
                 onPressed: () => _showSOSDialog(context),
                 icon: const Icon(Icons.sos, size: 32),
-                label: const Text('SOS EMERGENCY', style: TextStyle(fontSize: AppTheme.text2xl, fontWeight: FontWeight.bold)),
+                label: Text(context.t('SOS EMERGENCY'), style: const TextStyle(fontSize: AppTheme.text2xl, fontWeight: FontWeight.bold)),
                 style: ElevatedButton.styleFrom(
                   backgroundColor: AppTheme.errorColor,
                   foregroundColor: Colors.white,
@@ -35,11 +37,11 @@ class EmergencyScreen extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 8),
-            const Text('Tap SOS for immediate emergency assistance', style: TextStyle(color: AppTheme.textSecondary, fontSize: AppTheme.textSm), textAlign: TextAlign.center),
+            Text(context.t('Tap SOS for immediate emergency assistance'), style: const TextStyle(color: AppTheme.textSecondary, fontSize: AppTheme.textSm), textAlign: TextAlign.center),
             const SizedBox(height: 24),
 
             // Quick Dial Grid
-            const Text('Quick Emergency Contacts', style: TextStyle(fontSize: AppTheme.textXl, fontWeight: FontWeight.bold)),
+            Text(context.t('Quick Emergency Contacts'), style: const TextStyle(fontSize: AppTheme.textXl, fontWeight: FontWeight.bold)),
             const SizedBox(height: 12),
             GridView.count(
               crossAxisCount: 2,
@@ -50,19 +52,19 @@ class EmergencyScreen extends StatelessWidget {
               childAspectRatio: 1.2,
               children: [
                 _EmergencyButton(
-                  icon: Icons.local_hospital, label: 'Ambulance', number: AppConstants.ambulanceNumber,
+                  icon: Icons.local_hospital, label: context.t('Ambulance'), number: AppConstants.ambulanceNumber,
                   color: AppTheme.ambulanceColor, onTap: () => _makeCall(AppConstants.ambulanceNumber),
                 ),
                 _EmergencyButton(
-                  icon: Icons.local_police, label: 'Police', number: AppConstants.policeNumber,
+                  icon: Icons.local_police, label: context.t('Police'), number: AppConstants.policeNumber,
                   color: AppTheme.policeColor, onTap: () => _makeCall(AppConstants.policeNumber),
                 ),
                 _EmergencyButton(
-                  icon: Icons.fire_extinguisher, label: 'Fire', number: AppConstants.fireNumber,
+                  icon: Icons.fire_extinguisher, label: context.t('Fire'), number: AppConstants.fireNumber,
                   color: AppTheme.warningColor, onTap: () => _makeCall(AppConstants.fireNumber),
                 ),
                 _EmergencyButton(
-                  icon: Icons.local_hospital, label: 'Hospital', number: 'Search Nearby',
+                  icon: Icons.local_hospital, label: context.t('Hospital'), number: context.t('Search Nearby'),
                   color: AppTheme.hospitalColor, onTap: () {},
                 ),
               ],
@@ -70,12 +72,12 @@ class EmergencyScreen extends StatelessWidget {
             const SizedBox(height: 24),
 
             // Medical & Rescue
-            const Text('Medical & Rescue Services', style: TextStyle(fontSize: AppTheme.textXl, fontWeight: FontWeight.bold)),
+            Text(context.t('Medical & Rescue Services'), style: const TextStyle(fontSize: AppTheme.textXl, fontWeight: FontWeight.bold)),
             const SizedBox(height: 12),
-            _ServiceCard(icon: Icons.bloodtype, title: 'Blood Bank', subtitle: 'Find nearest blood bank', color: AppTheme.errorColor),
-            _ServiceCard(icon: Icons.medication, title: '24/7 Pharmacy', subtitle: 'Nearby pharmacies open now', color: AppTheme.infoColor),
-            _ServiceCard(icon: Icons.airline_seat_individual_suite, title: 'Mountain Rescue', subtitle: 'Emergency mountain rescue services', color: AppTheme.severityCritical),
-            _ServiceCard(icon: Icons.contact_phone, title: 'Tourist Police', subtitle: 'Helpline for tourists: 1144', color: AppTheme.policeColor),
+            _ServiceCard(icon: Icons.bloodtype, title: context.t('Blood Bank'), subtitle: context.t('Find nearest blood bank'), color: AppTheme.errorColor),
+            _ServiceCard(icon: Icons.medication, title: context.t('24/7 Pharmacy'), subtitle: context.t('Nearby pharmacies open now'), color: AppTheme.infoColor),
+            _ServiceCard(icon: Icons.airline_seat_individual_suite, title: context.t('Mountain Rescue'), subtitle: context.t('Emergency mountain rescue services'), color: AppTheme.severityCritical),
+            _ServiceCard(icon: Icons.contact_phone, title: context.t('Tourist Police'), subtitle: context.t('Helpline for tourists: 1144'), color: AppTheme.policeColor),
 
             const SizedBox(height: 24),
             // Emergency Info
@@ -89,15 +91,15 @@ class EmergencyScreen extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Row(
+                  Row(
                     children: [
-                      Icon(Icons.info, color: AppTheme.warningColor),
-                      SizedBox(width: 8),
-                      Text('Emergency Tips', style: TextStyle(fontWeight: FontWeight.bold)),
+                      const Icon(Icons.info, color: AppTheme.warningColor),
+                      const SizedBox(width: 8),
+                      Text(context.t('Emergency Tips'), style: const TextStyle(fontWeight: FontWeight.bold)),
                     ],
                   ),
                   const SizedBox(height: 8),
-                  const Text('• Stay calm and assess the situation\n• Call the appropriate emergency number\n• Share your exact location\n• Follow instructions from emergency services\n• Keep emergency contacts saved offline', style: TextStyle(fontSize: AppTheme.textBase, height: 1.6)),
+                  Text(context.t('• Stay calm and assess the situation\n• Call the appropriate emergency number\n• Share your exact location\n• Follow instructions from emergency services\n• Keep emergency contacts saved offline'), style: const TextStyle(fontSize: AppTheme.textBase, height: 1.6)),
                 ],
               ),
             ),
@@ -118,33 +120,33 @@ class EmergencyScreen extends StatelessWidget {
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Row(
+        title: Row(
           children: [
-            Icon(Icons.warning, color: AppTheme.errorColor, size: 28),
-            SizedBox(width: 8),
-            Text('SOS Emergency'),
+            const Icon(Icons.warning, color: AppTheme.errorColor, size: 28),
+            const SizedBox(width: 8),
+            Text(context.t('SOS Emergency')),
           ],
         ),
-        content: const Column(
+        content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Text('Your emergency alert will be sent to your emergency contacts with your current location.', style: TextStyle(fontSize: AppTheme.textBase)),
-            SizedBox(height: 16),
-            Text('Emergency contacts will be notified immediately.', style: TextStyle(fontWeight: FontWeight.w600)),
+            Text(context.t('Your emergency alert will be sent to your emergency contacts with your current location.'), style: const TextStyle(fontSize: AppTheme.textBase)),
+            const SizedBox(height: 16),
+            Text(context.t('Emergency contacts will be notified immediately.'), style: const TextStyle(fontWeight: FontWeight.w600)),
           ],
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          TextButton(onPressed: () => Navigator.pop(ctx), child: Text(context.t('Cancel'))),
           ElevatedButton.icon(
             onPressed: () {
               Navigator.pop(ctx);
               ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('SOS Alert Sent! Emergency contacts notified with your location.')),
+                SnackBar(content: Text(context.t('SOS Alert Sent! Emergency contacts notified with your location.'))),
               );
               _makeCall(AppConstants.policeNumber);
             },
             icon: const Icon(Icons.sos, color: Colors.white),
-            label: const Text('Send SOS'),
+            label: Text(context.t('Send SOS')),
             style: ElevatedButton.styleFrom(backgroundColor: AppTheme.errorColor, foregroundColor: Colors.white),
           ),
         ],

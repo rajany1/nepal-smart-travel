@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import "../../core/services/localization_service.dart";
 import '../models/form_field_config.dart';
 import '../models/report.dart';
 import '../../config/themes/app_theme.dart';

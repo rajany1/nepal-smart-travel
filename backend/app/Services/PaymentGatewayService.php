@@ -96,7 +96,12 @@ class PaymentGatewayService
         return ['success' => true, 'transaction_id' => $data['transaction_code'] ?? $transactionId];
     }
 
-    public function initiateKhalti(float $amount, string $reference, string $returnUrl): array
+    public function eSewaProductCode(): string
+    {
+        return $this->eSewaConfig()['merchant_code'];
+    }
+
+    public function initiateKhalti(float $amount, string $reference, string $returnUrl, string $purchaseOrderName = 'Payment'): array
     {
         $config = $this->khaltiConfig();
         $resp = Http::timeout(15)->withToken($config['secret_key'])
@@ -105,7 +110,7 @@ class PaymentGatewayService
                 'website_url' => config('app.url'),
                 'amount' => (int) round($amount * 100),
                 'purchase_order_id' => $reference,
-                'purchase_order_name' => 'Ad Campaign Payment',
+                'purchase_order_name' => $purchaseOrderName,
             ]);
         if (!$resp->ok() || !$resp->json('pidx')) {
             return ['success' => false, 'message' => 'Khalti initiation failed: ' . $resp->body()];

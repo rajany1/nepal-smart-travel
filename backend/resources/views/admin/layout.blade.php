@@ -114,6 +114,10 @@
                     <i class="fas fa-tasks w-5 text-center"></i>
                     <span class="font-medium">AI Tasks</span>
                 </a>
+                <a href="{{ route('admin.translator') }}" class="group flex items-center gap-3 rounded-3xl px-4 py-3 transition {{ request()->routeIs('admin.translator*') ? 'bg-accent-500 text-white shadow-lg' : 'text-teal-200 hover:bg-primary-800 hover:text-white' }}">
+                    <i class="fas fa-language w-5 text-center"></i>
+                    <span class="font-medium">Translator</span>
+                </a>
             </nav>
             <div class="border-t border-primary-800 px-6 py-4">
                 <a href="/" class="flex items-center gap-3 rounded-3xl px-4 py-3 text-teal-200 hover:bg-primary-800 hover:text-white transition">
@@ -159,6 +163,7 @@
                 </div>
                 <a href="{{ route('admin.ai.agents') }}" class="block px-3 py-2 rounded {{ request()->routeIs('admin.ai.agents*') ? 'bg-primary-700' : '' }}"><i class="fas fa-robot w-5"></i> AI Employees</a>
                 <a href="{{ route('admin.ai.tasks') }}" class="block px-3 py-2 rounded {{ request()->routeIs('admin.ai.tasks*') ? 'bg-primary-700' : '' }}"><i class="fas fa-tasks w-5"></i> AI Tasks</a>
+                <a href="{{ route('admin.translator') }}" class="block px-3 py-2 rounded {{ request()->routeIs('admin.translator*') ? 'bg-primary-700' : '' }}"><i class="fas fa-language w-5"></i> Translator</a>
                 <hr class="border-primary-700 my-2">
                 <a href="/" class="block px-3 py-2"><i class="fas fa-arrow-left w-5"></i> Back to Site</a>
                 <form method="POST" action="{{ route('logout') }}">

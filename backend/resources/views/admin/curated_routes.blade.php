@@ -16,6 +16,7 @@
             <thead class="bg-slate-50 text-slate-500 text-xs uppercase tracking-wide">
                 <tr>
                     <th class="text-left px-6 py-3">Route</th>
+                    <th class="text-left px-4 py-3">Type</th>
                     <th class="text-left px-4 py-3">Duration</th>
                     <th class="text-left px-4 py-3">Best Season</th>
                     <th class="text-left px-4 py-3">Stops</th>
@@ -29,6 +30,16 @@
                         <td class="px-6 py-4">
                             <div class="font-medium text-slate-800">{{ $route->title }}</div>
                             <div class="text-xs text-slate-400 mt-0.5">{{ $route->slug }}</div>
+                        </td>
+                        <td class="px-4 py-4">
+                            @if($route->route_type === 'trekking')
+                                <span class="text-xs bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full font-medium">Trekking</span>
+                                @if($route->difficulty)
+                                    <div class="text-xs text-slate-400 mt-1">{{ $route->difficultyLabel() }}</div>
+                                @endif
+                            @else
+                                <span class="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full font-medium">Itinerary</span>
+                            @endif
                         </td>
                         <td class="px-4 py-4 text-slate-600">{{ $route->duration_days }} day{{ $route->duration_days > 1 ? 's' : '' }}</td>
                         <td class="px-4 py-4 text-slate-600">{{ $route->best_season ?? '—' }}</td>
@@ -81,12 +92,55 @@
             </div>
             <div class="grid grid-cols-2 gap-4">
                 <div>
+                    <label class="block text-xs font-semibold text-slate-600 mb-1">Route Type *</label>
+                    <select name="route_type" id="rType" required class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm">
+                        <option value="itinerary">Itinerary (city/culture)</option>
+                        <option value="trekking">Trekking (mountain trail)</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-xs font-semibold text-slate-600 mb-1">Difficulty</label>
+                    <select name="difficulty" id="rDifficulty" class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm">
+                        <option value="">—</option>
+                        <option value="easy">Easy</option>
+                        <option value="moderate">Moderate</option>
+                        <option value="challenging">Challenging</option>
+                        <option value="hard">Hard</option>
+                    </select>
+                </div>
+            </div>
+            <div class="grid grid-cols-2 gap-4">
+                <div>
                     <label class="block text-xs font-semibold text-slate-600 mb-1">Duration (days) *</label>
                     <input type="number" name="duration_days" id="rDays" min="1" required class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm">
                 </div>
                 <div>
                     <label class="block text-xs font-semibold text-slate-600 mb-1">Best Season</label>
                     <input type="text" name="best_season" id="rSeason" placeholder="e.g. Oct–Nov" class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm">
+                </div>
+            </div>
+            <div class="grid grid-cols-3 gap-4">
+                <div>
+                    <label class="block text-xs font-semibold text-slate-600 mb-1">Max Altitude (m)</label>
+                    <input type="number" name="max_altitude_m" id="rMaxAlt" min="0" class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm">
+                </div>
+                <div>
+                    <label class="block text-xs font-semibold text-slate-600 mb-1">Distance (km)</label>
+                    <input type="number" step="0.1" name="total_distance_km" id="rDist" min="0" class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm">
+                </div>
+                <div>
+                    <label class="block text-xs font-semibold text-slate-600 mb-1">Elev. Gain (m)</label>
+                    <input type="number" name="elevation_gain_m" id="rElev" min="0" class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm">
+                </div>
+            </div>
+            <div class="grid grid-cols-2 gap-4">
+                <div>
+                    <label class="block text-xs font-semibold text-slate-600 mb-1">Starting Point</label>
+                    <input type="text" name="starting_point" id="rStart" placeholder="e.g. Lukla" class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm">
+                </div>
+                <div>
+                    <label class="block text-xs font-semibold text-slate-600 mb-1">Ending Point</label>
+                    <input type="text" name="ending_point" id="rEnd" placeholder="e.g. Lukla" class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm">
                 </div>
             </div>
             <div>
@@ -96,6 +150,10 @@
             <div>
                 <label class="block text-xs font-semibold text-slate-600 mb-1">Waypoints (place IDs, comma separated)</label>
                 <input type="text" name="waypoints" id="rWaypoints" placeholder="e.g. 1, 5, 12, 34" class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm">
+            </div>
+            <div>
+                <label class="block text-xs font-semibold text-slate-600 mb-1">Track (GPS line — one "lat,lng,Name" per line)</label>
+                <textarea name="track" id="rTrack" rows="5" placeholder="27.6880,86.7313,Lukla&#10;27.8046,86.7100,Namche Bazaar" class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm font-mono text-xs"></textarea>
             </div>
             <div>
                 <label class="block text-xs font-semibold text-slate-600 mb-1">Description</label>
@@ -120,7 +178,10 @@ function openCreate() {
     document.getElementById('routeForm').method = 'POST';
     document.getElementById('modalTitle').textContent = 'New Route';
     ['rTitle','rSlug','rDays','rSeason','rImage','rWaypoints','rDesc'].forEach(id => document.getElementById(id).value = '');
+    ['rMaxAlt','rDist','rElev','rStart','rEnd','rTrack'].forEach(id => document.getElementById(id).value = '');
     document.getElementById('rDays').value = 1;
+    document.getElementById('rType').value = 'itinerary';
+    document.getElementById('rDifficulty').value = '';
     document.getElementById('rActive').checked = true;
     document.getElementById('routeModal').classList.remove('hidden');
 }
@@ -139,10 +200,18 @@ function openEdit(r) {
     document.getElementById('modalTitle').textContent = 'Edit Route';
     document.getElementById('rTitle').value = r.title || '';
     document.getElementById('rSlug').value = r.slug || '';
+    document.getElementById('rType').value = r.route_type || 'itinerary';
+    document.getElementById('rDifficulty').value = r.difficulty || '';
     document.getElementById('rDays').value = r.duration_days || 1;
     document.getElementById('rSeason').value = r.best_season || '';
+    document.getElementById('rMaxAlt').value = r.max_altitude_m || '';
+    document.getElementById('rDist').value = r.total_distance_km || '';
+    document.getElementById('rElev').value = r.elevation_gain_m || '';
+    document.getElementById('rStart').value = r.starting_point || '';
+    document.getElementById('rEnd').value = r.ending_point || '';
     document.getElementById('rImage').value = r.image || '';
     document.getElementById('rWaypoints').value = (r.waypoints || []).join(', ');
+    document.getElementById('rTrack').value = (r.track || []).map(p => [p.lat, p.lng, p.name || ''].join(',')).join('\n');
     document.getElementById('rDesc').value = r.description || '';
     document.getElementById('rActive').checked = !!r.is_active;
     document.getElementById('routeModal').classList.remove('hidden');

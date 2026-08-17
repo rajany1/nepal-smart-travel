@@ -82,6 +82,23 @@ class RewardOffer extends Model
         return $this->ends_at !== null && $this->ends_at->lte(now());
     }
 
+    public function isActive(): bool
+    {
+        if ($this->status !== 'approved') {
+            return false;
+        }
+        if ($this->starts_at !== null && $this->starts_at->gt(now())) {
+            return false;
+        }
+        if ($this->isEnded()) {
+            return false;
+        }
+        if ($this->usage_limit !== null && (int) $this->usage_limit > 0 && (int) $this->used_count >= (int) $this->usage_limit) {
+            return false;
+        }
+        return true;
+    }
+
     public function isSystemLocked(): bool
     {
         return $this->paused_by === 'system' || $this->isEnded();

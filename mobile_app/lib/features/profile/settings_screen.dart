@@ -1,9 +1,15 @@
 import 'package:flutter/material.dart';
+import "../../core/services/localization_service.dart";
 import 'package:provider/provider.dart';
 import '../../config/themes/app_theme.dart';
 import '../../providers/auth_provider.dart';
 import '../../providers/profile_provider.dart';
+import '../../providers/theme_provider.dart';
+import '../../core/services/localization_service.dart';
 import '../../services/push_notification_service.dart';
+import '../../core/services/offline_db_service.dart';
+import '../../core/services/app_settings_service.dart';
+import 'package:flutter_cache_manager/flutter_cache_manager.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -21,8 +27,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
   String _selectedTheme = 'Light';
   bool _dataSaverMode = false;
   bool _autoDownload = true;
+  bool _saving = false;
 
-  final List<String> _languages = ['English', 'नेपाली', 'हिन्दी', '中文', '日本語'];
+  final List<String> _languages = ['English', 'नेपाली'];
   final List<String> _themes = ['Light', 'Dark', 'System'];
 
   @override
@@ -31,30 +38,35 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _loadSettings();
   }
 
-  void _loadSettings() {
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      final settings = context.read<ProfileProvider>().settings;
-      if (settings.isNotEmpty) {
-        setState(() {
-          _notificationsEnabled = settings['notifications_enabled'] ?? true;
-          _emailNotifications = settings['email_notifications'] ?? true;
-          _pushNotifications = settings['push_notifications'] ?? true;
-          _selectedLanguage = settings['language'] == 'ne' ? 'नेपाली' :
-                              settings['language'] == 'hi' ? 'हिन्दी' : 'English';
-          _selectedTheme = settings['theme'] == 'dark' ? 'Dark' :
-                          settings['theme'] == 'system' ? 'System' : 'Light';
-          _showOnMap = settings['show_on_map'] ?? true;
-        });
-      }
+  Future<void> _loadSettings() async {
+    final provider = context.read<ProfileProvider>();
+    await provider.loadSettings();
+    if (!mounted) return;
+
+    final settings = provider.settings;
+
+    setState(() {
+      _notificationsEnabled = settings['notifications_enabled'] ?? true;
+      _emailNotifications = settings['email_notifications'] ?? true;
+      _pushNotifications = settings['push_notifications'] ?? true;
+      _selectedLanguage = settings['language'] == 'ne' ? 'नेपाली' : 'English';
+      _selectedTheme = settings['theme'] == 'dark' ? 'Dark' :
+                      settings['theme'] == 'system' ? 'System' : 'Light';
+      _showOnMap = settings['show_on_map'] ?? true;
     });
+
+    _dataSaverMode = await AppSettingsService.dataSaverMode;
+    _autoDownload = await AppSettingsService.autoDownloadMaps;
+    if (mounted) setState(() {});
   }
 
   Future<void> _saveSettings() async {
-    final languageCode = _selectedLanguage == 'नेपाली' ? 'ne' :
-                         _selectedLanguage == 'हिन्दी' ? 'hi' : 'en';
+    final languageCode = _selectedLanguage == 'नेपाली' ? 'ne' : 'en';
     final themeMode = _selectedTheme.toLowerCase();
-    
-    await context.read<ProfileProvider>().updateSettings({
+
+    setState(() => _saving = true);
+
+    final ok = await context.read<ProfileProvider>().updateSettings({
       'notifications_enabled': _notificationsEnabled,
       'email_notifications': _emailNotifications,
       'push_notifications': _pushNotifications,
@@ -63,15 +75,20 @@ class _SettingsScreenState extends State<SettingsScreen> {
       'show_on_map': _showOnMap,
     });
 
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Settings saved'),
-          backgroundColor: AppTheme.successColor,
-          duration: Duration(seconds: 1),
-        ),
-      );
-    }
+    await AppSettingsService.setDataSaverMode(_dataSaverMode);
+    await AppSettingsService.setAutoDownloadMaps(_autoDownload);
+
+    if (!mounted) return;
+    setState(() => _saving = false);
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+            ok ? context.t('Settings saved') : context.t('Could not save settings. Please try again.')),
+        backgroundColor: ok ? AppTheme.successColor : AppTheme.errorColor,
+        duration: const Duration(seconds: 2),
+      ),
+    );
   }
 
   @override
@@ -79,15 +96,24 @@ class _SettingsScreenState extends State<SettingsScreen> {
     return Scaffold(
       backgroundColor: AppTheme.backgroundColor,
       appBar: AppBar(
-        title: const Text('Settings'),
+        title: Text(context.t('Settings')),
         backgroundColor: AppTheme.primaryColor,
         foregroundColor: Colors.white,
         elevation: 0,
         actions: [
-          IconButton(
-            icon: const Icon(Icons.save),
-            onPressed: _saveSettings,
-          ),
+          _saving
+              ? const Padding(
+                  padding: EdgeInsets.all(14),
+                  child: SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                  ),
+                )
+              : IconButton(
+                  icon: const Icon(Icons.save),
+                  onPressed: _saveSettings,
+                ),
         ],
       ),
       body: ListView(
@@ -95,13 +121,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
         children: [
           // Section: Notifications
           _buildSectionCard(
-            title: 'Notifications',
+            title: context.t('Notifications'),
             icon: Icons.notifications_outlined,
             color: AppTheme.infoColor,
             children: [
               _buildSwitchTile(
-                'Push Notifications',
-                'Receive push notifications for alerts and updates',
+                context.t('Push Notifications'),
+                context.t('Receive push notifications for alerts and updates'),
                 Icons.notifications_active,
                 _pushNotifications,
                 (v) {
@@ -111,16 +137,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
               ),
               const Divider(height: 1),
               _buildSwitchTile(
-                'Email Notifications',
-                'Receive email updates about your reports',
+                context.t('Email Notifications'),
+                context.t('Receive email updates about your reports'),
                 Icons.email_outlined,
                 _emailNotifications,
                 (v) => setState(() => _emailNotifications = v),
               ),
               const Divider(height: 1),
               _buildSwitchTile(
-                'Alert Alerts',
-                'Get notified about critical alerts near you',
+                context.t('Alert Alerts'),
+                context.t('Get notified about critical alerts near you'),
                 Icons.warning_amber,
                 _notificationsEnabled,
                 (v) => setState(() => _notificationsEnabled = v),
@@ -131,24 +157,38 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
           // Section: Appearance
           _buildSectionCard(
-            title: 'Appearance',
+            title: context.t('Appearance'),
             icon: Icons.palette_outlined,
             color: AppTheme.accentColor,
             children: [
               _buildDropdownTile(
-                'Language',
+                context.t('Language'),
                 Icons.language,
                 _selectedLanguage,
                 _languages,
-                (v) => setState(() => _selectedLanguage = v!),
+                (v) {
+                  setState(() => _selectedLanguage = v!);
+                  context.read<LocalizationService>().setLanguage(
+                        v == 'नेपाली' ? 'ne' : 'en',
+                      );
+                },
               ),
               const Divider(height: 1),
               _buildDropdownTile(
-                'Theme',
+                context.t('Theme'),
                 Icons.dark_mode,
                 _selectedTheme,
                 _themes,
-                (v) => setState(() => _selectedTheme = v!),
+                (v) {
+                  setState(() => _selectedTheme = v!);
+                  context.read<ThemeProvider>().setMode(
+                    v == 'Dark'
+                        ? ThemeMode.dark
+                        : v == 'System'
+                            ? ThemeMode.system
+                            : ThemeMode.light,
+                  );
+                },
               ),
             ],
           ),
@@ -156,13 +196,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
           // Section: Privacy
           _buildSectionCard(
-            title: 'Privacy & Security',
+            title: context.t('Privacy & Security'),
             icon: Icons.security,
             color: AppTheme.warningColor,
             children: [
               _buildSwitchTile(
-                'Show on Map',
-                'Allow others to see your contributions on the map',
+                context.t('Show on Map'),
+                context.t('Allow others to see your contributions on the map'),
                 Icons.map,
                 _showOnMap,
                 (v) => setState(() => _showOnMap = v),
@@ -170,8 +210,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
               const Divider(height: 1),
               ListTile(
                 leading: const Icon(Icons.delete_outline, color: AppTheme.errorColor),
-                title: const Text('Delete Account', style: TextStyle(color: AppTheme.errorColor)),
-                subtitle: const Text('Permanently delete your account and data'),
+                title: Text(context.t('Delete Account'), style: const TextStyle(color: AppTheme.errorColor)),
+                subtitle: Text(context.t('Permanently delete your account and data')),
                 onTap: () => _showDeleteConfirmation(context),
               ),
             ],
@@ -180,21 +220,21 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
           // Section: Data & Storage
           _buildSectionCard(
-            title: 'Data & Storage',
+            title: context.t('Data & Storage'),
             icon: Icons.storage,
             color: AppTheme.infoColor,
             children: [
               _buildSwitchTile(
-                'Data Saver Mode',
-                'Use less data when loading images',
+                context.t('Data Saver Mode'),
+                context.t('Skip background map downloads and use less memory for images'),
                 Icons.data_saver_on,
                 _dataSaverMode,
                 (v) => setState(() => _dataSaverMode = v),
               ),
               const Divider(height: 1),
               _buildSwitchTile(
-                'Auto-download Maps',
-                'Automatically download maps for offline use',
+                context.t('Auto-download Maps'),
+                context.t('Cache map tiles so the map works without internet'),
                 Icons.download,
                 _autoDownload,
                 (v) => setState(() => _autoDownload = v),
@@ -202,19 +242,39 @@ class _SettingsScreenState extends State<SettingsScreen> {
               const Divider(height: 1),
               ListTile(
                 leading: const Icon(Icons.delete_sweep_outlined, color: AppTheme.textSecondary),
-                title: const Text('Clear Cache'),
-                subtitle: Text('Free up storage space', style: TextStyle(color: AppTheme.textSecondary.withOpacity(0.7))),
-                trailing: Text('128 MB', style: TextStyle(color: AppTheme.textSecondary, fontSize: AppTheme.textSm)),
-                onTap: () {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Cache cleared')),
-                  );
-                },
+                title: Text(context.t('Clear Cache')),
+                subtitle: Text(context.t('Free up storage space (maps, places, images)'),
+                    style: TextStyle(color: AppTheme.textSecondary.withOpacity(0.7))),
+                onTap: _clearCache,
               ),
             ],
           ),
           const SizedBox(height: 32),
         ],
+      ),
+    );
+  }
+
+  Future<void> _clearCache() async {
+    final messenger = ScaffoldMessenger.of(context);
+    final db = OfflineDbService.instance;
+
+    final dbBytes = await db.cacheSizeBytes();
+
+    messenger.showSnackBar(SnackBar(content: Text(context.t('Clearing cache...'))));
+
+    await db.clearAll();
+    PaintingBinding.instance.imageCache.clear();
+    PaintingBinding.instance.imageCache.clearLiveImages();
+    try {
+      await DefaultCacheManager().emptyCache();
+    } catch (_) {}
+
+    final freedMb = (dbBytes / (1024 * 1024)).toStringAsFixed(1);
+    messenger.showSnackBar(
+      SnackBar(
+        content: Text('${context.t('Cache cleared')} ($freedMb MB freed)'),
+        backgroundColor: AppTheme.successColor,
       ),
     );
   }
@@ -309,14 +369,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Delete Account'),
-        content: const Text(
+        title: Text(ctx.t('Delete Account')),
+        content: Text(ctx.t(
           'Are you sure you want to delete your account? This action cannot be undone. All your data, reports, and contributions will be permanently removed.',
-        ),
+        )),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(),
-            child: const Text('Cancel'),
+            child: Text(ctx.t('Cancel')),
           ),
           TextButton(
             onPressed: () {
@@ -324,7 +384,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               _deleteAccount(context);
             },
             style: TextButton.styleFrom(foregroundColor: AppTheme.errorColor),
-            child: const Text('Delete'),
+            child: Text(ctx.t('Delete')),
           ),
         ],
       ),
@@ -338,12 +398,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
     final deleted = await authProvider.deleteAccount();
     if (deleted) {
-      messenger.showSnackBar(const SnackBar(content: Text('Your account has been deleted.')));
+      messenger.showSnackBar(
+          SnackBar(content: Text(context.t('Your account has been deleted.'))));
       navigator.pushReplacementNamed('/login');
     } else {
       messenger.showSnackBar(
-        const SnackBar(
-          content: Text('Could not delete your account. Please try again.'),
+        SnackBar(
+          content: Text(context.t('Could not delete your account. Please try again.')),
           backgroundColor: AppTheme.errorColor,
         ),
       );

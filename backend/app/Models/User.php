@@ -68,11 +68,6 @@ class User extends Authenticatable
         return $this->hasMany(XpTransaction::class);
     }
 
-    public function purchases(): \Illuminate\Database\Eloquent\Relations\HasMany
-    {
-        return $this->hasMany(UserPurchase::class);
-    }
-
     public function bookings(): \Illuminate\Database\Eloquent\Relations\HasMany
     {
         return $this->hasMany(Booking::class);

@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 
+
 class AdCampaignModel {
   final int id;
   final String name;

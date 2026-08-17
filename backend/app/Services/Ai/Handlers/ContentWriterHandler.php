@@ -5,6 +5,7 @@ namespace App\Services\Ai\Handlers;
 use App\Models\AiAgentTask;
 use App\Models\ModelTranslation;
 use App\Models\Place;
+use App\Services\PlaceDescriptionBuilder;
 use Illuminate\Support\Facades\Log;
 
 class ContentWriterHandler extends BaseHandler
@@ -39,16 +40,16 @@ class ContentWriterHandler extends BaseHandler
     protected function handleAutoWork(AiAgentTask $task): AiAgentTask
     {
         $results = $this->autoWork();
-        $msg = count($results) . ' description(s) written and stored';
+        $msg = count($results) . ' description(s) written and stored (templates)';
         return $this->markComplete($task, ['written' => count($results), 'items' => $results, 'message' => $msg]);
     }
 
     protected function autoWork(): array
     {
-        $llm = $this->ai();
+        $builder = app(PlaceDescriptionBuilder::class);
         $results = [];
 
-        $places = $this->placesMissingDescription()->take(5)->get();
+        $places = $this->placesMissingDescription()->take(10)->get();
 
         foreach ($places as $place) {
             try {
@@ -58,21 +59,19 @@ class ContentWriterHandler extends BaseHandler
                     ->where('field', 'description')
                     ->exists();
 
-                if ($exists) continue;
+                if ($exists) {
+                    continue;
+                }
 
-                $category = $place->category?->name ?? 'place';
-
-                $content = $llm->generate(
-                    "You are a content writer for a Nepal travel app. Write a Nepali description (2-3 sentences, welcoming, informative) for this place:\nName: {$place->name}\nCategory: {$category}\nDistrict: {$place->district}\nAddress: {$place->address}\n\nReturn ONLY the Nepali text, no quotes, no explanation."
-                );
+                $content = $builder->build($place);
 
                 ModelTranslation::create([
                     'translatable_type' => 'place',
                     'translatable_id' => $place->id,
                     'locale' => 'ne',
                     'field' => 'description',
-                    'value' => trim($content),
-                    'source' => 'ai',
+                    'value' => $content,
+                    'source' => 'rules',
                 ]);
 
                 $results[] = "place#{$place->id} ({$place->name})";
@@ -91,32 +90,23 @@ class ContentWriterHandler extends BaseHandler
             return $this->markFailed($task, "Place #{$placeId} not found");
         }
 
-        try {
-            $llm = $this->ai();
-            $category = $place->category?->name ?? 'place';
+        $content = app(PlaceDescriptionBuilder::class)->build($place);
 
-            $content = $llm->generate(
-                "You are a content writer for a Nepal travel app. Write a Nepali description (2-3 sentences) for:\nName: {$place->name}\nCategory: {$category}\nDistrict: {$place->district}\n\nReturn ONLY the Nepali text."
-            );
+        ModelTranslation::updateOrCreate(
+            [
+                'translatable_type' => 'place',
+                'translatable_id' => $place->id,
+                'locale' => 'ne',
+                'field' => 'description',
+            ],
+            ['value' => $content, 'source' => 'rules']
+        );
 
-            ModelTranslation::updateOrCreate(
-                [
-                    'translatable_type' => 'place',
-                    'translatable_id' => $place->id,
-                    'locale' => 'ne',
-                    'field' => 'description',
-                ],
-                ['value' => trim($content), 'source' => 'ai']
-            );
-
-            return $this->markComplete($task, [
-                'place_id' => $placeId,
-                'place' => $place->name,
-                'description_written' => trim($content),
-            ]);
-        } catch (\Exception $e) {
-            return $this->markFailed($task, $e->getMessage());
-        }
+        return $this->markComplete($task, [
+            'place_id' => $placeId,
+            'place' => $place->name,
+            'description_written' => $content,
+        ]);
     }
 
     protected function placesMissingDescription()

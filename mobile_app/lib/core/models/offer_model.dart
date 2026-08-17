@@ -133,3 +133,4 @@ class OfferRedemptionModel {
   bool get isAvailable =>
       status == 'claimed' && bookingId == null && consumedAt == null;
 }
+

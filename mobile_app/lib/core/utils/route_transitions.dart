@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import "../../core/services/localization_service.dart";
 
 class RouteTransitions {
   static Route<T> slideUpRoute<T>(Widget page) {

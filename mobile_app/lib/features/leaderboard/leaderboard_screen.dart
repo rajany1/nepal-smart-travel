@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
+import "../../core/services/localization_service.dart";
 import 'package:provider/provider.dart';
 import '../../config/themes/app_theme.dart';
 import '../../providers/leaderboard_provider.dart';
+import '../../core/services/localization_service.dart';
 
 class LeaderboardScreen extends StatefulWidget {
   const LeaderboardScreen({super.key});
@@ -39,12 +41,12 @@ class _LeaderboardScreenState extends State<LeaderboardScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Row(
+        title: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(Icons.emoji_events, color: AppTheme.secondaryColor),
-            SizedBox(width: 8),
-            Text('Leaderboard'),
+            const Icon(Icons.emoji_events, color: AppTheme.secondaryColor),
+            const SizedBox(width: 8),
+            Text(context.t('Leaderboard')),
           ],
         ),
       ),
@@ -63,11 +65,11 @@ class _LeaderboardScreenState extends State<LeaderboardScreen> {
                 if (provider.userRank != null)
                   SliverToBoxAdapter(child: _UserRankCard(rank: provider.userRank!)),
                 // Ranked list header
-                const SliverToBoxAdapter(
+                SliverToBoxAdapter(
                   child: Padding(
-                    padding: EdgeInsets.fromLTRB(16, 16, 16, 8),
-                    child: Text('All Rankings',
-                        style: TextStyle(
+                    padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+                    child: Text(context.t('All Rankings'),
+                        style: const TextStyle(
                             fontSize: AppTheme.textLg, fontWeight: FontWeight.bold)),
                   ),
                 ),
@@ -91,14 +93,14 @@ class _LeaderboardScreenState extends State<LeaderboardScreen> {
                           const SizedBox(height: 8),
                           ElevatedButton(
                               onPressed: () => provider.refreshAll(),
-                              child: const Text('Retry')),
+                              child: Text(context.t('Retry'))),
                         ],
                       ),
                     ),
                   )
                 else if (provider.users.isEmpty)
-                  const SliverFillRemaining(
-                    child: Center(child: Text('No rankings available yet')),
+                  SliverFillRemaining(
+                    child: Center(child: Text(context.t('No rankings available yet'))),
                   )
                 else ...[
                   SliverList(
@@ -179,7 +181,7 @@ class _CategoryFilter extends StatelessWidget {
                       ),
                       const SizedBox(height: 2),
                       Text(
-                        cat['label'] as String,
+                        context.t(cat['label'] as String),
                         style: TextStyle(
                           fontSize: AppTheme.textXs,
                           fontWeight: isActive ? FontWeight.bold : FontWeight.normal,
@@ -221,8 +223,8 @@ class _PodiumSection extends StatelessWidget {
       padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 8),
       child: Column(
         children: [
-          const Text('🏆 Top Contributors',
-              style: TextStyle(fontSize: AppTheme.textLg, fontWeight: FontWeight.bold)),
+          Text(context.t('🏆 Top Contributors'),
+              style: const TextStyle(fontSize: AppTheme.textLg, fontWeight: FontWeight.bold)),
           const SizedBox(height: 20),
           IntrinsicHeight(
             child: Row(
@@ -254,7 +256,7 @@ class _PodiumSection extends StatelessWidget {
                             borderRadius: BorderRadius.circular(12),
                           ),
                           child: Text(
-                            '${user.rank}${_getOrdinal(user.rank)}',
+                            '${user.rank}${_getOrdinal(context, user.rank)}',
                             style: TextStyle(
                               fontWeight: FontWeight.bold,
                               color: isFirst
@@ -300,7 +302,7 @@ class _PodiumSection extends StatelessWidget {
                             borderRadius: BorderRadius.circular(8),
                           ),
                           child: Text(
-                            '${_formatNumber(user.totalXp)} XP',
+                            '${_formatNumber(user.totalXp)} ${context.t('XP')}',
                             style: const TextStyle(
                               fontSize: 11,
                               color: AppTheme.secondaryColor,
@@ -329,11 +331,11 @@ class _PodiumSection extends StatelessWidget {
     );
   }
 
-  String _getOrdinal(int n) {
-    if (n == 1) return 'st';
-    if (n == 2) return 'nd';
-    if (n == 3) return 'rd';
-    return 'th';
+  String _getOrdinal(BuildContext context, int n) {
+    if (n == 1) return context.t('st');
+    if (n == 2) return context.t('nd');
+    if (n == 3) return context.t('rd');
+    return context.t('th');
   }
 
   String _formatNumber(int n) {
@@ -368,7 +370,7 @@ class _UserRankCard extends StatelessWidget {
         children: [
           const Icon(Icons.person_pin, color: AppTheme.primaryColor),
           const SizedBox(width: 8),
-          const Text('Your Rank', style: TextStyle(fontWeight: FontWeight.w600)),
+          Text(context.t('Your Rank'), style: const TextStyle(fontWeight: FontWeight.w600)),
           const Spacer(),
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
@@ -494,7 +496,7 @@ class _LeaderboardRow extends StatelessWidget {
           children: [
             Icon(Icons.emoji_events, size: 12, color: AppTheme.secondaryColor),
             const SizedBox(width: 2),
-            Text('${_formatNumber(user.totalXp)} XP',
+            Text('${_formatNumber(user.totalXp)} ${context.t('XP')}',
                 style: const TextStyle(fontSize: 11)),
             if (user.approvedReports > 0) ...[
               const SizedBox(width: 8),

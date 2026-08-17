@@ -206,6 +206,7 @@ class AlertController extends Controller
                     longitude: (float) $alert->longitude,
                     radiusKm: 20,
                     data: ['type' => 'alert', 'id' => $alert->id],
+                    settingsKey: 'notifications_enabled',
                 );
             } catch (\Throwable $e) {
                 Log::warning('Alert push notification failed: ' . $e->getMessage());

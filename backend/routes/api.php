@@ -1,4 +1,4 @@
-﻿<?php
+<?php
 
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
@@ -8,6 +8,7 @@ use App\Http\Controllers\ProfileController;
 use App\Http\Controllers\AlertController;
 use App\Http\Controllers\PlaceController;
 use App\Http\Controllers\ReportController;
+use App\Http\Controllers\Api\BookingPaymentController;
 use App\Http\Controllers\UserProfileController;
 use App\Http\Controllers\LeaderboardController;
 use App\Http\Controllers\PushTokenController;
@@ -82,6 +83,13 @@ Route::prefix('v1')->group(function () {
     Route::get('/offers', [\App\Http\Controllers\Api\OfferController::class, 'index']);
     Route::get('/offers/{id}', [\App\Http\Controllers\Api\OfferController::class, 'show'])->whereNumber('id');
 
+    // Curated routes (trekking + itineraries) - public read
+    Route::get('/routes', [\App\Http\Controllers\Api\RouteController::class, 'index']);
+    Route::get('/routes/{id}', [\App\Http\Controllers\Api\RouteController::class, 'show'])->whereNumber('id');
+
+    // UI translation dictionary (English -> Nepali) - public read
+    Route::get('/translations', [\App\Http\Controllers\Api\TranslationController::class, 'dictionary']);
+
     Route::middleware(['auth:sanctum', 'status'])->group(function () {
         Route::get('/offers/my', [\App\Http\Controllers\Api\OfferController::class, 'my']);
         Route::get('/offers/available', [\App\Http\Controllers\Api\OfferController::class, 'available']);
@@ -149,6 +157,14 @@ Route::prefix('v1')->group(function () {
         Route::post('/bookings/{booking}/cancel', [ConsumerController::class, 'cancelBooking']);
         Route::delete('/bookings/{booking}/coupon', [ConsumerController::class, 'removeCoupon']);
 
+        // Booking payments
+        Route::post('/bookings/{booking}/payment/initiate', [BookingPaymentController::class, 'initiate']);
+        Route::post('/bookings/{booking}/payment/verify', [BookingPaymentController::class, 'verify']);
+
     });
+
+    // Gateway callbacks (hit by eSewa / Khalti redirects — no auth)
+    Route::get('/payments/esewa/callback', [BookingPaymentController::class, 'esewaCallback'])->name('api.payments.esewa.callback');
+    Route::get('/payments/khalti/callback', [BookingPaymentController::class, 'khaltiCallback'])->name('api.payments.khalti.callback');
 
 });

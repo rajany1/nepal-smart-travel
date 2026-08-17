@@ -165,6 +165,8 @@ class PlaceController extends Controller
             ->whereBetween('latitude', [$minLat, $maxLat])
             ->whereBetween('longitude', [$minLng, $maxLng]);
 
+        $this->applyShowOnMapFilter($query, $request->user()?->id);
+
         if ($request->filled('category')) {
             $query->whereHas('category', function ($q) use ($request) {
                 $q->where('name', 'like', '%' . $request->category . '%');
@@ -224,6 +226,8 @@ class PlaceController extends Controller
 
         $query = Place::query()->with(['category', 'images'])->active();
 
+        $this->applyShowOnMapFilter($query, $request->user()?->id);
+
         if ($request->filled('category_id')) {
             $query->where('category_id', $request->category_id);
         }
@@ -274,6 +278,25 @@ class PlaceController extends Controller
             'success' => true,
             'data' => $data,
         ]);
+    }
+
+    /**
+     * Respect the "Show on Map" privacy setting: places submitted by users who
+     * opted out are hidden from public listings. OSM/admin places (no creator)
+     * and the requesting user's own places are always shown.
+     */
+    private function applyShowOnMapFilter($query, $viewerId = null)
+    {
+        $hiddenAuthorIds = \App\Models\User::whereRaw("JSON_EXTRACT(settings, '$.show_on_map') = 'false'")
+            ->pluck('id');
+
+        $query->where(function ($q) use ($hiddenAuthorIds, $viewerId) {
+            $q->whereNull('created_by')
+              ->orWhere('created_by', $viewerId)
+              ->orWhereNotIn('created_by', $hiddenAuthorIds);
+        });
+
+        return $query;
     }
 
     /**
@@ -329,6 +352,8 @@ class PlaceController extends Controller
                 [$lat, $lng, $lat]
             )
             ->having('distance', '<=', $radius);
+
+        $this->applyShowOnMapFilter($adminQuery, $request->user()?->id);
 
         if ($categoryId) {
             $adminQuery->where('category_id', $categoryId);

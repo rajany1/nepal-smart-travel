@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import "../../core/services/localization_service.dart";
 import 'package:google_fonts/google_fonts.dart';
 
 class AppTheme {

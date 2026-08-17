@@ -1,4 +1,5 @@
 import 'dart:async';
+import '../../core/services/localization_service.dart';
 import 'package:flutter/material.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:geolocator/geolocator.dart';
@@ -48,10 +49,15 @@ class PushNotificationService {
         unawaited(_registerToken());
       });
 
+      // Foreground message handler
       FirebaseMessaging.onMessage.listen((RemoteMessage message) {
-        debugPrint('Foreground message: ${message.notification?.title}');
+        final title = _getLocalizedTitle(message);
+        final body = _getLocalizedBody(message);
+        debugPrint('Foreground message: $title - $body');
+        // TODO: Show local notification (e.g., flutter_local_notifications)
       });
 
+      // Background/terminated message opened
       FirebaseMessaging.onMessageOpenedApp.listen((RemoteMessage message) {
         final data = message.data;
         if (data.isNotEmpty) {
@@ -65,6 +71,28 @@ class PushNotificationService {
     } catch (e) {
       debugPrint('FCM init failed: $e');
     }
+  }
+
+  /// Get localized title from FCM message data
+  String _getLocalizedTitle(RemoteMessage message) {
+    final data = message.data;
+    // Check if we have Nepali translation in data and user prefers Nepali
+    final loc = LocalizationService();
+    if (loc.isNepali && data.containsKey('title_ne')) {
+      return data['title_ne']!;
+    }
+    // Fallback to notification title or data title_en
+    return data['title_en'] ?? message.notification?.title ?? '';
+  }
+
+  /// Get localized body from FCM message data
+  String _getLocalizedBody(RemoteMessage message) {
+    final data = message.data;
+    final loc = LocalizationService();
+    if (loc.isNepali && data.containsKey('body_ne')) {
+      return data['body_ne']!;
+    }
+    return data['body_en'] ?? message.notification?.body ?? '';
   }
 
   Future<void> _registerToken() async {

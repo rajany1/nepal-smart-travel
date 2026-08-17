@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import "../../../core/services/localization_service.dart";
 import 'package:provider/provider.dart';
 import '../../../config/themes/app_theme.dart';
 import '../../../providers/auth_provider.dart';
@@ -12,7 +13,7 @@ class StoreXpHeader extends StatelessWidget {
     final user = auth.user;
     final xp = user?.totalXp ?? 0;
     final level = user?.currentLevel ?? 1;
-    final levelName = user?.levelName ?? 'Explorer';
+    final levelName = user?.levelName ?? context.t('Explorer');
     final progress = user?.levelProgress ?? 0.0;
     final nextLevelName = user?.nextLevelName ?? '';
 
@@ -52,14 +53,14 @@ class StoreXpHeader extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text('Your Balance',
+                    Text(context.t('Your Balance'),
                         style: TextStyle(color: Colors.white.withValues(alpha: 0.8), fontSize: 12, fontWeight: FontWeight.w500)),
                     const SizedBox(height: 4),
                     Row(
                       children: [
                         const Icon(Icons.star, size: 18, color: Color(0xFFFFD700)),
                         const SizedBox(width: 6),
-                        Text('$xp XP',
+                        Text('$xp ${context.t('XP')}',
                             style: const TextStyle(color: Colors.white, fontSize: 28, fontWeight: FontWeight.bold)),
                       ],
                     ),
@@ -77,7 +78,7 @@ class StoreXpHeader extends StatelessWidget {
                   children: [
                     const Icon(Icons.trending_up, size: 16, color: Colors.white),
                     const SizedBox(width: 4),
-                    Text('Lv.$level $levelName',
+                    Text('${context.t('Lv.')}$level $levelName',
                         style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w600)),
                   ],
                 ),
@@ -98,9 +99,9 @@ class StoreXpHeader extends StatelessWidget {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Text('Level $level $levelName',
+              Text('${context.t('Level')} $level $levelName',
                   style: TextStyle(color: Colors.white.withValues(alpha: 0.7), fontSize: 11)),
-              Text('Next: $nextLevelName',
+              Text('${context.t('Next:')} $nextLevelName',
                   style: TextStyle(color: Colors.white.withValues(alpha: 0.7), fontSize: 11)),
             ],
           ),

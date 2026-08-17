@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import "../../core/services/localization_service.dart";
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'config/themes/app_theme.dart';
@@ -14,8 +15,11 @@ import 'providers/report_provider.dart';
 import 'providers/leaderboard_provider.dart';
 import 'providers/map_view_provider.dart';
 import 'providers/ad_provider.dart';
-import 'providers/booking_provider.dart';
 import 'providers/offer_provider.dart';
+import 'providers/route_provider.dart';
+import 'providers/theme_provider.dart';
+import 'core/services/app_settings_service.dart';
+import 'core/services/localization_service.dart';
 
 import 'features/auth/login_screen.dart';
 import 'features/auth/register_screen.dart';
@@ -30,6 +34,7 @@ import 'features/profile/policies_screen.dart';
 
 import 'features/map/home_screen.dart';
 import 'features/places/nearby_map_screen.dart';
+import 'features/routes/routes_screen.dart';
 import 'features/reporting/reports_list_screen.dart';
 import 'features/emergency/emergency_screen.dart';
 import 'features/assistant/assistant_screen.dart';
@@ -38,8 +43,6 @@ import 'features/alerts/alerts_screen.dart';
 import 'features/leaderboard/leaderboard_screen.dart';
 
 // Consumer feature screens
-import 'features/partners/partners_list_screen.dart';
-import 'features/bookings/my_bookings_screen.dart';
 import 'features/subscriptions/subscription_plans_screen.dart';
 import 'features/store/store_screen.dart';
 
@@ -56,8 +59,14 @@ void main() async {
 
   SyncService.instance.startMonitoring();
 
+  // Apply Data Saver image-cache limits before the first frame
+  AppSettingsService.applyDataSaverLimits();
+
   final authProvider = AuthProvider();
   await authProvider.initializeAuth();
+
+  final localizationService = LocalizationService();
+  await localizationService.init();
 
   final pushService = PushNotificationService();
   await pushService.initialize();
@@ -66,16 +75,22 @@ void main() async {
   final navigatorKey = GlobalKey<NavigatorState>();
   pushService.setNavigatorKey(navigatorKey);
 
-  runApp(NepalSmartTravelApp(authProvider: authProvider, navigatorKey: navigatorKey));
+  runApp(NepalSmartTravelApp(
+    authProvider: authProvider,
+    localizationService: localizationService,
+    navigatorKey: navigatorKey,
+  ));
 }
 
 class NepalSmartTravelApp extends StatelessWidget {
   final AuthProvider authProvider;
+  final LocalizationService localizationService;
   final GlobalKey<NavigatorState> navigatorKey;
 
   const NepalSmartTravelApp({
     super.key,
     required this.authProvider,
+    required this.localizationService,
     required this.navigatorKey,
   });
 
@@ -93,16 +108,20 @@ class NepalSmartTravelApp extends StatelessWidget {
         ChangeNotifierProvider(create: (_) => LeaderboardProvider()),
         ChangeNotifierProvider(create: (_) => MapViewProvider()),
         ChangeNotifierProvider(create: (_) => AdProvider()),
-        ChangeNotifierProvider(create: (_) => BookingProvider()),
         ChangeNotifierProvider(create: (_) => OfferProvider()),
+        ChangeNotifierProvider(create: (_) => RouteProvider()),
+        ChangeNotifierProvider(create: (_) => ThemeProvider()),
+        ChangeNotifierProvider<LocalizationService>.value(value: localizationService),
       ],
-      child: MaterialApp(
-        debugShowCheckedModeBanner: false,
-        navigatorKey: navigatorKey,
-        title: AppConstants.appName,
-        theme: AppTheme.lightTheme,
-        darkTheme: AppTheme.darkTheme,
-        themeMode: ThemeMode.light,
+      child: Consumer<ThemeProvider>(
+        builder: (context, themeProvider, _) => Consumer<LocalizationService>(
+          builder: (context, localization, _) => MaterialApp(
+          debugShowCheckedModeBanner: false,
+          navigatorKey: navigatorKey,
+          title: AppConstants.appName,
+          theme: AppTheme.lightTheme,
+          darkTheme: AppTheme.darkTheme,
+          themeMode: themeProvider.mode,
 
         home: const AuthInitializationWrapper(),
         onGenerateRoute: (settings) {
@@ -135,6 +154,8 @@ class NepalSmartTravelApp extends StatelessWidget {
               return MaterialPageRoute(builder: (_) => const HomeScreen(), settings: settings);
             case '/nearby-places':
               return MaterialPageRoute(builder: (_) => const NearbyMapScreen(), settings: settings);
+            case '/routes':
+              return MaterialPageRoute(builder: (_) => const RoutesScreen(), settings: settings);
             case '/reports':
               return MaterialPageRoute(builder: (_) => const ReportsListScreen(), settings: settings);
             case '/emergency':
@@ -154,10 +175,6 @@ class NepalSmartTravelApp extends StatelessWidget {
                 ),
                 settings: settings,
               );
-            case '/partners':
-              return MaterialPageRoute(builder: (_) => const PartnersListScreen(), settings: settings);
-            case '/bookings':
-              return MaterialPageRoute(builder: (_) => const MyBookingsScreen(), settings: settings);
             case '/subscriptions':
               return MaterialPageRoute(builder: (_) => const SubscriptionPlansScreen(), settings: settings);
             case '/store':
@@ -166,6 +183,8 @@ class NepalSmartTravelApp extends StatelessWidget {
               return null;
           }
         },
+        ),
+        ),
       ),
     );
   }
@@ -202,6 +221,15 @@ class _AuthInitializationWrapperState
       if (!mounted) return;
 
       if (auth.isAuthenticated) {
+        // Preload user settings (notifications, theme, language) so screens
+        // reflect the server-side values on first open.
+        final profileProvider = context.read<ProfileProvider>();
+        await profileProvider.loadSettings();
+        // Align the app language with the server-side setting.
+        await context
+            .read<LocalizationService>()
+            .syncFromBackend(profileProvider.settings['language'] as String?);
+
         if (auth.isProfileCompletionRequired) {
           Navigator.pushReplacementNamed(
               context, '/profile-completion');

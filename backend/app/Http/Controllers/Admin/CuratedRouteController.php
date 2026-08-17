@@ -66,15 +66,56 @@ class CuratedRouteController extends Controller
         $data = $request->validate([
             'title' => 'required|string|max:255',
             'slug' => 'nullable|string|max:255|unique:curated_routes,slug,' . $request->route('route')?->id,
+            'route_type' => 'required|in:' . implode(',', CuratedRoute::TYPES),
+            'difficulty' => 'nullable|in:' . implode(',', CuratedRoute::DIFFICULTIES),
             'description' => 'nullable|string|max:5000',
             'image' => 'nullable|url|max:500',
             'duration_days' => 'required|integer|min:1|max:365',
             'best_season' => 'nullable|string|max:100',
+            'max_altitude_m' => 'nullable|integer|min:0|max:12000',
+            'total_distance_km' => 'nullable|numeric|min:0|max:5000',
+            'elevation_gain_m' => 'nullable|integer|min:0|max:30000',
+            'starting_point' => 'nullable|string|max:255',
+            'ending_point' => 'nullable|string|max:255',
             'waypoints' => 'nullable|string',
+            'track' => 'nullable|string',
             'is_active' => 'sometimes|boolean',
         ]);
         $data['slug'] = $data['slug'] ?: Str::slug($data['title']) . '-' . Str::lower(Str::random(4));
         $data['waypoints'] = array_filter(array_map('intval', explode(',', (string) ($data['waypoints'] ?? ''))));
+        $data['track'] = $this->parseTrack($data['track'] ?? '');
+        if (empty($data['track'])) {
+            unset($data['track']);
+        }
         return $data;
+    }
+
+    /**
+     * Accepts one "lat,lng" or "lat,lng,Name" per line (also plain JSON).
+     */
+    private function parseTrack(string $raw): array
+    {
+        $raw = trim($raw);
+        if ($raw === '') return [];
+
+        $decoded = json_decode($raw, true);
+        if (is_array($decoded)) {
+            return array_values(array_filter($decoded, fn($p) => is_array($p) && isset($p['lat']) && isset($p['lng'])));
+        }
+
+        $points = [];
+        foreach (preg_split('/\r?\n/', $raw) as $line) {
+            $line = trim($line);
+            if ($line === '') continue;
+            $parts = array_map('trim', explode(',', $line));
+            if (count($parts) >= 2 && is_numeric($parts[0]) && is_numeric($parts[1])) {
+                $points[] = [
+                    'lat' => (float) $parts[0],
+                    'lng' => (float) $parts[1],
+                    'name' => $parts[2] ?? null,
+                ];
+            }
+        }
+        return $points;
     }
 }
