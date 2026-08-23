@@ -30,6 +30,8 @@ class Place extends Model
         'featured_until',
         'source',
         'osm_id',
+        'osm_type',
+        'imported_at',
     ];
 
     protected function casts(): array

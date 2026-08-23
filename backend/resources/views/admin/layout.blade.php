@@ -28,7 +28,6 @@
         };
     </script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
-    <script src="https://cdn.jsdelivr.net/npm/@hotwired/turbo@7/dist/turbo.min.js"></script>
     <style>
         body {
             background: #FDFBF7;
@@ -42,7 +41,7 @@
         }
     </style>
 </head>
-<body class="min-h-screen text-slate-900 antialiased">
+<body data-since="{{ json_encode(\App\Support\LiveFeed::fingerprint()) }}" class="min-h-screen text-slate-900 antialiased">
     @php
         $user = Auth::user();
         $isModerator = $user && $user->isModerator();
@@ -229,5 +228,226 @@
         </div>
     </div>
     @yield('scripts')
+<script>
+(function () {
+    'use strict';
+    if (window.__liveFeedStarted) return;
+    window.__liveFeedStarted = true;
+
+    var POLL_MS = 10000;
+    var TTL = { places: 1, place_reviews: 1, reports: 1, report_comments: 1, alerts: 1, users: 1, reward_offers: 1, offer_redemptions: 1, ad_campaigns: 1, bookings: 1, payouts: 1, audit_logs: 1, place_corrections: 1, travel_partners: 1, user_subscriptions: 1, subscription_plans: 1, roles: 1, permissions: 1, achievements: 1, curated_routes: 1, ai_agents: 1, ai_agent_tasks: 1, translation_glossary: 1 };
+    var dirty = false;
+    var applying = false;
+    var chip = null;
+
+    // Dirty-form guard: never touch the page while the admin is typing.
+    document.addEventListener('input', function () { dirty = true; }, true);
+    document.addEventListener('change', function () { dirty = true; }, true);
+
+    function baseSince() {
+        try { return JSON.parse(document.body.getAttribute('data-since') || '{}'); } catch (e) { return {}; }
+    }
+    function storedDels() {
+        try { return JSON.parse(sessionStorage.getItem('lf_dels') || '{}'); } catch (e) { return {}; }
+    }
+    function storeDels(d) {
+        try {
+            var cap = {};
+            Object.keys(d).forEach(function (k) { cap[k] = d[k].slice(-100); });
+            sessionStorage.setItem('lf_dels', JSON.stringify(cap));
+        } catch (e) {}
+    }
+
+    function buildUrl(extra) {
+        var href = location.href.split('#')[0];
+        return href + (href.indexOf('?') >= 0 ? '&' : '?') + extra;
+    }
+
+    function showChip(count) {
+        if (!chip) {
+            chip = document.createElement('div');
+            chip.id = 'liveFeedChip';
+            chip.style.cssText = 'position:fixed;right:20px;bottom:20px;z-index:9999;display:flex;align-items:center;gap:8px;background:#00695C;color:#fff;padding:10px 16px;border-radius:9999px;box-shadow:0 6px 20px rgba(0,0,0,.25);font-size:13px;cursor:pointer;';
+            chip.addEventListener('click', function () { location.reload(); });
+            document.body.appendChild(chip);
+        }
+        chip.innerHTML = '<i class="fas fa-sync-alt"></i> ' + count + ' update' + (count === 1 ? '' : 's') + ' — Apply';
+    }
+    function hideChip() { if (chip) chip.remove(); chip = null; }
+
+    // ---- Surgical list interactions (AJAX, table-only replace) ----
+    function applyParsed(html, url) {
+        var doc = new DOMParser().parseFromString(html, 'text/html');
+        var fresh = doc.getElementById('liveTable');
+        var cur = document.getElementById('liveTable');
+        var ok = !!(fresh && cur);
+        if (ok) cur.innerHTML = fresh.innerHTML;
+        var fs = doc.body ? doc.body.getAttribute('data-since') : null;
+        if (fs) { try { document.body.setAttribute('data-since', fs); } catch (e) {} }
+        dirty = false;
+        if (url) url = url.replace(/[?&]fragment=1$/, '');
+        if (url && url !== location.href) { try { history.replaceState(null, '', url); } catch (e) {} }
+        return ok;
+    }
+
+    function ajaxGet(url) {
+        fetch(url, { headers: { 'X-Requested-With': 'XMLHttpRequest' } })
+            .then(function (r) { if (!r.ok) throw new Error('bad'); return r.text(); })
+            .then(function (html) { if (!applyParsed(html, url)) location.href = url; })
+            .catch(function () { location.href = url; });
+    }
+
+    function ajaxPost(form) {
+        var action = form.getAttribute('action') || location.href;
+        var fd = new FormData(form);
+        fetch(action, {
+            method: form.getAttribute('method') || 'POST',
+            body: fd, redirect: 'follow',
+            headers: { 'X-Requested-With': 'XMLHttpRequest' }
+        })
+            .then(function (r) { if (!r.ok) throw new Error('bad'); return r.text().then(function (html) { return { html: html, url: r.url }; }); })
+            .then(function (res) {
+                var clean = res.url.split('#')[0];
+                if (!applyParsed(res.html, clean)) location.href = clean;
+            })
+            .catch(function () { location.href = location.href; });
+    }
+
+    // Same-page links inside the live table (pagination, sort, status tabs) → AJAX, no page render.
+    document.addEventListener('click', function (e) {
+        if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+        var a = e.target && e.target.closest ? e.target.closest('a[href]') : null;
+        if (!a || !document.getElementById('liveTable') || !a.closest('#liveTable')) return;
+        var href = a.getAttribute('href') || '';
+        if (href.charAt(0) === '#') return;
+        try {
+            var u = new URL(a.href, location.origin);
+            if (u.pathname !== location.pathname) return;
+        } catch (err) { return; }
+        e.preventDefault();
+        e.stopPropagation();
+        ajaxGet(a.href + (a.href.indexOf('?') >= 0 ? '&' : '?') + 'fragment=1');
+    }, true);
+
+    // Forms on list pages (actions, search, bulk, categories) → AJAX, table-only replace.
+    // (Bubble phase so inline onsubmit confirm() runs first.)
+    document.addEventListener('submit', function (e) {
+        if (e.defaultPrevented) return;
+        var f = e.target;
+        if (!f || f.tagName !== 'FORM') return;
+        if (!document.getElementById('liveTable')) return;
+        if (f.closest('[id$="Modal"]')) return;
+        e.preventDefault();
+        e.stopPropagation();
+        var m = (f.getAttribute('method') || 'POST').toUpperCase();
+        if (m === 'GET') {
+            var q = new URLSearchParams(new FormData(f)).toString();
+            var base = f.getAttribute('action') || location.pathname;
+            var sep = base.indexOf('?') >= 0 ? '&' : '?';
+            ajaxGet(base + sep + q + (q ? '&' : '') + 'fragment=1');
+        } else {
+            ajaxPost(f);
+        }
+    });
+
+    function applyTableFragment() {
+        if (applying) return;
+        applying = true;
+        fetch(buildUrl('fragment=1'), { headers: { 'X-Requested-With': 'XMLHttpRequest' } })
+            .then(function (r) { if (!r.ok) throw new Error('bad'); return r.text(); })
+            .then(function (html) {
+                if (!applyParsed(html)) location.reload();
+            })
+            .catch(function () {})
+            .finally(function () { applying = false; });
+    }
+
+    function applyDashboardStats() {
+        if (applying) return;
+        applying = true;
+        fetch('/admin/live-feed/stats', { headers: { 'X-Requested-With': 'XMLHttpRequest' } })
+            .then(function (r) { return r.json(); })
+            .then(function (res) {
+                if (!res.success) return;
+                var s = res.stats;
+                document.querySelectorAll('[data-count]').forEach(function (el) {
+                    var k = el.getAttribute('data-count');
+                    if (s[k] === undefined || s[k] === null) return;
+                    if (k === 'system_health_status') {
+                        el.textContent = s[k];
+                        return;
+                    }
+                    var prefix = k === 'ads_income' ? '$' : '';
+                    var suffix = (k === 'operations_efficiency' || k === 'system_health_score') ? '%'
+                        : (k === 'analytics_score') ? ' / 100'
+                        : (k.indexOf('xp_') === 0) ? ' XP'
+                        : '';
+                    el.textContent = prefix + Number(s[k]).toLocaleString() + suffix;
+                });
+                dirty = false;
+            })
+            .catch(function () {})
+            .finally(function () { applying = false; });
+    }
+
+    function applyMapDelta(changes) {
+        var evt = new CustomEvent('livefeed:change', { detail: { changes: changes } });
+        window.dispatchEvent(evt);
+    }
+
+    function isTyping() {
+        var el = document.activeElement;
+        if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT')) return true;
+        return dirty;
+    }
+
+    function poll() {
+        if (document.visibilityState === 'hidden') return;
+        var since = baseSince();
+        var dels = storedDels();
+        var q = 'since=' + encodeURIComponent(JSON.stringify(since)) + '&dels_seen=' + encodeURIComponent(JSON.stringify(dels));
+        fetch('/admin/live-feed/changes?' + q, { headers: { 'X-Requested-With': 'XMLHttpRequest' } })
+            .then(function (r) { return r.json(); })
+            .then(function (res) {
+                if (!res.success) return;
+                var changes = res.changes || {};
+                var keys = Object.keys(changes);
+                if (keys.length === 0) { hideChip(); return; }
+
+                // Track deleted ids the client has applied.
+                var appliedDels = Object.assign({}, dels);
+                keys.forEach(function (t) {
+                    if (changes[t].deleted.length) {
+                        appliedDels[t] = (appliedDels[t] || []).concat(changes[t].deleted);
+                    }
+                });
+                storeDels(appliedDels);
+
+                // Advance the fingerprint for the next poll.
+                try { document.body.setAttribute('data-since', JSON.stringify(res.fp)); } catch (e) {}
+
+                if (isTyping()) return; // wait for next poll — never disturb a typing admin
+
+                var hasTable = !!document.getElementById('liveTable');
+                var hasMap = !!document.getElementById('liveMap');
+                var hasStats = !!document.querySelector('[data-count]');
+
+                if (hasMap) {
+                    applyMapDelta(changes);
+                } else if (hasTable) {
+                    applyTableFragment();
+                } else if (hasStats) {
+                    applyDashboardStats();
+                } else {
+                    showChip(keys.length);
+                }
+            })
+            .catch(function () {});
+    }
+
+    setInterval(poll, POLL_MS);
+    setTimeout(poll, 3000);
+})();
+</script>
 </body>
 </html>

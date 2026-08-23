@@ -1,4 +1,4 @@
-@extends('admin.layout')
+﻿@extends('admin.layout')
 @section('title', 'Places Management')
 
 @section('content')
@@ -66,6 +66,7 @@
             <form id="bulkForm" method="POST" action="">
                 @csrf
             </form>
+<div id="liveTable">
             <table class="w-full">
                 <thead class="bg-gray-50">
                     <tr>
@@ -152,6 +153,9 @@
                                     </button>
                                 </form>
                             @endif
+                            <button type="button" onclick="openReviewsModal({{ $place->id }})" class="px-3 py-1.5 text-xs font-medium bg-indigo-50 text-indigo-600 rounded-lg hover:bg-indigo-100 transition" title="View / edit reviews">
+                                <i class="fas fa-comments"></i>
+                            </button>
                             <button type="button" onclick="openEditModal({{ $place->id }})" class="px-3 py-1.5 text-xs font-medium bg-primary-50 text-primary-600 rounded-lg hover:bg-primary-100 transition">
                                 <i class="fas fa-edit"></i>
                             </button>
@@ -190,6 +194,7 @@
         </div>
         @if($places->hasPages())
         <div class="px-6 py-4 border-t border-gray-100">{{ $places->links() }}</div>
+</div>
         @endif
     </div>
 
@@ -405,6 +410,22 @@
     </div>
 </div>
 
+<!-- Place Reviews Modal -->
+<div id="reviewsModal" class="fixed inset-0 z-50 hidden" role="dialog" aria-modal="true">
+    <div class="flex items-center justify-center min-h-screen px-4 pt-4 pb-20 text-center sm:p-0">
+        <div class="fixed inset-0 bg-gray-500 bg-opacity-75 transition-opacity" onclick="closeReviewsModal()"></div>
+        <div class="relative inline-block bg-white rounded-xl shadow-2xl text-left overflow-hidden transform transition-all sm:max-w-2xl w-full max-h-[85vh] flex flex-col">
+            <div class="px-6 py-4 border-b border-gray-100 flex items-center justify-between">
+                <h3 class="font-semibold text-gray-800 truncate">Reviews â€” <span id="reviewsPlaceName" class="text-primary-600"></span></h3>
+                <button onclick="closeReviewsModal()" class="text-gray-400 hover:text-gray-600"><i class="fas fa-times"></i></button>
+            </div>
+            <div id="reviewsList" class="p-6 overflow-y-auto">
+                <!-- Rendered by JS -->
+            </div>
+        </div>
+    </div>
+</div>
+
 <script>
 // Store place data for inline editing
 const placesData = <?php echo json_encode($places->map(function($p) {
@@ -429,6 +450,109 @@ const placesData = <?php echo json_encode($places->map(function($p) {
 })->values()->toArray()); ?>;
 
 const storageBase = '{{ asset('storage') }}';
+
+// ========== PLACE REVIEWS ==========
+const csrfToken = '{{ csrf_token() }}';
+let reviewsData = [];
+
+function escapeHtml(s) {
+    return (s || '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+function openReviewsModal(placeId) {
+    fetch('/admin/places/' + placeId + '/reviews')
+        .then(r => r.json())
+        .then(data => {
+            if (!data.success) return;
+            document.getElementById('reviewsPlaceName').textContent = data.place.name;
+            reviewsData = data.reviews;
+            renderReviews();
+            const m = document.getElementById('reviewsModal');
+            m.classList.remove('hidden');
+            m.classList.add('flex');
+        })
+        .catch(() => alert('Failed to load reviews'));
+}
+
+function closeReviewsModal() {
+    const m = document.getElementById('reviewsModal');
+    m.classList.add('hidden');
+    m.classList.remove('flex');
+}
+
+function renderReviews() {
+    const list = document.getElementById('reviewsList');
+    if (!reviewsData.length) {
+        list.innerHTML = '<p class="text-center text-gray-500 py-10"><i class="fas fa-comment-slash text-3xl text-gray-300 block mb-3"></i>No reviews yet</p>';
+        return;
+    }
+    list.innerHTML = reviewsData.map(r => {
+        const stars = '<i class="fas fa-star"></i>'.repeat(r.rating) + '<i class="far fa-star"></i>'.repeat(5 - r.rating);
+        const statusBadge = r.status === 'approved'
+            ? '<span class="text-xs px-2 py-0.5 rounded-full bg-green-100 text-green-700 font-medium">Approved</span>'
+            : '<span class="text-xs px-2 py-0.5 rounded-full bg-red-100 text-red-700 font-medium">Rejected</span>';
+        const ratingOptions = [1,2,3,4,5].map(n =>
+            '<option value="' + n + '"' + (n === r.rating ? ' selected' : '') + '>' + n + ' star' + (n > 1 ? 's' : '') + '</option>'
+        ).join('');
+        return '' +
+        '<div class="border border-gray-100 rounded-xl p-4 mb-3">' +
+            '<div class="flex items-center justify-between flex-wrap gap-2">' +
+                '<div class="flex items-center gap-2 flex-wrap">' +
+                    '<div class="text-yellow-500 text-xs">' + stars + '</div>' +
+                    '<span class="text-xs font-medium text-gray-600">' + escapeHtml(r.user_name) + '</span>' +
+                    '<span class="text-xs text-gray-400">' + escapeHtml(r.created_at || '') + '</span>' +
+                '</div>' +
+                statusBadge +
+            '</div>' +
+            '<p class="font-medium text-sm text-gray-800 mt-2">' + escapeHtml(r.title) + '</p>' +
+            '<p class="text-sm text-gray-600 mt-1 whitespace-pre-wrap">' + escapeHtml(r.description) + '</p>' +
+            '<div class="flex gap-2 mt-3">' +
+                '<button type="button" onclick="toggleReviewEdit(' + r.id + ')" class="px-3 py-1.5 text-xs font-medium bg-primary-50 text-primary-600 rounded-lg hover:bg-primary-100 transition">' +
+                    '<i class="fas fa-edit mr-1"></i>Edit</button>' +
+                '<form method="POST" action="/admin/places/reviews/' + r.id + '/delete" onsubmit="return confirm(\'Delete this review?\')">' +
+                    '<input type="hidden" name="_token" value="' + csrfToken + '">' +
+                    '<button type="submit" class="px-3 py-1.5 text-xs font-medium bg-red-50 text-red-600 rounded-lg hover:bg-red-100 transition">' +
+                        '<i class="fas fa-trash mr-1"></i>Delete</button>' +
+                '</form>' +
+            '</div>' +
+            '<div id="review-edit-' + r.id + '" class="hidden mt-4 border-t border-gray-100 pt-4">' +
+                '<form method="POST" action="/admin/places/reviews/' + r.id + '/update">' +
+                    '<input type="hidden" name="_token" value="' + csrfToken + '">' +
+                    '<div class="grid grid-cols-2 gap-3">' +
+                        '<div>' +
+                            '<label class="block text-xs font-medium text-gray-600 mb-1">Rating</label>' +
+                            '<select name="rating" class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm">' + ratingOptions + '</select>' +
+                        '</div>' +
+                        '<div>' +
+                            '<label class="block text-xs font-medium text-gray-600 mb-1">Status</label>' +
+                            '<select name="status" class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm">' +
+                                '<option value="approved"' + (r.status === 'approved' ? ' selected' : '') + '>Approved (visible)</option>' +
+                                '<option value="rejected"' + (r.status === 'rejected' ? ' selected' : '') + '>Rejected (hidden)</option>' +
+                            '</select>' +
+                        '</div>' +
+                        '<div class="col-span-2">' +
+                            '<label class="block text-xs font-medium text-gray-600 mb-1">Title</label>' +
+                            '<input type="text" name="title" value="' + escapeHtml(r.title) + '" required maxlength="255" class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm">' +
+                        '</div>' +
+                        '<div class="col-span-2">' +
+                            '<label class="block text-xs font-medium text-gray-600 mb-1">Description</label>' +
+                            '<textarea name="description" rows="3" required maxlength="5000" class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm">' + escapeHtml(r.description) + '</textarea>' +
+                        '</div>' +
+                    '</div>' +
+                    '<div class="flex justify-end gap-2 mt-3">' +
+                        '<button type="button" onclick="toggleReviewEdit(' + r.id + ')" class="px-3 py-1.5 text-xs font-medium text-gray-600 bg-gray-100 rounded-lg hover:bg-gray-200 transition">Cancel</button>' +
+                        '<button type="submit" class="px-3 py-1.5 text-xs font-medium text-white bg-primary-600 rounded-lg hover:bg-primary-700 transition">Save Changes</button>' +
+                    '</div>' +
+                '</form>' +
+            '</div>' +
+        '</div>';
+    }).join('');
+}
+
+function toggleReviewEdit(id) {
+    const el = document.getElementById('review-edit-' + id);
+    if (el) el.classList.toggle('hidden');
+}
 
 function openEditModal(id) {
     const place = placesData.find(p => p.id === id);
@@ -552,7 +676,7 @@ document.addEventListener('keydown', function(e) {
                     <div>
                         <label class="block text-sm font-medium text-gray-700 mb-1">Category</label>
                         <select name="category_id" class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm">
-                            <option value="">— No change —</option>
+                            <option value="">â€” No change â€”</option>
                             @foreach($categories as $cat)
                             <option value="{{ $cat->id }}">{{ $cat->name }}</option>
                             @endforeach

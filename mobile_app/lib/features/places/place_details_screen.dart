@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:dio/dio.dart';
 import "../../core/services/localization_service.dart";
 import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -9,7 +10,9 @@ import '../../providers/place_details_provider.dart';
 import '../../widgets/image_carousel_widget.dart';
 import '../../widgets/ad_inline_banner.dart';
 import '../../core/services/session_manager.dart';
+import '../auth/login_screen.dart';
 import 'place_correction_screen.dart';
+import 'nearby_map_screen.dart';
 
 class PlaceDetailsScreen extends StatefulWidget {
   final Place place;
@@ -26,6 +29,7 @@ class _PlaceDetailsScreenState extends State<PlaceDetailsScreen> {
   final _reviewTitleController = TextEditingController();
   final _reviewDescController = TextEditingController();
   bool _isSubmittingReview = false;
+  DateTime? _reviewCooldownUntil;
   late final PlaceDetailsProvider _detailsProvider;
 
   bool get _isOsm => widget.place.id.startsWith('osm_');
@@ -73,10 +77,17 @@ class _PlaceDetailsScreenState extends State<PlaceDetailsScreen> {
   }
 
   Future<void> _openDirections(double lat, double lng) async {
-    final uri = Uri.parse('https://maps.google.com/maps?q=$lat,$lng');
-    if (await canLaunchUrl(uri)) {
-      await launchUrl(uri, mode: LaunchMode.externalApplication);
-    }
+    if (!context.mounted) return;
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => NearbyMapScreen(
+          destinationLat: lat,
+          destinationLng: lng,
+          destinationName: widget.place.name,
+        ),
+      ),
+    );
   }
 
   void _showReviewSheet(BuildContext context) {
@@ -168,7 +179,9 @@ class _PlaceDetailsScreenState extends State<PlaceDetailsScreen> {
                   SizedBox(
                     width: double.infinity,
                     child: ElevatedButton(
-                      onPressed: _isSubmittingReview
+                      onPressed: (_isSubmittingReview ||
+                              (_reviewCooldownUntil != null &&
+                                  DateTime.now().isBefore(_reviewCooldownUntil!)))
                           ? null
                           : () async {
                               if (_reviewTitleController.text.trim().isEmpty ||
@@ -205,9 +218,35 @@ class _PlaceDetailsScreenState extends State<PlaceDetailsScreen> {
                                 }
                               } catch (e) {
                                 setSheetState(() => _isSubmittingReview = false);
-                                ScaffoldMessenger.of(ctx).showSnackBar(
-                                  const SnackBar(content: Text('Failed to submit review')),
+                                final status = e is DioException ? e.response?.statusCode : null;
+                                debugPrint(
+                                  'REVIEW SUBMIT FAILED | id=${widget.place.id} | status=$status | error=$e'
+                                  '${e is DioException && e.response != null ? ' | body=${e.response?.data}' : ''}',
                                 );
+                                ScaffoldMessenger.of(ctx).showSnackBar(
+                                  SnackBar(
+                                    content: Text(
+                                      status == 429
+                                          ? 'Too many reviews. Please try again later.'
+                                          : status == 401
+                                              ? 'Please log in to write a review'
+                                              : status != null
+                                                  ? 'Failed to submit review ($status)'
+                                                  : 'Failed to submit review: ${e is DioException ? e.type.name : e}',
+                                    ),
+                                  ),
+                                );
+                                if (status == 429) {
+                                  setSheetState(() =>
+                                      _reviewCooldownUntil = DateTime.now().add(const Duration(seconds: 15)));
+                                }
+                                if (status == 401 && ctx.mounted) {
+                                  Navigator.pop(ctx);
+                                  Navigator.push(
+                                    ctx,
+                                    MaterialPageRoute(builder: (_) => const LoginScreen()),
+                                  );
+                                }
                               }
                             },
                       style: ElevatedButton.styleFrom(

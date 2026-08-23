@@ -1,4 +1,4 @@
-@extends('admin.layout')
+﻿@extends('admin.layout')
 
 @section('title', 'AI Employees')
 
@@ -64,6 +64,7 @@
       <h3 class="text-lg font-semibold text-gray-800">Registered AI Agents</h3>
     </div>
     <div class="overflow-x-auto">
+<div id="liveTable">
       <table class="w-full">
         <thead class="bg-gray-50">
           <tr>
@@ -133,6 +134,7 @@
           @endforelse
         </tbody>
       </table>
+</div>
     </div>
   </div>
 </div>

@@ -1,4 +1,4 @@
-@extends('admin.layout')
+﻿@extends('admin.layout')
 @section('title', 'Users Management')
 
 @section('content')
@@ -36,6 +36,7 @@
         </form>
     </div>
     <div class="overflow-x-auto">
+<div id="liveTable">
         <table class="w-full">
             <thead class="bg-gray-50">
                 <tr>
@@ -195,6 +196,7 @@
     @if($users->hasPages())
     <div class="px-6 py-4 border-t border-gray-100">
         {{ $users->appends(['role' => $role, 'status' => $status, 'search' => request('search')])->links() }}
+</div>
     </div>
     @endif
 </div>

@@ -1,5 +1,6 @@
 import 'dart:convert';
 import "../../core/services/localization_service.dart";
+import 'dart:math' as math;
 import 'dart:typed_data';
 import 'package:sqflite/sqflite.dart';
 import 'package:path/path.dart' as p;
@@ -95,7 +96,9 @@ class OfflineDbService {
         zoom_max INTEGER DEFAULT 16,
         downloaded_at INTEGER NOT NULL,
         size_bytes INTEGER DEFAULT 0,
-        is_expired INTEGER DEFAULT 0
+        is_expired INTEGER DEFAULT 0,
+        valid_days INTEGER DEFAULT 30,
+        tile_count INTEGER DEFAULT 0
       )
     ''');
 
@@ -115,7 +118,14 @@ class OfflineDbService {
   }
 
   Future<void> _onUpgrade(Database db, int oldVersion, int newVersion) async {
-    // Future migration logic
+    if (oldVersion < 2) {
+      // v2: offline map packs get a validity window (30/60 days) so users
+      // can re-download ("Update map") once expired.
+      await db.execute(
+          'ALTER TABLE offline_regions ADD COLUMN valid_days INTEGER DEFAULT 30');
+      await db.execute(
+          'ALTER TABLE offline_regions ADD COLUMN tile_count INTEGER DEFAULT 0');
+    }
   }
 
   // ===================== PLACES CACHE =====================
@@ -232,6 +242,23 @@ class OfflineDbService {
     return jsonDecode(rows.first['json_data'] as String) as Map<String, dynamic>;
   }
 
+  /// All cached places (Nepal-wide, up to [limit]) — the offline fallback for
+  /// the instant map dataset.
+  Future<List<Map<String, dynamic>>> getAllCachedPlaces({int limit = 1000}) async {
+    final db = await database;
+    final now = DateTime.now().millisecondsSinceEpoch;
+    final rows = await db.query(
+      'cached_places',
+      where: 'expires_at > ?',
+      whereArgs: [now],
+      orderBy: 'is_featured DESC, fetched_at DESC',
+      limit: limit,
+    );
+    return rows
+        .map((row) => jsonDecode(row['json_data'] as String) as Map<String, dynamic>)
+        .toList();
+  }
+
   Future<void> clearExpiredCache() async {
     final db = await database;
     final now = DateTime.now().millisecondsSinceEpoch;
@@ -240,11 +267,16 @@ class OfflineDbService {
 
   // ===================== MAP TILE CACHE =====================
 
+  /// Looks up a cached map tile. Returns `null` (a cache miss) when the tile is
+  /// absent OR looks broken (empty payload) OR is older than [maxAgeMs] (when
+  /// given). Treating empty/overlong-stale blobs as a miss lets the tile layer
+  /// re-download a fresh tile instead of showing a gray/blank tile forever.
   Future<Uint8List?> getCachedTile({
     required int z,
     required int x,
     required int y,
     String tileType = 'default',
+    int? maxAgeMs,
   }) async {
     final db = await database;
     final rows = await db.query(
@@ -255,9 +287,27 @@ class OfflineDbService {
     );
     if (rows.isEmpty) return null;
     final blob = rows.first['blob_data'];
-    if (blob is Uint8List) return blob;
-    if (blob is List<int>) return Uint8List.fromList(blob);
-    return null;
+    final Uint8List? bytes = (blob is Uint8List)
+        ? blob
+        : (blob is List<int> ? Uint8List.fromList(blob) : null);
+    if (bytes == null || bytes.isEmpty) {
+      // Empty/corrupt row — remove it so a later fetch can re-download and the
+      // map never shows a blank tile sourced from this broken entry.
+      await db.delete(
+        'tile_cache',
+        where: 'z = ? AND x = ? AND y = ? AND tile_type = ?',
+        whereArgs: [z, x, y, tileType],
+      );
+      return null;
+    }
+    if (maxAgeMs != null) {
+      final cachedAt = rows.first['cached_at'];
+      if (cachedAt is int &&
+          DateTime.now().millisecondsSinceEpoch - cachedAt > maxAgeMs) {
+        return null;
+      }
+    }
+    return bytes;
   }
 
   Future<void> saveTile({
@@ -282,6 +332,22 @@ class OfflineDbService {
     );
   }
 
+  /// Deletes a single cached tile — used when a cached blob is corrupt/stale so
+  /// the next visit re-downloads a fresh copy instead of showing a broken tile.
+  Future<void> clearTile({
+    required int z,
+    required int x,
+    required int y,
+    String tileType = 'default',
+  }) async {
+    final db = await database;
+    await db.delete(
+      'tile_cache',
+      where: 'z = ? AND x = ? AND y = ? AND tile_type = ?',
+      whereArgs: [z, x, y, tileType],
+    );
+  }
+
   Future<bool> hasTile({required int z, required int x, required int y, String tileType = 'default'}) async {
     final db = await database;
     final rows = await db.query(
@@ -303,6 +369,119 @@ class OfflineDbService {
     return (Sqflite.firstIntValue(tile) ?? 0) +
         (Sqflite.firstIntValue(places) ?? 0) +
         (Sqflite.firstIntValue(queue) ?? 0);
+  }
+
+  // ===================== OFFLINE MAP PACKS =====================
+
+  Future<Map<String, dynamic>?> getOfflineRegion(String name) async {
+    final db = await database;
+    final rows = await db.query(
+      'offline_regions',
+      where: 'name = ?',
+      whereArgs: [name],
+      limit: 1,
+    );
+    if (rows.isEmpty) return null;
+    return rows.first;
+  }
+
+  Future<void> saveOfflineRegion({
+    required String name,
+    required double minLat,
+    required double maxLat,
+    required double minLng,
+    required double maxLng,
+    required int minZoom,
+    required int maxZoom,
+    required int validDays,
+    int tileCount = 0,
+  }) async {
+    final db = await database;
+    await db.insert(
+      'offline_regions',
+      {
+        'name': name,
+        'min_lat': minLat,
+        'max_lat': maxLat,
+        'min_lng': minLng,
+        'max_lng': maxLng,
+        'zoom_min': minZoom,
+        'zoom_max': maxZoom,
+        'downloaded_at': DateTime.now().millisecondsSinceEpoch,
+        'valid_days': validDays,
+        'tile_count': tileCount,
+        'is_expired': 0,
+      },
+      conflictAlgorithm: ConflictAlgorithm.replace,
+    );
+  }
+
+  Future<void> deleteOfflineRegion(String name) async {
+    final db = await database;
+    await db.delete('offline_regions', where: 'name = ?', whereArgs: [name]);
+  }
+
+  /// Deletes cached tiles inside [bounds] for [minZoom..maxZoom] — used when
+  /// an offline map pack is updated (replaced) or deleted.
+  Future<void> clearTilesInRegion({
+    required double minLat,
+    required double maxLat,
+    required double minLng,
+    required double maxLng,
+    required int minZoom,
+    required int maxZoom,
+  }) async {
+    final db = await database;
+    for (var z = minZoom; z <= maxZoom; z++) {
+      final n = 1 << z;
+      final xMin = _lonToTileX(minLng, n);
+      final xMax = _lonToTileX(maxLng, n);
+      final yMin = _latToTileY(maxLat, n);
+      final yMax = _latToTileY(minLat, n);
+      await db.delete(
+        'tile_cache',
+        where: 'z = ? AND x BETWEEN ? AND ? AND y BETWEEN ? AND ?',
+        whereArgs: [z, xMin, xMax, yMin, yMax],
+      );
+    }
+  }
+
+  /// Number of cached tiles inside [bounds] for [minZoom..maxZoom].
+  Future<int> countTilesInRegion({
+    required double minLat,
+    required double maxLat,
+    required double minLng,
+    required double maxLng,
+    required int minZoom,
+    required int maxZoom,
+  }) async {
+    final db = await database;
+    var total = 0;
+    for (var z = minZoom; z <= maxZoom; z++) {
+      final n = 1 << z;
+      final xMin = _lonToTileX(minLng, n);
+      final xMax = _lonToTileX(maxLng, n);
+      final yMin = _latToTileY(maxLat, n);
+      final yMax = _latToTileY(minLat, n);
+      final rows = await db.rawQuery(
+        'SELECT COUNT(*) AS c FROM tile_cache WHERE z = ? AND x BETWEEN ? AND ? AND y BETWEEN ? AND ?',
+        [z, xMin, xMax, yMin, yMax],
+      );
+      total += (Sqflite.firstIntValue(rows) ?? 0);
+    }
+    return total;
+  }
+
+  static int _lonToTileX(double lng, int n) {
+    return (((lng + 180.0) / 360.0) * n).floor().clamp(0, n - 1).toInt();
+  }
+
+  static int _latToTileY(double lat, int n) {
+    final rad = lat * 3.141592653589793 / 180.0;
+    final tanLat = math.tan(rad);
+    final asinh = math.log(tanLat + math.sqrt(tanLat * tanLat + 1));
+    final t = (1.0 - (asinh / 3.141592653589793)) / 2.0;
+    return (t * n).floor().clamp(0, n - 1).toInt();
   }
 
   // ===================== SYNC QUEUE =====================
@@ -449,5 +628,6 @@ class OfflineDbService {
     await db.delete('sync_queue');
     await db.delete('tile_cache');
     await db.delete('recently_viewed');
+    await db.delete('offline_regions');
   }
 }

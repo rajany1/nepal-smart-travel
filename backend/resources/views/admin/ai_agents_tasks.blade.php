@@ -1,4 +1,4 @@
-@extends('admin.layout')
+﻿@extends('admin.layout')
 
 @section('title', 'AI Agent Tasks')
 
@@ -55,6 +55,7 @@
       <h3 class="text-lg font-semibold text-gray-800">Task History</h3>
     </div>
     <div class="overflow-x-auto">
+<div id="liveTable">
       <table class="w-full">
         <thead class="bg-gray-50">
           <tr>
@@ -116,6 +117,7 @@
     </div>
     @if(method_exists($tasks, 'links'))
       <div class="px-6 py-4 border-t border-gray-100">{{ $tasks->links() }}</div>
+</div>
     @endif
   </div>
 </div>
@@ -143,16 +145,16 @@ function showTaskDetails(id) {
     const t = taskDetails.find(x => x.id === id);
     if (!t) return;
     const lines = [
-        '═══════════════════════════════',
+        'â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•',
         `  Task #${t.id}  |  ${t.agent}`,
-        '═══════════════════════════════',
+        'â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•',
         `  Status  : ${t.status.toUpperCase()}`,
         `  Type    : ${t.type}`,
         `  Created : ${t.created}`,
         `  Done    : ${t.completed}`,
     ];
     if (t.message) lines.push(`  Message : ${t.message}`);
-    if (t.error) lines.push(``, `  ⚠ ERROR:`, `  ${t.error}`);
+    if (t.error) lines.push(``, `  âš  ERROR:`, `  ${t.error}`);
     if (t.output && Object.keys(t.output).length) {
         lines.push(``, `  Output:`);
         for (const [k, v] of Object.entries(t.output)) {
@@ -160,7 +162,7 @@ function showTaskDetails(id) {
             lines.push(`    ${k}: ${typeof v === 'object' ? JSON.stringify(v) : v}`);
         }
     }
-    lines.push('───────────────────────────────');
+    lines.push('â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€');
     alert(lines.join('\n'));
 }
 </script>

@@ -28,7 +28,7 @@ abstract class BaseHandler
     protected function ai(): AiProviderInterface
     {
         $provider = $this->agent->provider ?? config('services.ai.provider', 'gemini');
-        $model = $this->agent->model ?: config('services.ai.model', 'gemini-2.0-flash');
+        $model = $this->agent->model ?: config('services.ai.model', 'qwen/qwen3.6-27b');
 
         $attempts = match ($provider) {
             'groq' => [['label' => 'groq:' . $model, 'provider' => new GroqService($model)]],
@@ -36,10 +36,13 @@ abstract class BaseHandler
         };
 
         $chain = AiFallbackRouter::textChain();
-        $primaryPrefix = $provider === 'groq' ? 'groq:' : 'gemini:';
+        $primaryLabel = $attempts[0]['label'];
 
+        // Skip only an exact duplicate of the primary attempt. Prefix
+        // matching here used to drop every same-provider chain entry,
+        // so a stale agent model could knock out the healthy fallback.
         foreach ($chain->getAttempts() as $attempt) {
-            if (str_starts_with((string) ($attempt['label'] ?? ''), $primaryPrefix)) {
+            if ((string) ($attempt['label'] ?? '') === $primaryLabel) {
                 continue;
             }
             $attempts[] = $attempt;

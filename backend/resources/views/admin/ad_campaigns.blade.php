@@ -1,4 +1,4 @@
-@extends('admin.layout')
+﻿@extends('admin.layout')
 @section('title', 'Ad Campaigns')
 
 @section('content')
@@ -51,6 +51,7 @@
 
     <div class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
         <div class="overflow-x-auto">
+<div id="liveTable">
             <table class="w-full text-sm">
                 <thead class="bg-slate-50">
                     <tr><th class="text-left px-4 py-3">Campaign</th><th class="text-left px-4 py-3">Business</th><th class="text-center px-4 py-3">Impressions</th><th class="text-center px-4 py-3">Clicks</th><th class="text-center px-4 py-3">CTR</th><th class="text-center px-4 py-3">Budget / Paid</th><th class="text-center px-4 py-3">Payment</th><th class="text-center px-4 py-3">Targeting</th><th class="text-center px-4 py-3">Status</th><th class="text-right px-4 py-3">Actions</th></tr>
@@ -63,7 +64,7 @@
                             @if($c->content)<p class="text-xs text-slate-400">{{ Str::limit($c->content, 70) }}</p>@endif
                             <span class="text-[10px] bg-slate-100 text-slate-500 px-2 py-0.5 rounded-full">{{ str_replace('_', ' ', $c->ad_type) }}</span>
                         </td>
-                        <td class="px-4 py-4 text-sm">{{ $c->business?->name ?? '—' }}</td>
+                        <td class="px-4 py-4 text-sm">{{ $c->business?->name ?? 'â€”' }}</td>
                         <td class="px-4 py-4 text-center text-sm">{{ number_format($c->current_impressions) }}{{ $c->max_impressions > 0 ? ' / '.number_format($c->max_impressions) : '' }}</td>
                         <td class="px-4 py-4 text-center text-sm">{{ number_format($c->current_clicks) }}</td>
                         <td class="px-4 py-4 text-center text-sm">{{ $c->ctr() }}%</td>
@@ -83,8 +84,8 @@
                             @switch($c->status)
                                 @case('active')
                                     <span class="text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded-full">Active</span>
-                                    @if($c->ends_at && $c->ends_at->lte(now()))<span class="block text-[10px] text-orange-500 mt-0.5">Ended — not serving</span>
-                                    @elseif(!$c->hasBudget())<span class="block text-[10px] text-orange-500 mt-0.5">Budget exhausted — not serving</span>@endif
+                                    @if($c->ends_at && $c->ends_at->lte(now()))<span class="block text-[10px] text-orange-500 mt-0.5">Ended â€” not serving</span>
+                                    @elseif(!$c->hasBudget())<span class="block text-[10px] text-orange-500 mt-0.5">Budget exhausted â€” not serving</span>@endif
                                     @break
                                 @case('pending')<span class="text-xs bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full">Pending</span>@break
                                 @case('paused')
@@ -140,6 +141,7 @@
     </div>
     <div class="mt-4">{{ $campaigns->appends(['status' => $status])->links() }}</div>
 </div>
+</div>
 
 {{-- Reject Modal --}}
 <div id="rejectModal" class="hidden fixed inset-0 z-50 bg-black/40 grid place-items-center" onclick="if(event.target===this)this.classList.add('hidden')">
@@ -168,7 +170,7 @@
                 <div><label>Campaign Name</label><input type="text" name="name" required class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm"></div>
                 <div><label>Ad Type</label><select name="ad_type" required class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm"><option value="banner">Banner</option><option value="promoted_place">Promoted Place</option><option value="sponsored_card">Sponsored Card</option></select></div>
             </div>
-            <div><label>Business (optional)</label><select name="business_id" class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm"><option value="">— None —</option>@foreach($partners as $p)<option value="{{ $p->id }}">{{ $p->name }}</option>@endforeach</select></div>
+            <div><label>Business (optional)</label><select name="business_id" class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm"><option value="">â€” None â€”</option>@foreach($partners as $p)<option value="{{ $p->id }}">{{ $p->name }}</option>@endforeach</select></div>
             <div><label>Content</label><textarea name="content" rows="2" class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm"></textarea></div>
             <div class="grid grid-cols-2 gap-4">
                 <div><label>Target URL</label><input type="url" name="target_url" class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm"></div>
@@ -204,7 +206,7 @@
                 <div><label>Name</label><input type="text" name="name" id="editName" required class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm"></div>
                 <div><label>Type</label><select name="ad_type" id="editType" required class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm"><option value="banner">Banner</option><option value="promoted_place">Promoted Place</option><option value="sponsored_card">Sponsored Card</option></select></div>
             </div>
-            <div><label>Business</label><select name="business_id" id="editBusiness" class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm"><option value="">— None —</option>@foreach($partners as $p)<option value="{{ $p->id }}">{{ $p->name }}</option>@endforeach</select></div>
+            <div><label>Business</label><select name="business_id" id="editBusiness" class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm"><option value="">â€” None â€”</option>@foreach($partners as $p)<option value="{{ $p->id }}">{{ $p->name }}</option>@endforeach</select></div>
             <div><label>Content</label><textarea name="content" id="editContent" rows="2" class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm"></textarea></div>
             <div class="grid grid-cols-2 gap-4">
                 <div><label>Target URL</label><input type="url" name="target_url" id="editUrl" class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm"></div>

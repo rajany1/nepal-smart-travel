@@ -1,12 +1,12 @@
 import 'package:flutter/material.dart';
-import "../../core/services/localization_service.dart";
+import 'dart:convert';
+import 'dart:io';
 import 'package:provider/provider.dart';
 import '../../config/themes/app_theme.dart';
 import '../../providers/auth_provider.dart';
 import '../../providers/profile_provider.dart';
 import '../../core/api/api_client.dart';
 import 'package:image_picker/image_picker.dart';
-// import 'dart:io';
 
 class ProfileSetupScreen extends StatefulWidget {
   const ProfileSetupScreen({super.key});
@@ -27,6 +27,7 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
   String? _selectedInterest;
   List<String> _selectedExpertiseRegions = [];
   String? _avatarUrl;
+  bool _avatarChanged = false;
   bool _isLoading = false;
   bool _editMode = false;
   final ImagePicker _picker = ImagePicker();
@@ -98,8 +99,10 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
         imageQuality: 80,
       );
       if (image != null) {
-        // In production, upload to server and get URL
-        setState(() => _avatarUrl = image.path);
+        setState(() {
+          _avatarUrl = image.path;
+          _avatarChanged = true;
+        });
       }
     } catch (e) {
       if (mounted) {
@@ -130,11 +133,20 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
         data['avatar'] = _avatarUrl;
       }
 
+      final profileProv = context.read<ProfileProvider>();
+
+      // Upload picked avatar first (base64)
+      if (_avatarChanged && _avatarUrl != null && !_avatarUrl!.startsWith('http')) {
+        final bytes = await File(_avatarUrl!).readAsBytes();
+        final base64Image = base64Encode(bytes);
+        await profileProv.updateAvatar('data:image/jpeg;base64,$base64Image');
+      }
+
       final api = ApiClient.instance;
       await api.updateProfile(data);
       await context.read<AuthProvider>().updateProfile(data);
       // Refresh profile provider after save
-      await context.read<ProfileProvider>().loadProfile(forceRefresh: true);
+      await profileProv.loadProfile(forceRefresh: true);
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -203,12 +215,26 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
                           ? NetworkImage(_avatarUrl!)
                           : null,
                       child: _avatarUrl == null || !_avatarUrl!.startsWith('http')
-                          ? Text(
-                              _nameController.text.isNotEmpty 
-                                  ? _nameController.text[0].toUpperCase() 
-                                  : '?',
-                              style: const TextStyle(fontSize: 40, color: AppTheme.primaryColor, fontWeight: FontWeight.bold),
-                            )
+                          ? (_avatarUrl != null
+                              ? ClipOval(
+                                  child: Image.file(
+                                    File(_avatarUrl!),
+                                    width: 100,
+                                    height: 100,
+                                    fit: BoxFit.cover,
+                                    errorBuilder: (_, __, ___) => const Icon(
+                                      Icons.person,
+                                      size: 48,
+                                      color: AppTheme.primaryColor,
+                                    ),
+                                  ),
+                                )
+                              : Text(
+                                  _nameController.text.isNotEmpty 
+                                      ? _nameController.text[0].toUpperCase() 
+                                      : '?',
+                                  style: const TextStyle(fontSize: 40, color: AppTheme.primaryColor, fontWeight: FontWeight.bold),
+                                ))
                           : null,
                     ),
                     Positioned(

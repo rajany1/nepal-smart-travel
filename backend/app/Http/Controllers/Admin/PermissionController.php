@@ -113,6 +113,7 @@ class PermissionController extends Controller
         );
 
         $permission->delete();
+        \App\Support\LiveFeed::bump('permissions', $permission->id);
 
         return redirect()->route('admin.permissions')->with('success', "Permission '{$permission->display_name}' deleted.");
     }

@@ -10,6 +10,10 @@ import '../api/api_client.dart';
 extension L10n on BuildContext {
   String t(String key) => watch<LocalizationService>().t(key);
 
+  /// Handler-safe translation. Use this inside event handlers / async
+  /// callbacks where [t] (which uses `watch`) would throw in debug mode.
+  String tr(String key) => read<LocalizationService>().t(key);
+
   bool get isNepali => watch<LocalizationService>().isNepali;
 }
 

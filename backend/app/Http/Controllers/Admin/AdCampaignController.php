@@ -115,6 +115,7 @@ class AdCampaignController extends Controller
         $this->requireAdmin($request);
         $name = $adCampaign->name;
         $adCampaign->delete();
+        \App\Support\LiveFeed::bump('ad_campaigns', $adCampaign->id);
         $this->moderatorService->log(Auth::user(), 'ad-campaign.deleted', 'ad_campaign', $adCampaign->id, 'Deleted campaign: ' . $name);
         return redirect()->route('admin.ad-campaigns')->with('success', 'Campaign deleted.');
     }

@@ -14,6 +14,18 @@ class LocationService {
   Position? get currentPosition => _currentPosition;
   String? get currentAddress => _currentAddress;
 
+  /// Instant last-known fix (cached in memory or from the OS) — used so the
+  /// map opens on a real spot without waiting for a fresh GPS fix.
+  Future<Position?> getLastKnownPosition() async {
+    if (_currentPosition != null) return _currentPosition;
+    try {
+      _currentPosition = await Geolocator.getLastKnownPosition();
+    } catch (_) {
+      _currentPosition = null;
+    }
+    return _currentPosition;
+  }
+
   Future<bool> requestPermission() async {
     LocationPermission permission = await Geolocator.checkPermission();
     if (permission == LocationPermission.denied) {
@@ -202,10 +214,13 @@ class LocationService {
     int intervalMs = 5000,
     double distanceFilterM = 0,
   }) {
+    // NOTE: no timeLimit here — geolocator applies it as a Stream.timeout()
+    // which KILLS the stream when updates are slower than the limit (e.g.
+    // walking with a 5m distance filter), freezing the blue dot. A live
+    // tracking stream must never time out.
     return Geolocator.getPositionStream(
       locationSettings: LocationSettings(
         accuracy: accuracy,
-        timeLimit: Duration(milliseconds: intervalMs),
         distanceFilter: distanceFilterM.toInt(),
       ),
     );

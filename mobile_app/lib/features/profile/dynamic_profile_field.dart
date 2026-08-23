@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import "../../core/services/localization_service.dart";
 import '../../../config/themes/app_theme.dart';
 import '../../../core/models/profile_fields.dart';
 
@@ -121,10 +120,46 @@ class _DynamicProfileFieldState extends State<DynamicProfileField> {
 
       case ProfileFieldType.checkbox:
         return _buildCheckboxField();
-
-      default:
-        return _buildTextField();
     }
+  }
+
+  InputDecoration _baseDecoration({String? hint, Widget? suffixIcon}) {
+    return InputDecoration(
+      hintText: hint ?? widget.fieldDef.placeholder,
+      suffixIcon: suffixIcon,
+      filled: widget.fieldDef.readonly,
+      fillColor: widget.fieldDef.readonly
+          ? AppTheme.dividerColor.withValues(alpha: 0.3)
+          : Colors.white,
+      hintStyle: const TextStyle(color: AppTheme.textSecondary),
+      border: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(12),
+        borderSide: const BorderSide(color: AppTheme.dividerColor),
+      ),
+      enabledBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(12),
+        borderSide: const BorderSide(color: AppTheme.dividerColor),
+      ),
+      focusedBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(12),
+        borderSide: const BorderSide(
+          color: AppTheme.primaryColor,
+          width: 2,
+        ),
+      ),
+      errorBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(12),
+        borderSide: const BorderSide(color: AppTheme.errorColor),
+      ),
+      focusedErrorBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(12),
+        borderSide: const BorderSide(color: AppTheme.errorColor, width: 2),
+      ),
+      contentPadding: const EdgeInsets.symmetric(
+        horizontal: 14,
+        vertical: 14,
+      ),
+    );
   }
 
   Widget _buildTextField() {
@@ -134,36 +169,7 @@ class _DynamicProfileFieldState extends State<DynamicProfileField> {
       obscureText: widget.fieldDef.type == ProfileFieldType.email ? false : false,
       maxLength: widget.fieldDef.maxLength,
       readOnly: widget.fieldDef.readonly,
-      decoration: InputDecoration(
-        hintText: widget.fieldDef.placeholder,
-        border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(8),
-          borderSide: const BorderSide(color: AppTheme.dividerColor),
-        ),
-        enabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(8),
-          borderSide: const BorderSide(color: AppTheme.dividerColor),
-        ),
-        focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(8),
-          borderSide: const BorderSide(
-            color: AppTheme.primaryColor,
-            width: 2,
-          ),
-        ),
-        errorBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(8),
-          borderSide: const BorderSide(color: AppTheme.errorColor),
-        ),
-        filled: widget.fieldDef.readonly,
-        fillColor: widget.fieldDef.readonly
-            ? AppTheme.dividerColor.withOpacity(0.3)
-            : null,
-        contentPadding: const EdgeInsets.symmetric(
-          horizontal: 12,
-          vertical: 12,
-        ),
-      ),
+      decoration: _baseDecoration(),
       onChanged: (value) {
         widget.onChanged(value.trim());
       },
@@ -175,25 +181,7 @@ class _DynamicProfileFieldState extends State<DynamicProfileField> {
       controller: _textController,
       maxLines: widget.fieldDef.rows ?? 4,
       maxLength: widget.fieldDef.maxLength,
-      decoration: InputDecoration(
-        hintText: widget.fieldDef.placeholder,
-        border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(8),
-          borderSide: const BorderSide(color: AppTheme.dividerColor),
-        ),
-        enabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(8),
-          borderSide: const BorderSide(color: AppTheme.dividerColor),
-        ),
-        focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(8),
-          borderSide: const BorderSide(
-            color: AppTheme.primaryColor,
-            width: 2,
-          ),
-        ),
-        contentPadding: const EdgeInsets.all(12),
-      ),
+      decoration: _baseDecoration(),
       onChanged: (value) {
         widget.onChanged(value.trim());
       },
@@ -206,8 +194,11 @@ class _DynamicProfileFieldState extends State<DynamicProfileField> {
         ) ??
         widget.fieldDef.options;
 
+    final hasValue = widget.initialValue == null ||
+        options.any((o) => o.value == widget.initialValue?.toString());
+
     return DropdownButtonFormField<String>(
-      value: widget.initialValue?.toString(),
+      value: hasValue ? widget.initialValue?.toString() : null,
       items: [
         DropdownMenuItem(
           value: null,
@@ -222,24 +213,7 @@ class _DynamicProfileFieldState extends State<DynamicProfileField> {
       onChanged: (value) {
         widget.onChanged(value);
       },
-      decoration: InputDecoration(
-        border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(8),
-          borderSide: const BorderSide(color: AppTheme.dividerColor),
-        ),
-        enabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(8),
-          borderSide: const BorderSide(color: AppTheme.dividerColor),
-        ),
-        focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(8),
-          borderSide: const BorderSide(
-            color: AppTheme.primaryColor,
-            width: 2,
-          ),
-        ),
-        contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
-      ),
+      decoration: _baseDecoration(),
     );
   }
 
@@ -307,28 +281,7 @@ class _DynamicProfileFieldState extends State<DynamicProfileField> {
     return TextFormField(
       controller: _textController,
       keyboardType: TextInputType.number,
-      decoration: InputDecoration(
-        hintText: widget.fieldDef.placeholder,
-        border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(8),
-          borderSide: const BorderSide(color: AppTheme.dividerColor),
-        ),
-        enabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(8),
-          borderSide: const BorderSide(color: AppTheme.dividerColor),
-        ),
-        focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(8),
-          borderSide: const BorderSide(
-            color: AppTheme.primaryColor,
-            width: 2,
-          ),
-        ),
-        contentPadding: const EdgeInsets.symmetric(
-          horizontal: 12,
-          vertical: 12,
-        ),
-      ),
+      decoration: _baseDecoration(),
       onChanged: (value) {
         widget.onChanged(int.tryParse(value) ?? 0);
       },
@@ -336,31 +289,29 @@ class _DynamicProfileFieldState extends State<DynamicProfileField> {
   }
 
   Widget _buildDateField() {
+    final currentValue = _textController.text;
+    DateTime? initial = DateTime.tryParse(currentValue);
     return TextFormField(
       controller: _textController,
       readOnly: true,
-      decoration: InputDecoration(
-        hintText: widget.fieldDef.placeholder ?? 'Select a date',
-        suffixIcon: const Icon(Icons.calendar_today),
-        border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(8),
-          borderSide: const BorderSide(color: AppTheme.dividerColor),
-        ),
-        enabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(8),
-          borderSide: const BorderSide(color: AppTheme.dividerColor),
-        ),
-        contentPadding: const EdgeInsets.symmetric(
-          horizontal: 12,
-          vertical: 12,
-        ),
+      decoration: _baseDecoration(
+        suffixIcon: const Icon(Icons.calendar_today, color: AppTheme.primaryColor),
       ),
       onTap: () async {
         final date = await showDatePicker(
           context: context,
-          initialDate: DateTime.now(),
+          initialDate: initial ?? DateTime.now(),
           firstDate: DateTime(1900),
           lastDate: DateTime.now(),
+          builder: (context, child) => Theme(
+            data: Theme.of(context).copyWith(
+              colorScheme: ColorScheme.fromSeed(
+                seedColor: AppTheme.primaryColor,
+                primary: AppTheme.primaryColor,
+              ),
+            ),
+            child: child!,
+          ),
         );
         if (date != null) {
           _textController.text = date.toIso8601String().split('T')[0];

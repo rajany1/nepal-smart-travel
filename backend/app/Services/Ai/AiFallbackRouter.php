@@ -160,8 +160,8 @@ class AiFallbackRouter implements AiProviderInterface
             switch ($name) {
                 case 'groq':
                     $attempts[] = [
-                        'label' => 'groq:' . config('services.ai.model', 'llama-3.3-70b-versatile'),
-                        'provider' => new GroqService(config('services.ai.model', 'llama-3.3-70b-versatile')),
+                        'label' => 'groq:' . config('services.ai.model', 'qwen/qwen3.6-27b'),
+                        'provider' => new GroqService(config('services.ai.model', 'qwen/qwen3.6-27b')),
                     ];
                     break;
 
@@ -169,7 +169,7 @@ class AiFallbackRouter implements AiProviderInterface
                     foreach (self::geminiKeys($keyPool) as $key) {
                         $attempts[] = [
                             'label' => 'gemini:' . substr($key, 0, 8),
-                            'provider' => new GeminiService(config('services.ai.model', 'gemini-2.0-flash'), $key),
+                            'provider' => new GeminiService(config('services.ai.gemini_text_model', 'gemini-3.6-flash'), $key),
                             'key' => $key,
                         ];
                     }

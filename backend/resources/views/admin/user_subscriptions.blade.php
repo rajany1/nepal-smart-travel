@@ -1,4 +1,4 @@
-@extends('admin.layout')
+﻿@extends('admin.layout')
 @section('title', 'User Subscriptions')
 
 @section('content')
@@ -15,6 +15,7 @@
 
     <div class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
         <div class="overflow-x-auto">
+<div id="liveTable">
             <table class="w-full">
                 <thead class="bg-slate-50">
                     <tr><th class="px-6 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">User</th><th class="px-6 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">Plan</th><th class="px-6 py-3 text-center text-xs font-semibold text-slate-500 uppercase tracking-wider">Status</th><th class="px-6 py-3 text-center text-xs font-semibold text-slate-500 uppercase tracking-wider">Starts</th><th class="px-6 py-3 text-center text-xs font-semibold text-slate-500 uppercase tracking-wider">Ends</th><th class="px-6 py-3 text-right text-xs font-semibold text-slate-500 uppercase tracking-wider">Actions</th></tr>
@@ -32,7 +33,7 @@
                                 @case('expired')<span class="text-xs bg-slate-100 text-slate-600 px-2 py-0.5 rounded-full">Expired</span>@break
                             @endswitch
                         </td>
-                        <td class="px-6 py-4 text-center text-sm">{{ $sub->starts_at?->format('Y-m-d') ?? '—' }}</td>
+                        <td class="px-6 py-4 text-center text-sm">{{ $sub->starts_at?->format('Y-m-d') ?? 'â€”' }}</td>
                         <td class="px-6 py-4 text-center text-sm">{{ $sub->ends_at?->format('Y-m-d') ?? 'Unlimited' }}</td>
                         <td class="px-6 py-4 text-right">
                             @if(($sub->status === 'active' || $sub->status === 'trialing') && $sub->plan?->slug !== 'free')
@@ -52,6 +53,7 @@
     </div>
     <div class="mt-4">{{ $subscriptions->links() }}</div>
 </div>
+</div>
 
 <div id="assignModal" class="hidden fixed inset-0 z-50 bg-black/40 grid place-items-center" onclick="if(event.target===this)this.classList.add('hidden')">
     <div class="bg-white rounded-2xl shadow-xl w-full max-w-md mx-4 p-6">
@@ -68,7 +70,7 @@
             <div><label class="block text-xs font-semibold text-slate-600 mb-1">Plan</label>
                 <select name="subscription_plan_id" required class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm">
                     @foreach($plans as $p)
-                    <option value="{{ $p->id }}">{{ $p->name }} — Rs. {{ number_format($p->price) }}/{{ $p->billing_interval }}</option>
+                    <option value="{{ $p->id }}">{{ $p->name }} â€” Rs. {{ number_format($p->price) }}/{{ $p->billing_interval }}</option>
                     @endforeach
                 </select>
             </div>

@@ -14,10 +14,12 @@ use App\Models\ModerationQueue;
 use App\Models\AuditLog;
 use App\Models\XpTransaction;
 use App\Models\PlaceImage;
+use App\Models\PlaceReview;
 use App\Services\AchievementService;
 use App\Services\PushNotificationService;
 use App\Services\ModeratorService;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 use Carbon\Carbon;
@@ -159,6 +161,14 @@ class AdminController extends Controller
     {
         $this->requireAdmin($request);
 
+        $stats = $this->dashboardStats();
+
+        return view('admin.dashboard', compact('stats'));
+    }
+
+    /** Scalar dashboard numbers — reused by dashboard() and the live-feed stats endpoint. */
+    private function dashboardStats(): array
+    {
         $user = Auth::user();
         $isModerator = $user->isModerator();
 
@@ -222,7 +232,7 @@ class AdminController extends Controller
         );
         $healthStatus = $healthScore >= 80 ? 'Excellent' : ($healthScore >= 60 ? 'Stable' : 'Needs attention');
 
-        $stats = [
+        return [
             'total_users' => $totalUsers,
             'total_reports' => $totalReports,
             'pending_reports' => $pendingReports,
@@ -256,8 +266,44 @@ class AdminController extends Controller
             'moderator_permissions' => $isModerator ? $this->moderatorService->getPermissions($user) : [],
             'recent_audit_logs' => AuditLog::with('user')->latest()->take(5)->get(),
         ];
+    }
 
-        return view('admin.dashboard', compact('stats'));
+    /** Live-feed stats: scalar numbers only (chart data included for the trend card). */
+    public function liveFeedStats(Request $request)
+    {
+        $this->requireAdmin($request);
+
+        $stats = $this->dashboardStats();
+
+        return response()->json([
+            'success' => true,
+            'stats' => [
+                'total_users' => $stats['total_users'],
+                'total_reports' => $stats['total_reports'],
+                'pending_reports' => $stats['pending_reports'],
+                'approved_reports' => $stats['approved_reports'],
+                'rejected_reports' => $stats['rejected_reports'],
+                'total_alerts' => $stats['total_alerts'],
+                'total_places' => $stats['total_places'],
+                'operations_efficiency' => $stats['operations_efficiency'],
+                'analytics_score' => $stats['analytics_score'],
+                'ads_income' => $stats['ads_income'],
+                'system_health_score' => $stats['system_health_score'],
+                'system_health_status' => $stats['system_health_status'],
+                'users_change_pct' => $stats['users_change_pct'],
+                'reports_change_pct' => $stats['reports_change_pct'],
+                'pending_change_pct' => $stats['pending_change_pct'],
+                'alerts_change_pct' => $stats['alerts_change_pct'],
+                'chart_today' => $stats['chart_values'][6] ?? 0,
+                'chart_peak' => max($stats['chart_values']),
+                'chart_avg' => (int) round(collect($stats['chart_values'])->avg()),
+                'pending_queue' => $stats['pending_queue'],
+                'xp_report_approval' => $stats['xp_rates']['report_approval_xp'],
+                'xp_alert_post' => $stats['xp_rates']['alert_post_xp'],
+                'xp_review' => $stats['xp_rates']['review_xp'],
+                'xp_place_submit' => $stats['xp_rates']['place_submit_xp'],
+            ],
+        ]);
     }
 
     public function auditLogs(Request $request)
@@ -603,16 +649,16 @@ class AdminController extends Controller
 
         if ($report->latitude && $report->longitude) {
             try {
-                PushNotificationService::notifyNearbyUsers(
+                dispatch(new \App\Jobs\SendNearbyPushNotification(
                     title: 'âš ï¸ ' . $report->title,
                     message: str($report->description)->limit(100),
                     latitude: (float) $report->latitude,
                     longitude: (float) $report->longitude,
                     radiusKm: 20,
                     data: ['type' => 'report', 'id' => $report->id],
-                );
+                ));
             } catch (\Throwable $e) {
-                Log::warning('Report approval push notification failed: ' . $e->getMessage());
+                Log::warning('Report approval push dispatch failed: ' . $e->getMessage());
             }
         }
 
@@ -657,6 +703,8 @@ class AdminController extends Controller
 
         $report = Report::findOrFail($id);
         $report->delete();
+
+        \App\Support\LiveFeed::bump('reports', $id);
 
         ModerationQueue::where('content_type', 'report')
             ->where('content_id', $id)
@@ -829,6 +877,8 @@ class AdminController extends Controller
         $alert = Alert::findOrFail($id);
         $alert->delete();
 
+        \App\Support\LiveFeed::bump('alerts', $id);
+
         $this->logAction('alert.deleted', 'alert', $id, "Deleted alert #{$id}: {$alert->title}");
 
         return back()->with('success', 'Alert deleted');
@@ -844,7 +894,11 @@ class AdminController extends Controller
         $place = Place::findOrFail($id);
         $place->delete();
 
+        \App\Support\LiveFeed::bump('places', $id);
+
         $this->logAction('place.deleted', 'place', $id, "Deleted place #{$id}: {$place->name}");
+
+        \App\Services\PlacesCache::bump();
 
         return back()->with('success', 'Place deleted');
     }
@@ -860,7 +914,95 @@ class AdminController extends Controller
 
         $this->logAction('place.feature', 'place', $place->id, "{$status} place #{$place->id}: {$place->name}");
 
+        \App\Services\PlacesCache::bump();
+
         return back()->with('success', "Place {$status}");
+    }
+
+    // ========== PLACE REVIEWS (view/edit/delete from the places list) ==========
+
+    public function placeReviews(Request $request, $id)
+    {
+        $this->requireAdmin($request);
+        $place = Place::findOrFail($id);
+        $reviews = $place->reviews()
+            ->with('user')
+            ->latest()
+            ->get()
+            ->map(fn($r) => [
+                'id' => (string) $r->id,
+                'title' => $r->title,
+                'description' => $r->description,
+                'rating' => (int) $r->rating,
+                'status' => $r->moderation_status ?? 'approved',
+                'user_name' => $r->user?->name ?? 'Anonymous',
+                'created_at' => $r->created_at?->toDateTimeString(),
+            ]);
+
+        return response()->json([
+            'success' => true,
+            'place' => ['id' => $place->id, 'name' => $place->name],
+            'reviews' => $reviews,
+        ]);
+    }
+
+    public function updatePlaceReview(Request $request, $id)
+    {
+        $this->requireAdmin($request);
+        $this->requirePermission('manage_places');
+
+        $review = PlaceReview::findOrFail($id);
+        $validated = $request->validate([
+            'rating' => 'required|integer|min:1|max:5',
+            'title' => 'required|string|max:255',
+            'description' => 'required|string|max:5000',
+            'status' => 'required|in:approved,rejected',
+        ]);
+
+        $review->update([
+            'rating' => $validated['rating'],
+            'title' => $validated['title'],
+            'description' => $validated['description'],
+            'moderation_status' => $validated['status'],
+            'moderated_at' => now(),
+        ]);
+
+        $this->recalcPlaceRating($review->place_id);
+        $this->logAction('place.review.updated', 'place_review', $review->id, "Updated review #{$review->id} (place #{$review->place_id}) by admin");
+
+        \App\Services\PlacesCache::bump();
+
+        return back()->with('success', 'Review updated');
+    }
+
+    public function deletePlaceReview(Request $request, $id)
+    {
+        $this->requireAdmin($request);
+        $this->requirePermission('manage_places');
+
+        $review = PlaceReview::findOrFail($id);
+        $placeId = $review->place_id;
+        $review->delete();
+
+        \App\Support\LiveFeed::bump('place_reviews', $id);
+
+        $this->recalcPlaceRating($placeId);
+        $this->logAction('place.review.deleted', 'place_review', $id, "Deleted review #{$id} (place #{$placeId}) by admin");
+
+        \App\Services\PlacesCache::bump();
+
+        return back()->with('success', 'Review deleted');
+    }
+
+    private function recalcPlaceRating(int $placeId): void
+    {
+        $place = Place::find($placeId);
+        if (!$place) {
+            return;
+        }
+        $place->average_rating = $place->approvedReviews()->avg('rating') ?? 0;
+        $place->total_reviews = $place->approvedReviews()->count();
+        $place->save();
     }
 
     public function approvePlace(Request $request, $id)
@@ -887,6 +1029,8 @@ class AdminController extends Controller
         }
 
         $this->logAction('place.approved', 'place', $place->id, "Approved place #{$place->id}: {$place->name}");
+
+        \App\Services\PlacesCache::bump();
 
         return back()->with('success', 'Place approved and published.');
     }
@@ -916,6 +1060,8 @@ class AdminController extends Controller
         $place->delete();
 
         $this->logAction('place.rejected', 'place', $place->id, "Rejected and deleted place #{$place->id}: {$place->name}");
+
+        \App\Services\PlacesCache::bump();
 
         return back()->with('success', 'Place rejected and removed.');
     }
@@ -992,6 +1138,8 @@ class AdminController extends Controller
             'reviewed_by' => Auth::id(),
             'reviewed_at' => now(),
         ]);
+
+        \App\Services\PlacesCache::bump();
 
         return back()->with('success', 'Correction #' . $correction->id . ' marked as applied.');
     }
@@ -1197,6 +1345,8 @@ class AdminController extends Controller
 
         $this->logAction('place.created', 'place', $place->id, "Created place: {$validated['name']}");
 
+        \App\Services\PlacesCache::bump();
+
         return back()->with('success', 'Place created');
     }
 
@@ -1237,6 +1387,8 @@ class AdminController extends Controller
 
         $this->logAction('place.updated', 'place', $place->id, "Updated place #{$place->id}: {$validated['name']}");
 
+        \App\Services\PlacesCache::bump();
+
         return back()->with('success', 'Place updated');
     }
 
@@ -1250,6 +1402,7 @@ class AdminController extends Controller
         $image->delete();
 
         $this->logAction('place.image-deleted', 'place_image', $id, "Deleted image #{$id} from place #{$placeId}");
+        \App\Services\PlacesCache::bump();
         return back()->with('success', 'Image deleted');
     }
 
@@ -1271,6 +1424,7 @@ class AdminController extends Controller
             ]);
             $output = \Illuminate\Support\Facades\Artisan::output();
             $this->logAction('place.osm-import', 'place', null, "OSM import from city: {$city}, radius: {$radius}");
+            \App\Services\PlacesCache::bump();
             return back()->with('success', "OSM import complete. Output: " . nl2br(e($output)));
         } catch (\Exception $e) {
             return back()->with('error', 'OSM import failed: ' . $e->getMessage());
@@ -1328,7 +1482,9 @@ class AdminController extends Controller
         }
 
         $deleted = Place::whereIn('id', $ids)->delete();
+        \App\Support\LiveFeed::bump('places', $ids);
         $this->logAction('place.bulk-delete', 'place', null, "Bulk deleted {$deleted} places");
+        \App\Services\PlacesCache::bump();
 
         return back()->with('success', "{$deleted} places deleted");
     }
@@ -1363,36 +1519,30 @@ class AdminController extends Controller
 
         $updated = Place::whereIn('id', $ids)->update($updates);
         $this->logAction('place.bulk-update', 'place', null, "Bulk updated {$updated} places");
+        \App\Services\PlacesCache::bump();
 
         return back()->with('success', "{$updated} places updated");
     }
 
     public function liveMap()
     {
-        $places = Place::with('category', 'images')
-            ->where('is_active', true)
+        // Page loads districts + reports + alerts only. Places load via AJAX
+        // (live-map.places) per district selection — loading all ~77k places
+        // on page render exhausts PHP memory and freezes the browser.
+        $districts = Place::where('is_active', true)
             ->whereNotNull('latitude')
             ->whereNotNull('longitude')
-            ->get()
-            ->map(function ($p) {
-                $firstImg = $p->images->first();
-                return [
-                    'id' => $p->id,
-                    'type' => 'place',
-                    'name' => $p->name,
-                    'description' => $p->description,
-                    'latitude' => (float) $p->latitude,
-                    'longitude' => (float) $p->longitude,
-                    'category' => $p->category?->name ?? 'Uncategorized',
-                    'icon' => $p->category?->icon ?? 'map-marker-alt',
-                    'color' => $p->category?->color ?? '#6366f1',
-                    'status' => $p->is_verified ? 'verified' : 'unverified',
-                    'image' => $firstImg ? asset('storage/' . $firstImg->image_url) : null,
-                    'rating' => (float) ($p->average_rating ?? 0),
-                    'reviews_count' => $p->total_reviews ?? 0,
-                    'url' => route('admin.places.view', $p->id),
-                ];
-            });
+            ->whereNotNull('district')
+            ->where('district', '!=', '')
+            ->distinct()
+            ->pluck('district')
+            ->sort()
+            ->values();
+
+        $totalPlaces = Place::where('is_active', true)
+            ->whereNotNull('latitude')
+            ->whereNotNull('longitude')
+            ->count();
 
         $reports = Report::whereIn('status', ['approved', 'pending'])
             ->whereNotNull('latitude')
@@ -1441,16 +1591,90 @@ class AdminController extends Controller
             });
 
         return view('admin.live_map', [
-            'resources' => json_encode([
-                'places' => $places,
-                'reports' => $reports,
-                'alerts' => $alerts,
-            ]),
-            'counts' => [
-                'places' => $places->count(),
-                'reports' => $reports->count(),
-                'alerts' => $alerts->count(),
-            ],
+            'districts' => $districts,
+            'totalPlaces' => $totalPlaces,
+            'reports' => $reports,
+            'alerts' => $alerts,
+        ]);
+    }
+
+    public function liveMapPlaces(Request $request)
+    {
+        // A full-Nepal load is large (~77k rows) — give this admin-only AJAX
+        // call headroom instead of crashing on the default 128M limit.
+        ini_set('memory_limit', '512M');
+        set_time_limit(120);
+
+        $district = trim((string) $request->query('district', 'all'));
+        $ids = $request->query('ids')
+            ? array_values(array_filter(array_map('intval', explode(',', (string) $request->query('ids')))))
+            : [];
+
+        $query = DB::table('places')
+            ->leftJoin('place_categories as c', 'c.id', '=', 'places.category_id')
+            ->select([
+                'places.id',
+                'places.name',
+                'places.district',
+                'places.latitude',
+                'places.longitude',
+                'places.average_rating',
+                'places.total_reviews',
+                'places.is_verified',
+                'c.name as category',
+                'c.icon as icon',
+            ])
+            ->where('places.is_active', true)
+            ->whereNotNull('places.latitude')
+            ->whereNotNull('places.longitude');
+
+        if ($district !== 'all') {
+            $query->where('places.district', $district);
+        }
+
+        if ($ids !== []) {
+            $query->whereIn('places.id', $ids);
+        }
+
+        $places = $query->get();
+
+        // Images only for single districts / small delta loads; skipped for full-Nepal.
+        $images = collect();
+        if ($district !== 'all' || $ids !== []) {
+            $images = DB::table('place_images')
+                ->whereIn('place_id', $places->pluck('id'))
+                ->select('place_id', 'image_url')
+                ->get()
+                ->groupBy('place_id');
+        }
+
+        $urlPrefix = url('/admin/places/');
+        $result = $places->map(function ($p) use ($images, $urlPrefix) {
+            $img = $images->get($p->id)?->first();
+            return [
+                'id' => $p->id,
+                'type' => 'place',
+                'name' => $p->name,
+                'district' => $p->district,
+                'description' => null,
+                'latitude' => (float) $p->latitude,
+                'longitude' => (float) $p->longitude,
+                'category' => $p->category ?: 'Uncategorized',
+                'icon' => $p->icon ?: 'map-marker-alt',
+                'color' => '#00695C',
+                'status' => $p->is_verified ? 'verified' : 'unverified',
+                'image' => $img ? asset('storage/' . $img->image_url) : null,
+                'rating' => (float) ($p->average_rating ?? 0),
+                'reviews_count' => (int) ($p->total_reviews ?? 0),
+                'url' => $urlPrefix . $p->id,
+            ];
+        });
+
+        return response()->json([
+            'success' => true,
+            'district' => $district,
+            'count' => $result->count(),
+            'places' => $result->values(),
         ]);
     }
 

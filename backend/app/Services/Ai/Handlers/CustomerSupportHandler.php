@@ -46,7 +46,9 @@ class CustomerSupportHandler extends BaseHandler
 
         $nearby = $this->getNearbyPlaces($lat, $lng);
         $alerts = $this->getLiveAlerts();
-        $categories = PlaceCategories::select('id', 'name', 'icon')->get()->toArray();
+        // 100+ categories as full JSON is ~6KB and blows Groq free-tier TPM;
+        // a compact id/name slice keeps the model oriented without the bloat.
+        $categories = PlaceCategories::select('id', 'name')->take(25)->get()->toArray();
 
         $nearbyJson = json_encode($nearby, JSON_UNESCAPED_UNICODE);
         $alertsJson = json_encode($alerts, JSON_UNESCAPED_UNICODE);
@@ -141,12 +143,15 @@ PROMPT;
     {
         if (!$lat || !$lng) return [];
 
-        $places = Place::select('id', 'name', 'category_id', 'latitude', 'longitude', 'district', 'description', 'average_rating')
+        // Keep the prompt small: descriptions blow past Groq's free-tier
+        // TPM limit and force multi-retry sleeps. 5 compact rows is enough
+        // context for recommendations.
+        $places = Place::select('id', 'name', 'category_id', 'latitude', 'longitude', 'district', 'average_rating')
             ->selectRaw("(6371 * acos(cos(radians(?)) * cos(radians(latitude)) * cos(radians(longitude) - radians(?)) + sin(radians(?)) * sin(radians(latitude)))) AS distance", [$lat, $lng, $lat])
             ->where('is_active', true)
             ->having('distance', '<=', 50)
             ->orderBy('distance')
-            ->take(20)
+            ->take(5)
             ->get();
 
         return $places->toArray();
@@ -154,10 +159,10 @@ PROMPT;
 
     protected function getLiveAlerts(): array
     {
-        return Alert::select('id', 'title', 'description', 'severity', 'latitude', 'longitude')
+        return Alert::select('id', 'title', 'severity')
             ->where(function ($q) {
                 $q->whereNull('expires_at')->orWhere('expires_at', '>', now());
             })
-            ->latest()->take(10)->get()->toArray();
+            ->latest()->take(3)->get()->toArray();
     }
 }

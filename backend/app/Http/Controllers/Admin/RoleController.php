@@ -118,6 +118,7 @@ class RoleController extends Controller
 
         $role->permissions()->detach();
         $role->delete();
+        \App\Support\LiveFeed::bump('roles', $role->id);
 
         return redirect()->route('admin.roles')->with('success', "Role '{$role->display_name}' deleted.");
     }

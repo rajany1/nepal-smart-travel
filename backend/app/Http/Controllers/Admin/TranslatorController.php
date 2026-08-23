@@ -104,6 +104,7 @@ class TranslatorController extends Controller
 
         $term = $translation->term;
         $translation->delete();
+        \App\Support\LiveFeed::bump('translation_glossary', $translation->id);
 
         return redirect()->route('admin.translator')->with('success', "Word '{$term}' deleted.");
     }

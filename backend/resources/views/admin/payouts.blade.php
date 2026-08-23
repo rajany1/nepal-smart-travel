@@ -1,4 +1,4 @@
-@extends('admin.layout')
+﻿@extends('admin.layout')
 
 @section('title', 'Payouts')
 
@@ -43,6 +43,7 @@
 
 <div class="bg-white rounded-2xl shadow overflow-hidden">
     <div class="overflow-x-auto">
+<div id="liveTable">
         <table class="w-full text-sm">
             <thead class="bg-slate-50 text-slate-500 text-xs uppercase tracking-wide">
                 <tr>
@@ -59,7 +60,7 @@
                 @forelse($payouts as $payout)
                     <tr class="hover:bg-slate-50/60">
                         <td class="px-6 py-4">
-                            <div class="font-medium text-slate-800">{{ $payout->partner?->name ?? '—' }}</div>
+                            <div class="font-medium text-slate-800">{{ $payout->partner?->name ?? 'â€”' }}</div>
                             @if($payout->partner?->phone)
                                 <div class="text-xs text-slate-500">{{ $payout->partner->phone }}</div>
                             @endif
@@ -69,17 +70,17 @@
                         </td>
                         <td class="px-4 py-4 font-semibold text-slate-800">Rs. {{ number_format($payout->amount, 2) }}</td>
                         <td class="px-4 py-4 text-slate-600">
-                            {{ $methodLabels[$payout->payment_method] ?? ucfirst($payout->payment_method ?? '—') }}
+                            {{ $methodLabels[$payout->payment_method] ?? ucfirst($payout->payment_method ?? 'â€”') }}
                             @if($payout->payment_detail)
                                 <span class="block text-xs text-slate-400">{{ $payout->payment_detail }}</span>
                             @endif
                         </td>
                         <td class="px-4 py-4 text-slate-600">{{ $payout->requested_at?->format('M j, Y H:i') }}</td>
-                        <td class="px-4 py-4 text-slate-500 max-w-[200px] truncate" title="{{ $payout->note }}">{{ $payout->note ?: '—' }}</td>
+                        <td class="px-4 py-4 text-slate-500 max-w-[200px] truncate" title="{{ $payout->note }}">{{ $payout->note ?: 'â€”' }}</td>
                         <td class="px-4 py-4">
                             <span class="text-xs px-3 py-1 rounded-full border {{ $statusColors[$payout->status] ?? '' }}">{{ ucfirst($payout->status) }}</span>
                             @if($payout->processed_at)
-                                <span class="block text-[10px] text-slate-400 mt-0.5">{{ $payout->processed_at->format('M j, Y') }} by {{ $payout->processor?->name ?? '—' }}</span>
+                                <span class="block text-[10px] text-slate-400 mt-0.5">{{ $payout->processed_at->format('M j, Y') }} by {{ $payout->processor?->name ?? 'â€”' }}</span>
                             @endif
                             @if($payout->admin_note)
                                 <span class="block text-[10px] text-slate-500 mt-0.5"><i class="fas fa-comment"></i> {{ $payout->admin_note }}</span>
@@ -98,7 +99,7 @@
                                     </button>
                                 </div>
                             @else
-                                <span class="text-slate-300 text-right block">—</span>
+                                <span class="text-slate-300 text-right block">â€”</span>
                             @endif
                         </td>
                     </tr>
@@ -114,6 +115,7 @@
         </table>
     </div>
     <div class="px-6 py-4">{{ $payouts->links() }}</div>
+</div>
 </div>
 
 <!-- Mark Paid modal -->

@@ -521,12 +521,26 @@ class AuthController extends Controller
         // Simple OTP verification - check against stored hash
         $storedOtp = cache('email_otp_' . $user->id);
         if (!$storedOtp || $storedOtp !== $request->otp) {
+            // Brute-force lock: 5 wrong attempts invalidate the OTP entirely.
+            $attemptKey = 'email_otp_attempts_' . $user->id;
+            $attempts = (int) cache($attemptKey, 0) + 1;
+            cache([$attemptKey => $attempts], now()->addMinutes(15));
+            if ($attempts >= 5) {
+                cache()->forget('email_otp_' . $user->id);
+                cache()->forget($attemptKey);
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Too many incorrect codes. Request a new code.',
+                ], 429, ['Retry-After' => '3600']);
+            }
             return response()->json([
                 'success' => false,
                 'message' => 'Invalid or expired OTP.',
             ], 400);
         }
 
+        // Reset attempt counter on success
+        cache()->forget('email_otp_attempts_' . $user->id);
         $user->update(['email_verified_at' => now()]);
         cache()->forget('email_otp_' . $user->id);
 
@@ -563,6 +577,8 @@ class AuthController extends Controller
     {
         $otp = str_pad(random_int(0, 999999), 6, '0', STR_PAD_LEFT);
         cache(['email_otp_' . $user->id => $otp], now()->addMinutes(10));
+        // Fresh code = fresh attempts
+        cache()->forget('email_otp_attempts_' . $user->id);
 
         try {
             \Illuminate\Support\Facades\Mail::raw(

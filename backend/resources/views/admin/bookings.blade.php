@@ -1,4 +1,4 @@
-@extends('admin.layout')
+﻿@extends('admin.layout')
 @section('title', 'Bookings & Commissions')
 
 @section('content')
@@ -83,6 +83,7 @@
     {{-- Bookings Table --}}
     <div class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
         <div class="overflow-x-auto">
+<div id="liveTable">
             <table class="w-full">
                 <thead class="bg-slate-50">
                     <tr>
@@ -105,7 +106,7 @@
                             <p class="font-semibold text-sm text-slate-900">{{ $b->customer_name }}</p>
                             <p class="text-xs text-slate-400">
                                 @if($b->customer_phone){{ $b->customer_phone }}@endif
-                                @if($b->customer_email){{ $b->customer_phone ? ' • ' : '' }}{{ $b->customer_email }}@endif
+                                @if($b->customer_email){{ $b->customer_phone ? ' â€¢ ' : '' }}{{ $b->customer_email }}@endif
                             </p>
                             @if($b->user)
                             <a href="#" class="text-xs text-primary-500 hover:underline"><i class="fas fa-user"></i> {{ $b->user->name }}</a>
@@ -115,7 +116,7 @@
                             <p class="text-sm font-medium">{{ $b->travelPartner->name }}</p>
                             <p class="text-xs text-slate-400">
                                 {{ str_replace('_', ' ', $b->travelPartner->type) }}
-                                @if($b->travelPartner->district) • {{ $b->travelPartner->district }}@endif
+                                @if($b->travelPartner->district) â€¢ {{ $b->travelPartner->district }}@endif
                             </p>
                         </td>
                         <td class="px-4 py-3 text-right">
@@ -142,7 +143,7 @@
                             <p class="text-[10px] text-amber-500 mt-0.5">Applied</p>
                             @endif
                             @else
-                            <span class="text-xs text-slate-300">—</span>
+                            <span class="text-xs text-slate-300">â€”</span>
                             @endif
                         </td>
                         <td class="px-4 py-3 text-center">
@@ -259,6 +260,7 @@
 
     @if($bookings->hasPages())
     <div class="mt-4">{{ $bookings->appends(['status' => $status, 'search' => $search])->links() }}</div>
+</div>
     @endif
 </div>
 
@@ -275,7 +277,7 @@
             <div>
                 <label class="block text-xs font-semibold text-slate-600 mb-1">Partner</label>
                 <select name="travel_partner_id" id="partnerSelect" required onchange="autofillAmount(); previewCommission(); filterRewards()" class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm">
-                    <option value="">— Select Partner —</option>
+                    <option value="">â€” Select Partner â€”</option>
                     @foreach($partners as $p)
                     <option value="{{ $p->id }}" data-rate="{{ $p->commission_rate }}" data-fixed="{{ $p->commission_fixed }}" data-district="{{ $p->district ?? '' }}" data-value-npr="{{ $p->value_npr }}">{{ $p->name }} ({{ $p->commission_rate }}% + Rs.{{ number_format($p->commission_fixed) }})</option>
                     @endforeach
@@ -285,9 +287,9 @@
                 <div>
                     <label class="block text-xs font-semibold text-slate-600 mb-1">Select User</label>
                     <select id="userSelect" onchange="selectUser()" class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm">
-                        <option value="">— Select User —</option>
+                        <option value="">â€” Select User â€”</option>
                         @foreach($users as $u)
-                        <option value="{{ $u->id }}" data-name="{{ $u->name }}" data-phone="{{ $u->phone ?? '' }}" data-email="{{ $u->email ?? '' }}">{{ $u->name }} — {{ $u->email ?? $u->phone ?? 'No contact' }}</option>
+                        <option value="{{ $u->id }}" data-name="{{ $u->name }}" data-phone="{{ $u->phone ?? '' }}" data-email="{{ $u->email ?? '' }}">{{ $u->name }} â€” {{ $u->email ?? $u->phone ?? 'No contact' }}</option>
                         @endforeach
                     </select>
                 </div>
@@ -325,7 +327,7 @@
                 <div>
                     <label class="block text-xs font-semibold text-slate-600 mb-1">User's Claimed Offer Code <span id="rewardFilterInfo" class="text-xs text-slate-400 font-normal"></span></label>
                     <select name="offer_redemption_id" id="rewardCodeSelect" onchange="applyRewardByCode()" class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm">
-                        <option value="">— Select user & partner first —</option>
+                        <option value="">â€” Select user & partner first â€”</option>
                     </select>
                 </div>
                 <div class="grid grid-cols-2 gap-3">
@@ -343,10 +345,10 @@
             {{-- Commission Preview --}}
             <div id="commissionPreview" class="hidden bg-slate-50 border border-slate-200 rounded-lg p-4 space-y-1 text-sm">
                 <p class="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1">Commission Preview</p>
-                <div class="flex justify-between"><span class="text-slate-600">Rate:</span><span id="previewRate" class="font-medium">—</span></div>
-                <div class="flex justify-between"><span class="text-slate-600">Total Commission:</span><span id="previewCommission" class="font-semibold text-green-600">—</span></div>
-                <div class="flex justify-between"><span class="text-slate-600">Reward Pool (25%):</span><span id="previewReward" class="font-semibold text-amber-600">—</span></div>
-                <div class="flex justify-between"><span class="text-slate-600">Platform Revenue (75%):</span><span id="previewPlatform" class="font-semibold text-rose-600">—</span></div>
+                <div class="flex justify-between"><span class="text-slate-600">Rate:</span><span id="previewRate" class="font-medium">â€”</span></div>
+                <div class="flex justify-between"><span class="text-slate-600">Total Commission:</span><span id="previewCommission" class="font-semibold text-green-600">â€”</span></div>
+                <div class="flex justify-between"><span class="text-slate-600">Reward Pool (25%):</span><span id="previewReward" class="font-semibold text-amber-600">â€”</span></div>
+                <div class="flex justify-between"><span class="text-slate-600">Platform Revenue (75%):</span><span id="previewPlatform" class="font-semibold text-rose-600">â€”</span></div>
             </div>
 
             <div class="flex justify-end gap-3 pt-2">
@@ -409,7 +411,7 @@ function filterRewards() {
     const userOpt = userSel.options[userSel.selectedIndex];
     const userId = userOpt?.value || '';
 
-    codeSelect.innerHTML = '<option value="">— No Offer Code —</option>';
+    codeSelect.innerHTML = '<option value="">â€” No Offer Code â€”</option>';
 
     if (!userId) {
         document.getElementById('rewardFilterInfo').textContent = '(select a user first)';
@@ -436,7 +438,7 @@ function filterRewards() {
         opt.value = c.id;
         opt.dataset.offerType = c.offer_type || '';
         opt.dataset.discountValue = c.discount_value;
-        opt.textContent = '[' + c.code + '] ' + c.offer_name + (c.offer_type === 'percentage_off' ? ' — ' + c.discount_value + '% off' : c.offer_type === 'fixed_off' ? ' — Rs.' + c.discount_value + ' off' : '');
+        opt.textContent = '[' + c.code + '] ' + c.offer_name + (c.offer_type === 'percentage_off' ? ' â€” ' + c.discount_value + '% off' : c.offer_type === 'fixed_off' ? ' â€” Rs.' + c.discount_value + ' off' : '');
         codeSelect.appendChild(opt);
     });
 }

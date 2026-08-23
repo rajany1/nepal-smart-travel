@@ -1,4 +1,4 @@
-@extends('admin.layout')
+﻿@extends('admin.layout')
 @section('title', 'Alerts Management')
 
 @section('content')
@@ -14,6 +14,7 @@
             </div>
         </div>
         <div class="overflow-x-auto">
+<div id="liveTable">
             <table class="w-full">
                 <thead class="bg-gray-50">
                     <tr>
@@ -65,6 +66,7 @@
         </div>
         @if($alerts->hasPages())
         <div class="px-6 py-4 border-t border-gray-100">{{ $alerts->links() }}</div>
+</div>
         @endif
     </div>
 

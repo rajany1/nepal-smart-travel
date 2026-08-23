@@ -1,4 +1,4 @@
-@extends('admin.layout')
+﻿@extends('admin.layout')
 
 @section('title', 'Curated Routes')
 
@@ -12,6 +12,7 @@
 
 <div class="bg-white rounded-2xl shadow overflow-hidden">
     <div class="overflow-x-auto">
+<div id="liveTable">
         <table class="w-full text-sm">
             <thead class="bg-slate-50 text-slate-500 text-xs uppercase tracking-wide">
                 <tr>
@@ -42,7 +43,7 @@
                             @endif
                         </td>
                         <td class="px-4 py-4 text-slate-600">{{ $route->duration_days }} day{{ $route->duration_days > 1 ? 's' : '' }}</td>
-                        <td class="px-4 py-4 text-slate-600">{{ $route->best_season ?? '—' }}</td>
+                        <td class="px-4 py-4 text-slate-600">{{ $route->best_season ?? 'â€”' }}</td>
                         <td class="px-4 py-4 text-slate-600">{{ count($route->waypoints ?? []) }}</td>
                         <td class="px-4 py-4">
                             @if($route->is_active)
@@ -76,6 +77,7 @@
     </div>
     <div class="px-6 py-4">{{ $routes->links() }}</div>
 </div>
+</div>
 
 <div id="routeModal" class="hidden fixed inset-0 z-50 bg-black/40 grid place-items-center" onclick="if(event.target===this)this.classList.add('hidden')">
     <div class="bg-white rounded-2xl shadow-xl w-full max-w-lg mx-4 max-h-[90vh] overflow-y-auto p-6">
@@ -87,7 +89,7 @@
                 <input type="text" name="title" id="rTitle" required class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm">
             </div>
             <div>
-                <label class="block text-xs font-semibold text-slate-600 mb-1">Slug (optional — auto-generated)</label>
+                <label class="block text-xs font-semibold text-slate-600 mb-1">Slug (optional â€” auto-generated)</label>
                 <input type="text" name="slug" id="rSlug" class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm">
             </div>
             <div class="grid grid-cols-2 gap-4">
@@ -101,7 +103,7 @@
                 <div>
                     <label class="block text-xs font-semibold text-slate-600 mb-1">Difficulty</label>
                     <select name="difficulty" id="rDifficulty" class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm">
-                        <option value="">—</option>
+                        <option value="">â€”</option>
                         <option value="easy">Easy</option>
                         <option value="moderate">Moderate</option>
                         <option value="challenging">Challenging</option>
@@ -116,7 +118,7 @@
                 </div>
                 <div>
                     <label class="block text-xs font-semibold text-slate-600 mb-1">Best Season</label>
-                    <input type="text" name="best_season" id="rSeason" placeholder="e.g. Oct–Nov" class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm">
+                    <input type="text" name="best_season" id="rSeason" placeholder="e.g. Octâ€“Nov" class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm">
                 </div>
             </div>
             <div class="grid grid-cols-3 gap-4">
@@ -152,7 +154,7 @@
                 <input type="text" name="waypoints" id="rWaypoints" placeholder="e.g. 1, 5, 12, 34" class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm">
             </div>
             <div>
-                <label class="block text-xs font-semibold text-slate-600 mb-1">Track (GPS line — one "lat,lng,Name" per line)</label>
+                <label class="block text-xs font-semibold text-slate-600 mb-1">Track (GPS line â€” one "lat,lng,Name" per line)</label>
                 <textarea name="track" id="rTrack" rows="5" placeholder="27.6880,86.7313,Lukla&#10;27.8046,86.7100,Namche Bazaar" class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm font-mono text-xs"></textarea>
             </div>
             <div>

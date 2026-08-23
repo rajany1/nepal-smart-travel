@@ -1,15 +1,16 @@
-@extends('admin.layout')
+﻿@extends('admin.layout')
 @section('title', 'Subscription Plans')
 
 @section('content')
 <div class="space-y-6">
     <div class="flex items-center justify-between">
-        <div><h3 class="text-2xl font-bold text-slate-900">Subscription Plans</h3><p class="text-sm text-slate-500 mt-1">Premium plans for users — offline maps, AI itinerary, trek planner.</p></div>
+        <div><h3 class="text-2xl font-bold text-slate-900">Subscription Plans</h3><p class="text-sm text-slate-500 mt-1">Premium plans for users â€” offline maps, AI itinerary, trek planner.</p></div>
         <button onclick="document.getElementById('createModal').classList.remove('hidden')" class="bg-primary-600 hover:bg-primary-700 text-white px-5 py-2.5 rounded-xl text-sm font-semibold shadow transition flex items-center gap-2"><i class="fas fa-plus"></i> New Plan</button>
     </div>
 
     <div class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
         <div class="overflow-x-auto">
+<div id="liveTable">
             <table class="w-full">
                 <thead class="bg-slate-50">
                     <tr><th class="px-6 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">Plan</th><th class="px-6 py-3 text-center text-xs font-semibold text-slate-500 uppercase tracking-wider">Price</th><th class="px-6 py-3 text-center text-xs font-semibold text-slate-500 uppercase tracking-wider">Billing</th><th class="px-6 py-3 text-center text-xs font-semibold text-slate-500 uppercase tracking-wider">Subscribers</th><th class="px-6 py-3 text-center text-xs font-semibold text-slate-500 uppercase tracking-wider">Status</th><th class="px-6 py-3 text-right text-xs font-semibold text-slate-500 uppercase tracking-wider">Actions</th></tr>
@@ -52,6 +53,7 @@
         </div>
     </div>
     <div class="mt-4">{{ $plans->links() }}</div>
+</div>
 </div>
 
 <div id="createModal" class="hidden fixed inset-0 z-50 bg-black/40 grid place-items-center" onclick="if(event.target===this)this.classList.add('hidden')">

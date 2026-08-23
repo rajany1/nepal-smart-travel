@@ -1,4 +1,4 @@
-@extends('admin.layout')
+﻿@extends('admin.layout')
 @section('title', 'Place Corrections')
 
 @section('content')
@@ -44,6 +44,7 @@
     @endif
 
     <div class="overflow-x-auto">
+<div id="liveTable">
         <table class="w-full">
             <thead class="bg-gray-50">
                 <tr>
@@ -67,9 +68,9 @@
                             @if($c->place_id)
                             <a href="{{ route('admin.places.view', $c->place_id) }}" class="text-blue-600 hover:underline">Place #{{ $c->place_id }}</a>
                             @endif
-                            @if($c->osm_id)<span class="text-gray-400">· {{ $c->osm_id }}</span>@endif
+                            @if($c->osm_id)<span class="text-gray-400">Â· {{ $c->osm_id }}</span>@endif
                         </p>
-                        <p class="text-xs text-gray-400 mt-0.5">{{ $c->description ?? '—' }}</p>
+                        <p class="text-xs text-gray-400 mt-0.5">{{ $c->description ?? 'â€”' }}</p>
                     </td>
                     <td class="px-6 py-4">
                         <span class="text-xs bg-gray-100 text-gray-700 px-2 py-1 rounded">{{ str_replace('_', ' ', ucwords($c->correction_type)) }}</span>
@@ -78,7 +79,7 @@
                     <td class="px-6 py-4 text-xs text-gray-600">
                         @if($c->suggested_name)<p><b>Name:</b> {{ $c->suggested_name }}</p>@endif
                         @if($c->suggested_latitude !== null)<p><b>Loc:</b> {{ number_format($c->suggested_latitude, 5) }}, {{ number_format($c->suggested_longitude, 5) }}</p>@endif
-                        @if(!$c->suggested_name && $c->suggested_latitude === null)<span class="text-gray-400">—</span>@endif
+                        @if(!$c->suggested_name && $c->suggested_latitude === null)<span class="text-gray-400">â€”</span>@endif
                     </td>
                     <td class="px-6 py-4">
                         @if($c->status === 'pending')
@@ -127,6 +128,7 @@
     </div>
     @if($corrections->hasPages())
     <div class="px-6 py-4 border-t border-gray-100">{{ $corrections->links() }}</div>
+</div>
     @endif
 </div>
 @endsection

@@ -5,10 +5,10 @@ import '../../config/themes/app_theme.dart';
 import '../../providers/auth_provider.dart';
 import '../../providers/profile_provider.dart';
 import '../../providers/theme_provider.dart';
-import '../../core/services/localization_service.dart';
 import '../../services/push_notification_service.dart';
 import '../../core/services/offline_db_service.dart';
 import '../../core/services/app_settings_service.dart';
+import '../offline/offline_maps_screen.dart';
 import 'package:flutter_cache_manager/flutter_cache_manager.dart';
 
 class SettingsScreen extends StatefulWidget {
@@ -238,6 +238,22 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 Icons.download,
                 _autoDownload,
                 (v) => setState(() => _autoDownload = v),
+              ),
+              const Divider(height: 1),
+              ListTile(
+                leading: const Icon(Icons.map_outlined, color: AppTheme.primaryColor),
+                title: Text(context.t('Offline Maps')),
+                subtitle: Text(context.t('Download the full Nepal map (30/60 days), update or delete it'),
+                    style: TextStyle(color: AppTheme.textSecondary.withOpacity(0.7))),
+                trailing: const Icon(Icons.chevron_right, color: AppTheme.textSecondary),
+                onTap: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => const OfflineMapsScreen(),
+                    ),
+                  );
+                },
               ),
               const Divider(height: 1),
               ListTile(

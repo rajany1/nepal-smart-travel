@@ -1,5 +1,4 @@
 ﻿import 'dart:async';
-import 'dart:convert';
 import "../../core/services/localization_service.dart";
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
@@ -8,13 +7,11 @@ import 'package:provider/provider.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:cached_network_image/cached_network_image.dart';
-import 'package:http/http.dart' as http;
-import 'package:url_launcher/url_launcher.dart';
 import 'package:geolocator/geolocator.dart';
+import 'package:flutter_compass/flutter_compass.dart';
 import '../../config/constants/app_constants.dart';
 import '../../config/themes/app_theme.dart';
 import '../../core/services/location_service.dart';
-import '../../core/services/localization_service.dart';
 import '../../core/services/offline_db_service.dart';
 import '../../core/services/offline_tile_provider.dart';
 import '../../core/services/app_settings_service.dart';
@@ -30,6 +27,8 @@ import '../routes/route_detail_screen.dart';
 import 'place_details_screen.dart';
 import 'add_place_screen.dart';
 import 'filter_places_sheet.dart';
+import 'utils/route_polyline_utils.dart';
+import 'widgets/map_blue_dot.dart';
 import '../../widgets/ad_inline_banner.dart';
 
 /// Nepal Smart Travel enhanced nearby map screen with:
@@ -39,21 +38,36 @@ import '../../widgets/ad_inline_banner.dart';
 /// - Offline caching
 /// - FABs for My Location, Filter, Add Place
 class NearbyMapScreen extends StatefulWidget {
-  const NearbyMapScreen({super.key});
+  const NearbyMapScreen({
+    super.key,
+    this.destinationLat,
+    this.destinationLng,
+    this.destinationName,
+  });
+
+  final double? destinationLat;
+  final double? destinationLng;
+  final String? destinationName;
 
   @override
   State<NearbyMapScreen> createState() => _NearbyMapScreenState();
 }
 
-class _NearbyMapScreenState extends State<NearbyMapScreen> {
+class _NearbyMapScreenState extends State<NearbyMapScreen>
+    with SingleTickerProviderStateMixin {
   final LocationService _locationService = LocationService();
   final MapController _mapController = MapController();
-  final MapController _satelliteMapController = MapController();
   final DraggableScrollableController _sheetController =
       DraggableScrollableController();
   final TextEditingController _searchController = TextEditingController();
   final OfflineDbService _offlineDb = OfflineDbService.instance;
-  final OfflineTileProvider _offlineTiles = OfflineTileProvider();
+  // Standard (OSM/Carto) map layer. Bypasses the on-device tile cache because
+  // that cache can hold blanks/corrupt tiles (OSM valid-but-empty PNGs) which
+  // otherwise show as a permanent gray basemap. Satellite keeps its own cache.
+  final OfflineTileProvider _offlineTiles =
+      OfflineTileProvider(bypassNetworkCache: true);
+  final OfflineTileProvider _satelliteTiles =
+      OfflineTileProvider(tileType: 'satellite');
 
   double? _lat;
   double? _lng;
@@ -70,13 +84,38 @@ class _NearbyMapScreenState extends State<NearbyMapScreen> {
   // Current location
   LatLng? _currentLocation;
 
+  // Heading (degrees, clockwise from north): GPS bearing while moving,
+  // compass fallback so the light rotates with the phone when standing.
+  double? _gpsHeading;
+  double? _compassHeading;
+  DateTime _lastGpsHeadingAt = DateTime.fromMillisecondsSinceEpoch(0);
+  bool _useGpsHeading = false;
+  double _accuracyM = 20;
+  bool _hasArrived = false;
+  StreamSubscription? _compassSub;
+  DateTime _lastCompassUi = DateTime.now().subtract(const Duration(milliseconds: 100));
+
+  double? get _heading => _useGpsHeading ? _gpsHeading : _compassHeading;
+
+  static double _shortestArc(double from, double to) {
+    var d = (to - from) % 360;
+    if (d > 180) d -= 360;
+    if (d < -180) d += 360;
+    return d;
+  }
+
   // Compass rotation (degrees, clockwise positive)
   final ValueNotifier<double> _rotationNotifier = ValueNotifier<double>(0);
 
   // Route / Directions (multi-route)
   List<Map<String, dynamic>> _routes = [];
   bool _isLoadingRoute = false;
-  bool _showFeaturedOnly = false;
+  String _sortMode = 'nearest'; // nearest | rating | featured
+
+  // Destination (e.g. opened from Place Details "Directions")
+  double? _destinationLat;
+  double? _destinationLng;
+  String? _destinationName;
 
   // Trekking / curated route overlays on the map
   List<CuratedRouteModel> _routeOverlays = [];
@@ -97,12 +136,20 @@ class _NearbyMapScreenState extends State<NearbyMapScreen> {
   int _lastPlacesHash = 0;
   List<_LabelAssignment> _lastLabelAssignments = [];
 
+  // Grid clustering state (Nepal-wide pins at low zoom)
+  static const int _clusterMinCount = 120;
+  static const double _clusterMaxZoom = 12.0;
+  static const int _clusterMaxPins = 400;
+
+  // Smooth camera glide (last-known -> fresh GPS fix)
+  late final AnimationController _cameraAnimController = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 700),
+  );
+  VoidCallback? _cameraAnimListener;
+
   // OSM submission tracking
 
-  MapController get _activeMapController =>
-      context.read<MapViewProvider>().isSatellite
-          ? _satelliteMapController
-          : _mapController;
   Map<String, String> _osmSubmissionStatuses = {}; // osmId -> none/pending/approved
 
   // Nepal bounding box
@@ -114,9 +161,39 @@ class _NearbyMapScreenState extends State<NearbyMapScreen> {
   @override
   void initState() {
     super.initState();
+    _destinationLat = widget.destinationLat;
+    _destinationLng = widget.destinationLng;
+    _destinationName = widget.destinationName;
     _syncStreamController = StreamController<int>.broadcast();
     _pollSyncCount();
+    _initCompass();
     WidgetsBinding.instance.addPostFrameCallback((_) => _initMap());
+  }
+
+  void _initCompass() {
+    final events = FlutterCompass.events;
+    if (events == null) return;
+    _compassSub = events.listen((event) {
+      if (!mounted) return;
+      final h = event.heading;
+      if (h == null) return;
+      // Throttle ~20Hz: the compass fires at 200Hz+; rebuilding the map at
+      // that rate is wasteful. Tiny changes are also ignored (tilt jitter).
+      final now = DateTime.now();
+      if (now.difference(_lastCompassUi).inMilliseconds < 50) return;
+      _lastCompassUi = now;
+      final h360 = (h % 360 + 360) % 360;
+      final prev = _compassHeading;
+      if (prev != null && _shortestArc(prev, h360).abs() < 1) return;
+      setState(() {
+        _compassHeading = h360;
+        // When GPS bearing is stale (standing still), let the compass drive
+        // the light so it follows the phone's rotation.
+        if (DateTime.now().difference(_lastGpsHeadingAt).inSeconds > 4) {
+          _useGpsHeading = false;
+        }
+      });
+    });
   }
 
   @override
@@ -124,11 +201,13 @@ class _NearbyMapScreenState extends State<NearbyMapScreen> {
     _debounceTimer?.cancel();
     _autoDownloadTimer?.cancel();
     _positionStream?.cancel();
+    _compassSub?.cancel();
     _syncStreamController?.close();
     _weatherDebounceTimer?.cancel();
     _rotationNotifier.dispose();
     _sheetController.dispose();
     _searchController.dispose();
+    _cameraAnimController.dispose();
     super.dispose();
   }
 
@@ -137,18 +216,23 @@ class _NearbyMapScreenState extends State<NearbyMapScreen> {
 
     await provider.fetchCategories();
 
-    final loc = await _locationService.getCurrentLocation();
-    if (loc != null && mounted) {
+    // Instant map: Nepal-wide dataset loads in parallel with GPS lookup —
+    // markers paint immediately (from SQLite cache or the 10-min Redis-backed
+    // /places/all), and the map recenters when GPS arrives.
+    unawaited(provider.setNepalCachedPlaces());
+    unawaited(provider.fetchNepalPlaces());
+
+    // 1) Last-known location straight away — the map opens on a real spot
+    //    with zero "waiting for location" state.
+    final lastKnown = await _locationService.getLastKnownPosition();
+    if (lastKnown != null && mounted) {
       setState(() {
-        _lat = loc.latitude;
-        _lng = loc.longitude;
-        _currentLocation = LatLng(loc.latitude, loc.longitude);
+        _lat = lastKnown.latitude;
+        _lng = lastKnown.longitude;
+        _currentLocation = LatLng(lastKnown.latitude, lastKnown.longitude);
       });
-      _startPositionTracking();
-    } else if (mounted) {
-      setState(() {
-        _lat = null;
-        _lng = null;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _recenterMap();
       });
     }
 
@@ -156,48 +240,179 @@ class _NearbyMapScreenState extends State<NearbyMapScreen> {
       // Attempt to load cached data first
       await _loadCachedPlaces();
 
-      // Then fetch fresh data from API
-      await provider.fetchNearbyPlaces(
-        lat: _lat!,
-        lng: _lng!,
-        radiusKm: 10.0,
-      );
-      _lastFetchLat = _lat;
-      _lastFetchLng = _lng;
-      _lastFetchRadius = 10.0;
+      // Viewport places come from the on-device Nepal dataset (client-side
+      // nearest) — no Overpass round-trip on open.
+      await _fetchPlacesForViewport();
       provider.fetchFeaturedPlaces(lat: _lat, lng: _lng);
       _fetchWeatherForViewport();
     }
 
-    WidgetsBinding.instance.addPostFrameCallback((_) async {
-      await Future.delayed(const Duration(milliseconds: 200));
-      _recenterMap();
-    });
+    // 2) Fresh GPS fix in the background. If it moved from the last-known
+    //    spot, glide the map smoothly to the live position.
+    final loc = await _locationService.getCurrentLocation();
+    if (loc != null && mounted) {
+      final distM = _currentLocation == null
+          ? double.infinity
+          : const Distance()
+              .as(LengthUnit.Meter, _currentLocation!, LatLng(loc.latitude, loc.longitude));
+      setState(() {
+        _lat = loc.latitude;
+        _lng = loc.longitude;
+        _currentLocation = LatLng(loc.latitude, loc.longitude);
+      });
+      _startPositionTracking();
+      if (distM > 50 && _mapReady) {
+        _smoothMoveTo(_currentLocation!);
+      }
+    }
+
+    if (!mounted) return;
+    if (_lat == null || _lng == null) {
+      // No location at all — fall back to the default Nepal center so the
+      // map (and its Nepal-wide pins) is still usable.
+      setState(() {
+        _lat = AppConstants.defaultLatitude;
+        _lng = AppConstants.defaultLongitude;
+        _currentLocation = LatLng(AppConstants.defaultLatitude, AppConstants.defaultLongitude);
+      });
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _recenterMap();
+      });
+    }
+
+    // Auto-fetch route to destination (Place Details "Directions")
+    if (_destinationLat != null && _destinationLng != null) {
+      await _fetchDestinationRoute();
+    }
+  }
+
+  /// Smoothly glide the camera to [target] (ease-in-out ~700ms).
+  void _smoothMoveTo(LatLng target) {
+    if (!_mapReady) return;
+    final start = _mapController.camera.center;
+    final zoom = _mapController.camera.zoom;
+    final oldListener = _cameraAnimListener;
+    if (oldListener != null) {
+      _cameraAnimController.removeListener(oldListener);
+    }
+    final listener = () {
+      final t = Curves.easeInOut.transform(_cameraAnimController.value);
+      try {
+        _mapController.move(
+          LatLng(
+            start.latitude + (target.latitude - start.latitude) * t,
+            start.longitude + (target.longitude - start.longitude) * t,
+          ),
+          zoom,
+        );
+      } catch (e) {
+        debugPrint('Smooth camera move failed: $e');
+      }
+    };
+    _cameraAnimListener = listener;
+    _cameraAnimController.addListener(listener);
+    _cameraAnimController
+      ..reset()
+      ..forward();
+  }
+
+  /// flutter_map 7 MapController has no `hasMaps` getter — reading the
+  /// camera throws when no map is attached yet.
+  bool get _mapReady {
+    try {
+      _mapController.camera;
+      return true;
+    } catch (_) {
+      return false;
+    }
   }
 
   void _startPositionTracking() {
     _positionStream = _locationService
         .getPositionStream(intervalMs: 3000, distanceFilterM: 5)
         .listen((position) {
+      final loc = LatLng(position.latitude, position.longitude);
       if (mounted) {
         setState(() {
-          _currentLocation = LatLng(position.latitude, position.longitude);
+          _currentLocation = loc;
+          _accuracyM = position.accuracy;
+          final gpsH = position.heading;
+          if (gpsH != null && gpsH > 0) {
+            _gpsHeading = (gpsH % 360 + 360) % 360;
+            _lastGpsHeadingAt = DateTime.now();
+            _useGpsHeading = true;
+          } else {
+            // No bearing (stationary) - compass takes over.
+            _useGpsHeading = false;
+          }
         });
       }
-      if (!mounted || !_isTracking) return;
+      if (!mounted) return;
+      _checkArrival(loc);
+      if (!_isTracking) return;
       setState(() {
         _lat = position.latitude;
         _lng = position.longitude;
       });
-      _activeMapController.move(
-          LatLng(position.latitude, position.longitude), _currentZoom);
+      if (_routes.isNotEmpty) {
+        // A route is displayed: keep it in view instead of dragging the
+        // camera to the user. Only re-fit (route + user) when they walk
+        // outside the current viewport, so the route never "disappears".
+        try {
+          final vp = _getViewportBounds();
+          final outside = position.latitude < vp.minLat ||
+              position.latitude > vp.maxLat ||
+              position.longitude < vp.minLng ||
+              position.longitude > vp.maxLng;
+          if (outside) {
+            final pts = <LatLng>[loc];
+            for (final r in _routes) {
+              pts.addAll(r['points'] as List<LatLng>);
+            }
+            _mapController.fitCamera(CameraFit.bounds(
+              bounds: _latLngBoundsFromPoints(pts),
+              padding: const EdgeInsets.all(80),
+            ));
+          }
+        } catch (e) {
+          debugPrint('Route-aware camera fit failed: $e');
+        }
+      } else {
+        _mapController.move(loc, _currentZoom);
+      }
     });
+  }
+
+  void _checkArrival(LatLng loc) {
+    if (_routes.isEmpty || _hasArrived) return;
+    final selected = _routes.firstWhere(
+      (r) => r['isSelected'] == true,
+      orElse: () => _routes.first,
+    );
+    final dest = ((selected['points'] as List<LatLng>?) ?? const <LatLng>[]);
+    if (dest.isEmpty) return;
+    final dist = const Distance().as(LengthUnit.Meter, loc, dest.last);
+    if (dist < 40) {
+      _hasArrived = true;
+      HapticFeedback.mediumImpact();
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(SnackBar(
+          behavior: SnackBarBehavior.floating,
+          duration: const Duration(seconds: 8),
+          content: const Text('You have arrived at your destination'),
+          action: SnackBarAction(
+            label: 'Done',
+            onPressed: () => _clearRoute(),
+          ),
+        ));
+    }
   }
 
   void _recenterMap() {
     if (_lat != null && _lng != null) {
       try {
-        _activeMapController.move(LatLng(_lat!, _lng!), _currentZoom);
+        _mapController.move(LatLng(_lat!, _lng!), _currentZoom);
       } catch (e) {
         debugPrint('MapController move failed: $e');
       }
@@ -288,6 +503,32 @@ class _NearbyMapScreenState extends State<NearbyMapScreen> {
 
   Future<void> _fetchPlacesForViewport({String? search}) async {
     if (_lat == null || _lng == null) return;
+
+    final provider = context.read<PlaceProvider>();
+
+    // Fast path (default): the Nepal-wide dataset is already on device —
+    // nearest-first viewport list computed client-side. Instant, offline-safe,
+    // and never shows the "Updating places..." overlay.
+    if (provider.nepalPlaces.isNotEmpty) {
+      final filtered = _applyPlaceFilters(provider.nepalPlaces);
+      final center = LatLng(_lat!, _lng!);
+      final distance = const Distance();
+      final sorted = filtered
+          .map((p) => p.copyWith(
+                distanceKm: distance.as(
+                  LengthUnit.Kilometer,
+                  center,
+                  LatLng(p.latitude, p.longitude),
+                ),
+              ))
+          .toList()
+        ..sort((a, b) => (a.distanceKm ?? 0).compareTo(b.distanceKm ?? 0));
+      provider.setViewportPlaces(sorted.take(60).toList());
+      _checkOsmSubmissionStatuses();
+      return;
+    }
+
+    // Cold start (offline, nothing cached yet): legacy network fallback.
     if (_currentZoom < 10) return;
     if (_isFetchingPlaces) return;
 
@@ -307,8 +548,6 @@ class _NearbyMapScreenState extends State<NearbyMapScreen> {
     setState(() => _isLoadingPlaces = true);
 
     try {
-      final provider = context.read<PlaceProvider>();
-
       // Fetch 2x the visible radius so panning within cached area is instant
       final fetchRadius = radius * 2;
       await provider.fetchNearbyPlaces(
@@ -515,7 +754,7 @@ class _NearbyMapScreenState extends State<NearbyMapScreen> {
   void _onPlaceTap(PlaceModel place) async {
     setState(() => _selectedPlace = place);
     try {
-      _activeMapController.move(LatLng(place.latitude, place.longitude), 15.0);
+      _mapController.move(LatLng(place.latitude, place.longitude), 15.0);
       _sheetController.animateTo(
         0.25,
         duration: const Duration(milliseconds: 300),
@@ -538,62 +777,58 @@ class _NearbyMapScreenState extends State<NearbyMapScreen> {
   }
 
   Future<void> _getDirections(PlaceModel place) async {
-    final msgNoRoutes = context.t('No valid routes found');
-    final msgRouteServerError = context.t('Route server error');
-    final msgUnknown = context.t('unknown');
-    final msgServerReturned = context.t('Server returned');
-    final msgFetchFailed = context.t('Could not fetch route. Please try again.');
-    final originLat = _currentLocation?.latitude ?? _lat;
-    final originLng = _currentLocation?.longitude ?? _lng;
-    if (originLat == null || originLng == null) return;
+    _hasArrived = false;
+    final msgNoRoutes = context.tr('No valid routes found');
+    final msgFetchFailed = context.tr('Could not fetch route. Please try again.');
+    var originLat = _currentLocation?.latitude ?? _lat;
+    var originLng = _currentLocation?.longitude ?? _lng;
+    if (originLat == null || originLng == null) {
+      originLat = 28.3949;
+      originLng = 84.1240;
+    }
     setState(() => _isLoadingRoute = true);
     try {
-      final url = Uri.parse(
-        'https://router.project-osrm.org/route/v1/driving/'
-        '$originLng,$originLat;${place.longitude},${place.latitude}'
-        '?geometries=geojson&overview=full&steps=true&alternatives=3',
+      final response = await ApiClient.instance.getDirections(
+        fromLat: originLat,
+        fromLng: originLng,
+        toLat: place.latitude,
+        toLng: place.longitude,
       );
-      final response = await http.get(url, headers: {
-        'User-Agent': 'NepalSmartTravel/1.0',
-      });
-      if (response.statusCode == 200) {
-        final data = json.decode(response.body);
-        if (data['code'] == 'Ok') {
-          final routes = data['routes'] as List;
-          final parsed = <Map<String, dynamic>>[];
-          for (int i = 0; i < routes.length; i++) {
-            final r = routes[i];
-            final coords = (r['geometry']['coordinates'] as List)
-                .map((c) => LatLng(c[1], c[0]))
-                .toList();
-            if (coords.length > 1) {
-              final distKm = (r['distance'] as num) / 1000;
-              final osrmDuration = (r['duration'] as num?)?.toDouble();
-              parsed.add({
-                'points': coords,
-                'distance': distKm,
-                // FL-21: prefer OSRM's real duration (seconds); fall back to a
-                // 30 km/h estimate when absent
-                'duration': osrmDuration != null && osrmDuration > 0
-                    ? osrmDuration / 60
-                    : distKm / 30 * 60,
-              });
-            }
-          }
-          if (parsed.isNotEmpty) {
-            setState(() => _routes = parsed);
-            final allPoints = parsed.expand((r) => r['points'] as List<LatLng>).toList();
-            final bounds = LatLngBounds.fromPoints(allPoints);
-            final cameraFit = CameraFit.bounds(bounds: bounds, padding: const EdgeInsets.all(60));
-            _activeMapController.fitCamera(cameraFit);
-          } else {
-            _showRouteError(msgNoRoutes);
-          }
-        } else {
-          _showRouteError('$msgRouteServerError: ${data['message'] ?? msgUnknown}');
+      final data = response.data['routes'] as List? ?? [];
+      final parsed = <Map<String, dynamic>>[];
+      for (final r in data) {
+        final pts = <LatLng>[];
+        final offRoad = <bool>[];
+        for (final p in (r['points'] as List)) {
+          final m = p as Map;
+          pts.add(LatLng(
+            ((m['lat'] as num)).toDouble(),
+            ((m['lng'] as num)).toDouble(),
+          ));
+          offRoad.add(m['offRoad'] == true);
+        }
+        if (pts.length > 1) {
+          parsed.add({
+            'points': pts,
+            'offRoad': offRoad,
+            'distance': (r['distance'] as num).toDouble(),
+            'duration': (r['duration'] as num).toDouble(),
+          });
+        }
+      }
+      if (parsed.isNotEmpty) {
+        debugPrint('Directions OK: ${parsed.length} route(s) for ${place.name}');
+        setState(() => _routes = parsed);
+        final allPoints = parsed.expand((r) => r['points'] as List<LatLng>).toList();
+        final bounds = _latLngBoundsFromPoints(allPoints);
+        final cameraFit = CameraFit.bounds(bounds: bounds, padding: const EdgeInsets.all(60));
+        try {
+          _mapController.fitCamera(cameraFit);
+        } catch (e) {
+          debugPrint('fitCamera failed: $e');
         }
       } else {
-        _showRouteError('$msgServerReturned ${response.statusCode}');
+        _showRouteError(msgNoRoutes);
       }
     } catch (e) {
       debugPrint('Route error: $e');
@@ -615,7 +850,90 @@ class _NearbyMapScreenState extends State<NearbyMapScreen> {
   }
 
   void _clearRoute() {
+    _hasArrived = false;
     setState(() => _routes = []);
+  }
+
+  Future<void> _fetchDestinationRoute() async {
+    if (_destinationLat == null || _destinationLng == null) return;
+    _hasArrived = false;
+    final msgNoRoutes = context.tr('No valid routes found');
+    final msgFetchFailed = context.tr('Could not fetch route. Please try again.');
+    var originLat = _currentLocation?.latitude ?? _lat;
+    var originLng = _currentLocation?.longitude ?? _lng;
+    if (originLat == null || originLng == null) {
+      originLat = 28.3949;
+      originLng = 84.1240;
+    }
+    setState(() => _isLoadingRoute = true);
+    try {
+      final response = await ApiClient.instance.getDirections(
+        fromLat: originLat,
+        fromLng: originLng,
+        toLat: _destinationLat!,
+        toLng: _destinationLng!,
+      );
+      final data = response.data['routes'] as List? ?? [];
+      final parsed = <Map<String, dynamic>>[];
+      for (final r in data) {
+        final pts = <LatLng>[];
+        final offRoad = <bool>[];
+        for (final p in (r['points'] as List)) {
+          final m = p as Map;
+          pts.add(LatLng(
+            ((m['lat'] as num)).toDouble(),
+            ((m['lng'] as num)).toDouble(),
+          ));
+          offRoad.add(m['offRoad'] == true);
+        }
+        if (pts.length > 1) {
+          parsed.add({
+            'points': pts,
+            'offRoad': offRoad,
+            'distance': (r['distance'] as num).toDouble(),
+            'duration': (r['duration'] as num).toDouble(),
+          });
+        }
+      }
+      if (parsed.isNotEmpty) {
+        setState(() => _routes = parsed);
+        final allPoints = parsed.expand((r) => r['points'] as List<LatLng>).toList()
+          ..add(LatLng(_destinationLat!, _destinationLng!))
+          ..add(LatLng(originLat, originLng));
+        final bounds = _latLngBoundsFromPoints(allPoints);
+        try {
+          _mapController.fitCamera(
+            CameraFit.bounds(bounds: bounds, padding: const EdgeInsets.all(80)),
+          );
+        } catch (e) {
+          debugPrint('fitCamera failed: $e');
+        }
+      } else {
+        _showRouteError(msgNoRoutes);
+      }
+    } catch (e) {
+      debugPrint('Destination route error: $e');
+      _showRouteError(msgFetchFailed);
+    }
+    if (mounted) setState(() => _isLoadingRoute = false);
+  }
+
+  LatLngBounds _latLngBoundsFromPoints(List<LatLng> points) {
+    if (points.isEmpty) return LatLngBounds(const LatLng(0, 0), const LatLng(0, 0));
+    double minLat = points.first.latitude;
+    double maxLat = points.first.latitude;
+    double minLng = points.first.longitude;
+    double maxLng = points.first.longitude;
+    for (final p in points) {
+      if (p.latitude < minLat) minLat = p.latitude;
+      if (p.latitude > maxLat) maxLat = p.latitude;
+      if (p.longitude < minLng) minLng = p.longitude;
+      if (p.longitude > maxLng) maxLng = p.longitude;
+    }
+    return LatLngBounds(
+      LatLng(minLat, minLng),
+      LatLng(maxLat, maxLng),
+    );
   }
 
   @override
@@ -623,18 +941,14 @@ class _NearbyMapScreenState extends State<NearbyMapScreen> {
     return Scaffold(
       body: Stack(
         children: [
-          // Map with dual layers for smooth toggle
+          // Map with tile mode switch (single map, single controller)
           Consumer<MapViewProvider>(
             builder: (context, mapView, _) {
-              return AnimatedSwitcher(
-                duration: const Duration(milliseconds: 300),
-                child: _buildFlutterMap(
-                  key: ValueKey(mapView.isSatellite ? 'satellite' : 'standard'),
-                  isSatellite: mapView.isSatellite,
-                  placesVisible: mapView.showPlaces,
-                  showWeather: mapView.showWeather,
-                  showRoutes: mapView.showRoutes,
-                ),
+              return _buildFlutterMap(
+                isSatellite: mapView.isSatellite,
+                placesVisible: mapView.showPlaces,
+                showWeather: mapView.showWeather,
+                showRoutes: mapView.showRoutes,
               );
             },
           ),
@@ -766,15 +1080,13 @@ class _NearbyMapScreenState extends State<NearbyMapScreen> {
   }
 
   Widget _buildFlutterMap({
-    required Key key,
     required bool isSatellite,
     required bool placesVisible,
     required bool showWeather,
     required bool showRoutes,
   }) {
     return FlutterMap(
-      key: key,
-      mapController: isSatellite ? _satelliteMapController : _mapController,
+      mapController: _mapController,
       options: MapOptions(
         initialCenter: LatLng(
             _lat ?? AppConstants.defaultLatitude,
@@ -806,10 +1118,12 @@ class _NearbyMapScreenState extends State<NearbyMapScreen> {
       children: [
         if (isSatellite) ...[
           TileLayer(
-            urlTemplate: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+            urlTemplate: 'https://mt1.google.com/vt/lyrs=s&x={x}&y={y}&z={z}',
+            fallbackUrl:
+                'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
             userAgentPackageName: 'np.com.nepalsmarttravel',
             maxZoom: 19,
-            tileProvider: _offlineTiles,
+            tileProvider: _satelliteTiles,
           ),
           ColorFiltered(
             colorFilter: const ColorFilter.matrix(<double>[
@@ -827,7 +1141,12 @@ class _NearbyMapScreenState extends State<NearbyMapScreen> {
           ),
         ] else
           TileLayer(
+            // OSM raster for the standard (non-satellite) layer. A Carto
+            // (OSM-based) fallback is provided so the map still renders real
+            // tiles if tile.openstreetmap.org is slow/blocked/rate-limited.
             urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+            fallbackUrl:
+                'https://a.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png',
             userAgentPackageName: 'np.com.nepalsmarttravel',
             maxZoom: 19,
             tileProvider: _offlineTiles,
@@ -838,8 +1157,11 @@ class _NearbyMapScreenState extends State<NearbyMapScreen> {
           PolylineLayer(
             polylines: [
               for (int i = 0; i < _routes.length; i++)
-                Polyline(
-                  points: _routes[i]['points'] as List<LatLng>,
+                ...buildRoutePolylines(
+                  _routes[i]['points'] as List<LatLng>,
+                  _routes[i]['offRoad'] as List<bool>? ??
+                      List<bool>.filled(
+                          (_routes[i]['points'] as List<LatLng>).length, false),
                   color: i == 0
                       ? const Color(0xFF4285F4).withOpacity(0.85)
                       : Colors.grey.withOpacity(0.5),
@@ -889,61 +1211,40 @@ class _NearbyMapScreenState extends State<NearbyMapScreen> {
             markers: [
               Marker(
                 point: _currentLocation!,
-                width: 90,
-                height: 38,
+                width: 200,
+                height: 200,
                 alignment: Alignment.center,
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Container(
-                      width: 18,
-                      height: 18,
-                      decoration: BoxDecoration(
-                        color: Colors.blue.withOpacity(0.25),
-                        shape: BoxShape.circle,
+                child: MapBlueDot(
+                  heading: _heading,
+                  accuracyMeters: _accuracyM,
+                  zoom: _currentZoom,
+                  latitude: _currentLocation!.latitude,
+                ),
+              ),
+            ],
+          ),
+        if (_destinationLat != null && _destinationLng != null)
+          MarkerLayer(
+            markers: [
+              Marker(
+                point: LatLng(_destinationLat!, _destinationLng!),
+                width: 36,
+                height: 36,
+                alignment: Alignment.center,
+                child: Container(
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFE91E63),
+                    shape: BoxShape.circle,
+                    border: Border.all(color: Colors.white, width: 2),
+                    boxShadow: [
+                      BoxShadow(
+                        color: const Color(0xFFE91E63).withOpacity(0.4),
+                        blurRadius: 6,
+                        spreadRadius: 1,
                       ),
-                      child: Center(
-                        child: Container(
-                          width: 12,
-                          height: 12,
-                          decoration: const BoxDecoration(
-                            color: Colors.blue,
-                            shape: BoxShape.circle,
-                            boxShadow: [
-                              BoxShadow(
-                                color: Colors.black26,
-                                blurRadius: 4,
-                                spreadRadius: 1,
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                    ),
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 6, vertical: 1),
-                      decoration: BoxDecoration(
-                        color: Colors.white,
-                        borderRadius: BorderRadius.circular(8),
-                        boxShadow: [
-                          BoxShadow(
-                            color: Colors.black.withOpacity(0.15),
-                            blurRadius: 3,
-                            offset: const Offset(0, 1),
-                          ),
-                        ],
-                      ),
-                      child: Text(
-                        context.t('You are here'),
-                        style: const TextStyle(
-                          fontSize: 9,
-                          fontWeight: FontWeight.w600,
-                          color: Colors.blue,
-                        ),
-                      ),
-                    ),
-                  ],
+                    ],
+                  ),
+                  child: const Icon(Icons.flag, color: Colors.white, size: 18),
                 ),
               ),
             ],
@@ -952,7 +1253,7 @@ class _NearbyMapScreenState extends State<NearbyMapScreen> {
           Consumer<PlaceProvider>(
             builder: (context, provider, _) {
               return MarkerLayer(
-                markers: _buildMarkers(_applyPlaceFilters(provider.places)),
+                markers: _buildMarkers(_markerPlacesForViewport(provider)),
               );
             },
           ),
@@ -1007,7 +1308,7 @@ class _NearbyMapScreenState extends State<NearbyMapScreen> {
 
   void _resetRotationToNorth() {
     _rotationNotifier.value = 0;
-    _activeMapController.rotate(0);
+    _mapController.rotate(0);
   }
 
   Future<void> _loadRouteOverlays() async {
@@ -1156,30 +1457,6 @@ class _NearbyMapScreenState extends State<NearbyMapScreen> {
       mainAxisSize: MainAxisSize.min,
       children: [
         _mapFAB(
-          icon: Icons.add,
-          onTap: () {
-            final z = _activeMapController.camera.zoom;
-            _activeMapController.move(
-              _activeMapController.camera.center,
-              (z + 1)
-                  .clamp(AppConstants.minMapZoom, AppConstants.maxMapZoom),
-            );
-          },
-        ),
-        const SizedBox(height: 4),
-        _mapFAB(
-          icon: Icons.remove,
-          onTap: () {
-            final z = _activeMapController.camera.zoom;
-            _activeMapController.move(
-              _activeMapController.camera.center,
-              (z - 1)
-                  .clamp(AppConstants.minMapZoom, AppConstants.maxMapZoom),
-            );
-          },
-        ),
-        const SizedBox(height: 4),
-        _mapFAB(
           icon: Icons.my_location,
           color: _isTracking ? AppTheme.primaryColor : Colors.white,
           iconColor: _isTracking ? Colors.white : AppTheme.primaryColor,
@@ -1193,36 +1470,6 @@ class _NearbyMapScreenState extends State<NearbyMapScreen> {
           color: Colors.white,
           iconColor: AppTheme.textPrimary,
           onTap: _onFilterTap,
-        ),
-        const SizedBox(height: 4),
-        _mapFAB(
-          icon: Icons.star,
-          color: _showFeaturedOnly ? const Color(0xFFFFA000) : Colors.white,
-          iconColor: _showFeaturedOnly ? Colors.white : const Color(0xFFFFA000),
-          onTap: () => setState(() => _showFeaturedOnly = !_showFeaturedOnly),
-        ),
-        const SizedBox(height: 4),
-        Consumer<MapViewProvider>(
-          builder: (context, mapView, _) => _mapFAB(
-            icon: Icons.cloud,
-            color: mapView.showWeather ? const Color(0xFF5C6BC0) : Colors.white,
-            iconColor: mapView.showWeather ? Colors.white : const Color(0xFF5C6BC0),
-            onTap: mapView.toggleWeather,
-          ),
-        ),
-        const SizedBox(height: 4),
-        Consumer<MapViewProvider>(
-          builder: (context, mapView, _) => _mapFAB(
-            icon: Icons.hiking,
-            color: mapView.showRoutes ? const Color(0xFFB45309) : Colors.white,
-            iconColor: mapView.showRoutes ? Colors.white : const Color(0xFFB45309),
-            onTap: () {
-              mapView.toggleRoutes();
-              if (mapView.showRoutes) {
-                _loadRouteOverlays();
-              }
-            },
-          ),
         ),
         const SizedBox(height: 4),
         _mapFAB(
@@ -1263,12 +1510,12 @@ class _NearbyMapScreenState extends State<NearbyMapScreen> {
     // Always recenter to the user's exact location, no toggle confusion.
     if (_currentLocation != null) {
       setState(() => _isTracking = true);
-      _activeMapController.move(_currentLocation!, 15.0);
+      _mapController.move(_currentLocation!, 15.0);
       return;
     }
     if (_lat != null && _lng != null) {
       setState(() => _isTracking = true);
-      _activeMapController.move(LatLng(_lat!, _lng!), 15.0);
+      _mapController.move(LatLng(_lat!, _lng!), 15.0);
       return;
     }
     _requestLocationAndRecenter();
@@ -1304,7 +1551,7 @@ class _NearbyMapScreenState extends State<NearbyMapScreen> {
       _isTracking = true;
     });
     _startPositionTracking();
-    _activeMapController.move(_currentLocation!, 15.0);
+    _mapController.move(_currentLocation!, 15.0);
   }
 
   Future<void> _retryLocation() async {
@@ -1339,7 +1586,7 @@ class _NearbyMapScreenState extends State<NearbyMapScreen> {
     _cachedBoundsEast = null;
     _cachedBoundsWest = null;
     try {
-      _activeMapController.move(LatLng(_lat!, _lng!), 15.0);
+      _mapController.move(LatLng(_lat!, _lng!), 15.0);
     } catch (e) {
       debugPrint('Map move failed: $e');
     }
@@ -1366,7 +1613,13 @@ class _NearbyMapScreenState extends State<NearbyMapScreen> {
           _fetchPlacesForViewport();
         },
       ),
-    );
+    ).then((_) {
+      // Overlay toggles live in the filter sheet now; load trekking routes
+      // if the user enabled them there.
+      if (mounted && context.read<MapViewProvider>().showRoutes) {
+        _loadRouteOverlays();
+      }
+    });
   }
 
   void _onAddPlaceTap() {
@@ -1506,7 +1759,7 @@ class _NearbyMapScreenState extends State<NearbyMapScreen> {
     var result = places;
     final f = _activeFilter;
 
-    final showFeatured = _showFeaturedOnly || (f?.onlyFeatured ?? false);
+    final showFeatured = f?.onlyFeatured ?? false;
     if (showFeatured) {
       result = result.where((p) => p.isFeatured).toList();
     }
@@ -1538,8 +1791,76 @@ class _NearbyMapScreenState extends State<NearbyMapScreen> {
     return result;
   }
 
+  List<PlaceModel> _sortedPlaces(List<PlaceModel> places) {
+    final result = List<PlaceModel>.from(places);
+    switch (_sortMode) {
+      case 'rating':
+        result.sort((a, b) {
+          final ra = a.averageRating ?? -1.0;
+          final rb = b.averageRating ?? -1.0;
+          return rb.compareTo(ra);
+        });
+      case 'featured':
+        result.sort((a, b) {
+          if (a.isFeatured != b.isFeatured) return a.isFeatured ? -1 : 1;
+          final ra = a.averageRating ?? -1.0;
+          final rb = b.averageRating ?? -1.0;
+          return rb.compareTo(ra);
+        });
+      default:
+        result.sort((a, b) {
+          final da = _distanceFromUser(a);
+          final db = _distanceFromUser(b);
+          return da.compareTo(db);
+        });
+    }
+    return result;
+  }
+
+  Widget _buildSortChip(String mode, IconData icon, String label) {
+    final selected = _sortMode == mode;
+    return InkWell(
+      borderRadius: BorderRadius.circular(16),
+      onTap: () => setState(() => _sortMode = mode),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 150),
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+        decoration: BoxDecoration(
+          color: selected
+              ? AppTheme.primaryColor.withOpacity(0.1)
+              : Colors.white,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(
+            color: selected ? AppTheme.primaryColor : Colors.grey.shade300,
+          ),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon,
+                size: 14,
+                color: selected
+                    ? AppTheme.primaryColor
+                    : Colors.grey.shade500),
+            const SizedBox(width: 4),
+            Text(
+              label,
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+                color: selected
+                    ? AppTheme.primaryColor
+                    : AppTheme.textSecondary,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   Widget _buildBottomSheetContent(PlaceProvider provider) {
-    final displayPlaces = _applyPlaceFilters(provider.places);
+    final displayPlaces = _sortedPlaces(_applyPlaceFilters(provider.places));
     return DraggableScrollableSheet(
       controller: _sheetController,
       initialChildSize: 0.22,
@@ -1584,6 +1905,10 @@ class _NearbyMapScreenState extends State<NearbyMapScreen> {
                         _buildSheetSelectedPreview(_selectedPlace!, () {
                           _navigateToDetails(_selectedPlace!);
                         }),
+                      if (_selectedPlace == null &&
+                          _destinationLat != null &&
+                          _destinationLng != null)
+                        _buildDestinationPreview(),
                       Padding(
                         padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
                         child: Row(
@@ -1611,6 +1936,18 @@ class _NearbyMapScreenState extends State<NearbyMapScreen> {
                         ),
                       ),
                       const Divider(height: 1, thickness: 1),
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+                        child: Row(
+                          children: [
+                            _buildSortChip('nearest', Icons.near_me, context.t('Nearest')),
+                            const SizedBox(width: 8),
+                            _buildSortChip('rating', Icons.star, context.t('Rating')),
+                            const SizedBox(width: 8),
+                            _buildSortChip('featured', Icons.workspace_premium, context.t('Featured')),
+                          ],
+                        ),
+                      ),
                       AdInlineBanner(adContext: 'explore'),
                     ],
                   ),
@@ -1630,13 +1967,13 @@ class _NearbyMapScreenState extends State<NearbyMapScreen> {
                               color: Colors.grey.shade300),
                           const SizedBox(height: 8),
                           Text(
-                            _showFeaturedOnly ? context.t('No featured places') : context.t('No places found'),
+                            _activeFilter?.onlyFeatured == true ? context.t('No featured places') : context.t('No places found'),
                             style: TextStyle(
                                 color: Colors.grey.shade500,
                                 fontSize: AppTheme.textBase),
                           ),
                           const SizedBox(height: 4),
-                          if (!_showFeaturedOnly)
+                          if (_activeFilter?.onlyFeatured != true)
                             Text(
                               context.t('Try zooming in or moving the map'),
                               style: TextStyle(
@@ -1670,6 +2007,7 @@ class _NearbyMapScreenState extends State<NearbyMapScreen> {
 
   Widget _buildPlaceItem(PlaceModel place) {
     final isSelected = _selectedPlace?.id.toString() == place.id.toString();
+    final markerColor = _getCategoryColor(place.category);
     return Padding(
       padding: const EdgeInsets.only(bottom: 8),
       child: Material(
@@ -1694,22 +2032,55 @@ class _NearbyMapScreenState extends State<NearbyMapScreen> {
             child: Row(
               children: [
                 ClipRRect(
-                  borderRadius: BorderRadius.circular(10),
+                  borderRadius: BorderRadius.circular(12),
                   child: SizedBox(
-                    width: 56,
-                    height: 56,
-                    child: place.images.isNotEmpty
-                        ? CachedNetworkImage(
-                            imageUrl: place.images.first,
-                            width: 56,
-                            height: 56,
-                            fit: BoxFit.cover,
-                            placeholder: (_, __) =>
-                                _placePlaceholder(place),
-                            errorWidget: (_, __, ___) =>
-                                _placePlaceholder(place),
-                          )
-                        : _placePlaceholder(place),
+                    width: 60,
+                    height: 60,
+                    child: Stack(
+                      fit: StackFit.expand,
+                      children: [
+                        place.images.isNotEmpty
+                            ? CachedNetworkImage(
+                                imageUrl: place.images.first,
+                                fit: BoxFit.cover,
+                                placeholder: (_, __) =>
+                                    _placePlaceholder(place),
+                                errorWidget: (_, __, ___) =>
+                                    _placePlaceholder(place),
+                              )
+                            : _placePlaceholder(place),
+                        if (place.isFeatured)
+                          Positioned(
+                            top: 0,
+                            left: 0,
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 5, vertical: 2),
+                              decoration: const BoxDecoration(
+                                color: AppTheme.secondaryColor,
+                                borderRadius: BorderRadius.only(
+                                    bottomRight: Radius.circular(10)),
+                              ),
+                              child: const Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(Icons.star,
+                                      size: 10, color: Colors.white),
+                                  SizedBox(width: 2),
+                                  Text(
+                                    'FEATURED',
+                                    style: TextStyle(
+                                      fontSize: 8,
+                                      fontWeight: FontWeight.w700,
+                                      color: Colors.white,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                      ],
+                    ),
                   ),
                 ),
                 const SizedBox(width: 12),
@@ -1741,13 +2112,35 @@ class _NearbyMapScreenState extends State<NearbyMapScreen> {
                       const SizedBox(height: 4),
                       Row(
                         children: [
-                          if (place.category != null)
-                            Text(
-                              place.category!,
-                              style: TextStyle(
-                                  fontSize: AppTheme.textSm, color: Colors.grey.shade600),
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
+                          if (place.category != null) ...[
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 6, vertical: 2),
+                              decoration: BoxDecoration(
+                                color: markerColor.withOpacity(0.12),
+                                borderRadius: BorderRadius.circular(5),
+                              ),
+                              child: Text(
+                                place.category!,
+                                style: TextStyle(
+                                    fontSize: 10,
+                                    color: markerColor,
+                                    fontWeight: FontWeight.w600),
+                              ),
+                            ),
+                            const SizedBox(width: 6),
+                          ],
+                          if (place.district != null &&
+                              place.district!.isNotEmpty)
+                            Flexible(
+                              child: Text(
+                                place.district!,
+                                style: TextStyle(
+                                    fontSize: AppTheme.textSm,
+                                    color: Colors.grey.shade600),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
                             ),
                         ],
                       ),
@@ -1763,6 +2156,14 @@ class _NearbyMapScreenState extends State<NearbyMapScreen> {
                               style: const TextStyle(
                                   fontSize: AppTheme.textSm, fontWeight: FontWeight.w600),
                             ),
+                            if (place.totalReviews > 0) ...[
+                              const SizedBox(width: 4),
+                              Text(
+                                '(${place.totalReviews})',
+                                style: TextStyle(
+                                    fontSize: AppTheme.textSm, color: Colors.grey.shade500),
+                              ),
+                            ],
                             const SizedBox(width: 8),
                           ],
                           if (_distanceFromUser(place) != null)
@@ -2092,6 +2493,20 @@ class _NearbyMapScreenState extends State<NearbyMapScreen> {
                       onPressed: _isLoadingRoute ? null : () => _getDirections(place),
                     ),
                   ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      icon: const Icon(Icons.rate_review_outlined, size: 16),
+                      label: Text(context.t('Details'), style: const TextStyle(fontSize: 12)),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: AppTheme.primaryColor,
+                        side: BorderSide(color: AppTheme.primaryColor.withOpacity(0.4)),
+                        padding: const EdgeInsets.symmetric(vertical: 6),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                      ),
+                      onPressed: onTap,
+                    ),
+                  ),
                   if (_routes.isNotEmpty) ...[
                     const SizedBox(width: 8),
                     IconButton(
@@ -2168,6 +2583,80 @@ class _NearbyMapScreenState extends State<NearbyMapScreen> {
     );
   }
 
+  Widget _buildDestinationPreview() {
+    return Material(
+      color: Colors.transparent,
+      child: Container(
+        padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+        decoration: const BoxDecoration(
+          border: Border(left: BorderSide(color: Color(0xFFE91E63), width: 4)),
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 48,
+              height: 48,
+              decoration: BoxDecoration(
+                color: const Color(0xFFE91E63).withOpacity(0.15),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: const Icon(Icons.flag, color: Color(0xFFE91E63), size: 24),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(_destinationName ?? context.t('Destination'),
+                      style: const TextStyle(
+                          fontWeight: FontWeight.w600, fontSize: 16),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis),
+                  const SizedBox(height: 2),
+                  Text(context.t('Tap Get Directions for route'),
+                      style: TextStyle(color: Colors.grey.shade500, fontSize: 12)),
+                ],
+              ),
+            ),
+            const SizedBox(width: 8),
+            if (_routes.isEmpty)
+              SizedBox(
+                height: 36,
+                child: ElevatedButton.icon(
+                  icon: const Icon(Icons.directions, size: 16),
+                  label: Text(_isLoadingRoute ? '...' : context.t('Go')),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFFE91E63),
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(20)),
+                  ),
+                  onPressed: _isLoadingRoute ? null : _fetchDestinationRoute,
+                ),
+              )
+            else
+              SizedBox(
+                height: 36,
+                child: ElevatedButton.icon(
+                  icon: const Icon(Icons.clear, size: 16),
+                  label: Text(context.t('Clear')),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppTheme.textSecondary,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(20)),
+                  ),
+                  onPressed: _clearRoute,
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
   Widget _placePlaceholderSmall(PlaceModel place) {
     final color = _getCategoryColor(place.category);
     return Container(
@@ -2181,7 +2670,162 @@ class _NearbyMapScreenState extends State<NearbyMapScreen> {
     );
   }
 
+  /// Nepal-wide dataset filtered to the current viewport (with margin) so
+  /// marker/label work stays proportional to what's on screen. When no
+  /// Nepal data is available yet (cold start), falls back to the nearby list.
+  List<PlaceModel> _markerPlacesForViewport(PlaceProvider provider) {
+    final source = provider.nepalPlaces.isNotEmpty
+        ? provider.nepalPlaces
+        : provider.places;
+    var filtered = _applyPlaceFilters(source);
+    if (filtered.isEmpty) return filtered;
+
+    final vp = _getViewportBounds();
+    const margin = 0.15;
+    return filtered
+        .where((p) =>
+            p.latitude >= vp.minLat - margin &&
+            p.latitude <= vp.maxLat + margin &&
+            p.longitude >= vp.minLng - margin &&
+            p.longitude <= vp.maxLng + margin)
+        .toList();
+  }
+
+  /// Grid clustering: group pins by map tile at the current zoom, show one
+  /// count badge per cell. Tap zooms in, re-clustering at a finer grain.
+  List<Marker> _buildClusteredMarkers(List<PlaceModel> places) {
+    // Pre-GPS (whole Nepal in view at any zoom) the cells stay coarse so
+    // badges, not pin soup, are shown until the map centers on the user.
+    final cellDeg = 360.0 / math.pow(2, math.min(_currentZoom, 9.0));
+    final groups = <int, List<PlaceModel>>{};
+    for (final p in places) {
+      final cx = ((p.longitude + 180.0) / cellDeg).floor();
+      final cy = ((p.latitude + 90.0) / cellDeg).floor();
+      final key = cx * 100003 + cy;
+      groups.putIfAbsent(key, () => []).add(p);
+    }
+
+    final markers = <Marker>[];
+    groups.forEach((_, group) {
+      if (group.length == 1) {
+        final p = group.first;
+        markers.add(Marker(
+          point: LatLng(p.latitude, p.longitude),
+          width: 32,
+          height: 32,
+          alignment: Alignment.center,
+          child: _buildPinChild(p, 32.0, false),
+        ));
+        return;
+      }
+      // Anchor the badge on the cell's best (first/featured) place so the
+      // cluster always sits on real coordinates.
+      final anchor = group.first;
+      markers.add(Marker(
+        point: LatLng(anchor.latitude, anchor.longitude),
+        width: 44,
+        height: 44,
+        alignment: Alignment.center,
+        child: GestureDetector(
+          onTap: () => _zoomIntoCluster(anchor.latitude, anchor.longitude),
+          child: _buildClusterBadge(group.length),
+        ),
+      ));
+    });
+    return markers;
+  }
+
+  Widget _buildClusterBadge(int count) {
+    return Container(
+      width: 40,
+      height: 40,
+      decoration: BoxDecoration(
+        color: AppTheme.primaryColor,
+        shape: BoxShape.circle,
+        border: Border.all(color: Colors.white, width: 2),
+        boxShadow: const [BoxShadow(color: Colors.black26, blurRadius: 4)],
+      ),
+      alignment: Alignment.center,
+      child: Text(
+        '$count',
+        style: const TextStyle(
+          color: Colors.white,
+          fontWeight: FontWeight.bold,
+          fontSize: 13,
+        ),
+      ),
+    );
+  }
+
+  void _zoomIntoCluster(double lat, double lng) {
+    try {
+      _mapController.move(
+        LatLng(lat, lng),
+        math.min(_currentZoom + 3, 15.0),
+      );
+    } catch (e) {
+      debugPrint('Cluster zoom failed: $e');
+    }
+  }
+
+  /// Plain circular category pin (no label) — shared by the cluster and the
+  /// high-zoom paths.
+  Widget _buildPinChild(PlaceModel place, double markerSize, bool isSelected) {
+    final markerColor = _getCategoryColor(place.category);
+    return GestureDetector(
+      onTap: () => _onPlaceTap(place),
+      onDoubleTap: () => _navigateToDetails(place),
+      child: Stack(
+        clipBehavior: Clip.none,
+        children: [
+          AnimatedContainer(
+            duration: const Duration(milliseconds: 250),
+            width: markerSize, height: markerSize,
+            decoration: BoxDecoration(
+              color: markerColor, shape: BoxShape.circle,
+              border: Border.all(color: Colors.white, width: isSelected ? 3 : 1.5),
+              boxShadow: [
+                BoxShadow(
+                  color: markerColor.withOpacity(isSelected ? 0.6 : 0.25),
+                  blurRadius: isSelected ? 10 : 3,
+                  spreadRadius: isSelected ? 3 : 0.5,
+                ),
+              ],
+            ),
+            child: Stack(
+              alignment: Alignment.center,
+              children: [
+                Icon(_getCategoryIcon(place.category), color: Colors.white, size: isSelected ? 22 : 16),
+                if (isSelected)
+                  Positioned(
+                    top: 0, right: 0,
+                    child: Container(
+                      width: 14, height: 14,
+                      decoration: const BoxDecoration(color: Colors.white, shape: BoxShape.circle),
+                      child: const Icon(Icons.check_circle, size: 9, color: AppTheme.successColor),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   List<Marker> _buildMarkers(List<PlaceModel> places) {
+    // Grid clustering: group pins by map tile at the current zoom, show one
+    // count badge per cell. Clusters sit ON a real place (the first/featured
+    // pin of the cell) — never on the group average, which floats in empty
+    // terrain between towns. Tap zooms in, re-clustering at a finer grain.
+    final forceCluster = _lat == null || _lng == null;
+    final tooManyPins = places.length > _clusterMaxPins;
+    final denseLowZoom =
+        places.length > _clusterMinCount && _currentZoom < _clusterMaxZoom;
+    if (forceCluster || tooManyPins || denseLowZoom) {
+      return _buildClusteredMarkers(places);
+    }
+
     final markers = <Marker>[];
 
     if (places.isEmpty) return markers;
@@ -2191,7 +2835,7 @@ class _NearbyMapScreenState extends State<NearbyMapScreen> {
     final midZoom = _currentZoom >= 14;
 
     // Phase 0: Check if label assignment needs recomputation
-    final camera = _activeMapController.camera;
+    final camera = _mapController.camera;
     final viewport = MediaQuery.of(context).size;
     final stateKey = '${_currentZoom}|${camera.center.latitude}|${camera.center.longitude}|${camera.rotation}|${_selectedPlace?.id}';
     final placesHash = Object.hashAll(places.map((p) => p.id));
@@ -2206,50 +2850,16 @@ class _NearbyMapScreenState extends State<NearbyMapScreen> {
     for (int i = 0; i < places.length; i++) {
       final place = places[i];
       final assignment = _lastLabelAssignments[i];
-      final markerColor = _getCategoryColor(place.category);
       final isSelected = _selectedPlace?.id.toString() == place.id.toString();
       final markerSize = isSelected ? 44.0 : 32.0;
 
-      final markerChild = GestureDetector(
-        onTap: () => _onPlaceTap(place),
-        onDoubleTap: () => _navigateToDetails(place),
-        child: Stack(
-          clipBehavior: Clip.none,
-          children: [
-            AnimatedContainer(
-              duration: const Duration(milliseconds: 250),
-              width: markerSize, height: markerSize,
-              decoration: BoxDecoration(
-                color: markerColor, shape: BoxShape.circle,
-                border: Border.all(color: Colors.white, width: isSelected ? 3 : 1.5),
-                boxShadow: [
-                  BoxShadow(
-                    color: markerColor.withOpacity(isSelected ? 0.6 : 0.25),
-                    blurRadius: isSelected ? 10 : 3,
-                    spreadRadius: isSelected ? 3 : 0.5,
-                  ),
-                ],
-              ),
-              child: Stack(
-                alignment: Alignment.center,
-                children: [
-                  Icon(_getCategoryIcon(place.category), color: Colors.white, size: isSelected ? 22 : 16),
-                  if (isSelected)
-                    Positioned(
-                      top: 0, right: 0,
-                      child: Container(
-                        width: 14, height: 14,
-                        decoration: const BoxDecoration(color: Colors.white, shape: BoxShape.circle),
-                        child: const Icon(Icons.check_circle, size: 9, color: AppTheme.successColor),
-                      ),
-                    ),
-                ],
-              ),
-            ),
-            if (assignment.side != null)
-              _buildLabel(place, assignment.side!, assignment.labelWidth, markerSize, showAddress),
-          ],
-        ),
+      final markerChild = Stack(
+        clipBehavior: Clip.none,
+        children: [
+          _buildPinChild(place, markerSize, isSelected),
+          if (assignment.side != null)
+            _buildLabel(place, assignment.side!, assignment.labelWidth, markerSize, showAddress),
+        ],
       );
 
       markers.add(Marker(
@@ -2590,7 +3200,7 @@ class _NearbyMapScreenState extends State<NearbyMapScreen> {
 
   void _fetchWeatherForViewport() {
     try {
-      final bounds = _activeMapController.camera.visibleBounds;
+      final bounds = _mapController.camera.visibleBounds;
       _fetchWeatherGrid(
         minLat: bounds.south,
         maxLat: bounds.north,

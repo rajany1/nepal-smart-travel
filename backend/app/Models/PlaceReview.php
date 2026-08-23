@@ -3,10 +3,20 @@
 namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Support\Str;
 
 class PlaceReview extends Model
 {
     protected $guarded = ['id', 'uuid'];
+
+    protected static function booted(): void
+    {
+        static::creating(function (PlaceReview $review) {
+            if (empty($review->uuid)) {
+                $review->uuid = (string) Str::uuid();
+            }
+        });
+    }
 
     public function user()
     {

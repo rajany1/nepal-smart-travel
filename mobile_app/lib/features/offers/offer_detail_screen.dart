@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'dart:async';
 import "../../core/services/localization_service.dart";
 import 'package:provider/provider.dart';
 import 'package:dio/dio.dart';
@@ -8,7 +9,6 @@ import '../../config/themes/app_theme.dart';
 import '../../core/models/offer_model.dart';
 import '../../providers/auth_provider.dart';
 import '../../providers/offer_provider.dart';
-import '../../core/services/localization_service.dart';
 import '../auth/login_screen.dart';
 
 class OfferDetailScreen extends StatefulWidget {
@@ -22,6 +22,18 @@ class OfferDetailScreen extends StatefulWidget {
 
 class _OfferDetailScreenState extends State<OfferDetailScreen> {
   bool _isClaiming = false;
+  DateTime? _claimCooldownUntil;
+
+  @override
+  void initState() {
+    super.initState();
+    // Fresh claim state on open — if the user already claimed this offer
+    // (from another device/session) the button must not stay active.
+    final provider = context.read<OfferProvider>();
+    if (provider.myRedemptions.isEmpty) {
+      Future.microtask(() => provider.fetchMyRedemptions());
+    }
+  }
 
   String _typeLabel(BuildContext context) {
     switch (widget.offer.offerType) {
@@ -67,16 +79,47 @@ class _OfferDetailScreenState extends State<OfferDetailScreen> {
     try {
       final redemption = await context.read<OfferProvider>().claimOffer(widget.offer.id);
       if (!mounted) return;
+      setState(() => _claimCooldownUntil = DateTime.now().add(const Duration(seconds: 5)));
       await _showCodeSheet(redemption);
     } on DioException catch (e) {
       if (!mounted) return;
       final data = e.response?.data;
+      if (e.response?.statusCode == 429) {
+        // Server throttle active — back off longer.
+        setState(() => _claimCooldownUntil = DateTime.now().add(const Duration(seconds: 30)));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(context.t('Too many claims. Please try again later.'))),
+        );
+        return;
+      }
+      if (e.response?.statusCode == 409) {
+        // Already claimed (maybe from another device) — the server returns the
+        // existing redemption; consume it so the button flips to claimed and
+        // the user gets their code instead of tapping forever.
+        final redemption = data is Map && data['redemption'] is Map
+            ? OfferRedemptionModel.fromJson(data['redemption'] as Map<String, dynamic>)
+            : null;
+        if (redemption != null) {
+          context.read<OfferProvider>().addRedemption(redemption);
+          if (!mounted) return;
+          await _showCodeSheet(redemption);
+          return;
+        }
+        setState(() => _claimCooldownUntil = DateTime.now().add(const Duration(seconds: 10)));
+        final message = data is Map && data['message'] != null
+            ? data['message'].toString()
+            : context.t('You already claimed this offer.');
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+        return;
+      }
+      setState(() => _claimCooldownUntil = DateTime.now().add(const Duration(seconds: 5)));
       final message = data is Map && data['message'] != null
           ? data['message'].toString()
           : context.t('Could not claim offer. Try again.');
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
     } catch (_) {
       if (!mounted) return;
+      setState(() => _claimCooldownUntil = DateTime.now().add(const Duration(seconds: 5)));
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(context.t('Could not claim offer. Check your connection.'))),
       );
@@ -145,7 +188,7 @@ class _OfferDetailScreenState extends State<OfferDetailScreen> {
                 Expanded(
                   child: OutlinedButton.icon(
                     onPressed: () async {
-                      final copiedMsg = context.t('Code copied');
+                      final copiedMsg = context.tr('Code copied');
                       await Clipboard.setData(ClipboardData(text: redemption.code));
                       if (context.mounted) {
                         ScaffoldMessenger.of(context).showSnackBar(
@@ -349,25 +392,12 @@ class _OfferDetailScreenState extends State<OfferDetailScreen> {
                 ),
               )
             else
-              SizedBox(
-                width: double.infinity,
-                height: 52,
-                child: FilledButton.icon(
-                  onPressed: canClaim ? _claim : null,
-                  icon: _isClaiming
-                      ? const SizedBox(
-                          width: 20,
-                          height: 20,
-                          child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
-                        )
-                      : const Icon(Icons.local_offer),
-                  label: Text(_isClaiming ? context.t('Claiming...') : context.t('Get Offer Code')),
-                  style: FilledButton.styleFrom(
-                    backgroundColor: AppTheme.secondaryColor,
-                    foregroundColor: Colors.white,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-                  ),
-                ),
+              _ClaimButton(
+                offer: offer,
+                canClaim: canClaim,
+                isClaiming: _isClaiming,
+                cooldownUntil: _claimCooldownUntil,
+                onClaim: _claim,
               ),
           ],
         ),
@@ -408,6 +438,101 @@ class _InfoChip extends StatelessWidget {
           const SizedBox(width: 6),
           Text(label, style: const TextStyle(fontSize: AppTheme.textXs, fontWeight: FontWeight.w600)),
         ],
+      ),
+    );
+  }
+}
+
+class _ClaimButton extends StatefulWidget {
+  final OfferModel offer;
+  final bool canClaim;
+  final bool isClaiming;
+  final DateTime? cooldownUntil;
+  final VoidCallback onClaim;
+
+  const _ClaimButton({
+    required this.offer,
+    required this.canClaim,
+    required this.isClaiming,
+    required this.cooldownUntil,
+    required this.onClaim,
+  });
+
+  @override
+  State<_ClaimButton> createState() => _ClaimButtonState();
+}
+
+class _ClaimButtonState extends State<_ClaimButton> {
+  Timer? _ticker;
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.cooldownUntil != null) _startTicker();
+  }
+
+  @override
+  void didUpdateWidget(covariant _ClaimButton oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.cooldownUntil != oldWidget.cooldownUntil) {
+      _ticker?.cancel();
+      if (widget.cooldownUntil != null) _startTicker();
+    }
+  }
+
+  void _startTicker() {
+    _ticker = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (widget.cooldownUntil != null && DateTime.now().isAfter(widget.cooldownUntil!)) {
+        _ticker?.cancel();
+        setState(() {});
+      } else {
+        setState(() {});
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _ticker?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final cooldownUntil = widget.cooldownUntil;
+    final remaining = cooldownUntil == null
+        ? Duration.zero
+        : cooldownUntil.difference(DateTime.now());
+    final cooling = remaining > Duration.zero;
+    final enabled = widget.canClaim && !widget.isClaiming && !cooling;
+
+    String label;
+    if (widget.isClaiming) {
+      label = context.t('Claiming...');
+    } else if (cooling) {
+      label = '${context.t('Please wait')} ${remaining.inSeconds + 1}s';
+    } else {
+      label = context.t('Get Offer Code');
+    }
+
+    return SizedBox(
+      width: double.infinity,
+      height: 52,
+      child: FilledButton.icon(
+        onPressed: enabled ? widget.onClaim : null,
+        icon: widget.isClaiming
+            ? const SizedBox(
+                width: 20,
+                height: 20,
+                child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+              )
+            : const Icon(Icons.local_offer),
+        label: Text(label),
+        style: FilledButton.styleFrom(
+          backgroundColor: AppTheme.secondaryColor,
+          foregroundColor: Colors.white,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+        ),
       ),
     );
   }

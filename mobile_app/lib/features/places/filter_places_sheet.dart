@@ -3,6 +3,7 @@ import "../../core/services/localization_service.dart";
 import 'package:provider/provider.dart';
 import '../../config/themes/app_theme.dart';
 import '../../providers/place_provider.dart';
+import '../../providers/map_view_provider.dart';
 
 class PlaceFilter {
   final int? categoryId;
@@ -76,6 +77,7 @@ class _FilterPlacesSheetState extends State<FilterPlacesSheet> {
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(24, 20, 24, 32),
+      child: SingleChildScrollView(
       child: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -175,6 +177,30 @@ class _FilterPlacesSheetState extends State<FilterPlacesSheet> {
             onChanged: (v) => setState(() => _onlyFeatured = v),
             activeColor: AppTheme.primaryColor,
           ),
+
+          // Map layers
+          const Text('Map Layers', style: TextStyle(fontWeight: FontWeight.w500, fontSize: 14)),
+          const SizedBox(height: 4),
+          Consumer<MapViewProvider>(
+            builder: (context, mapView, _) => Column(
+              children: [
+                SwitchListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text('Show weather overlay', style: TextStyle(fontSize: 14)),
+                  value: mapView.showWeather,
+                  onChanged: (_) => mapView.toggleWeather(),
+                  activeColor: AppTheme.primaryColor,
+                ),
+                SwitchListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text('Show trekking routes', style: TextStyle(fontSize: 14)),
+                  value: mapView.showRoutes,
+                  onChanged: (_) => mapView.toggleRoutes(),
+                  activeColor: AppTheme.primaryColor,
+                ),
+              ],
+            ),
+          ),
           const SizedBox(height: 16),
 
           // Apply button
@@ -201,6 +227,7 @@ class _FilterPlacesSheetState extends State<FilterPlacesSheet> {
             ),
           ),
         ],
+      ),
       ),
     );
   }

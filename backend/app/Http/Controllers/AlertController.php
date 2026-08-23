@@ -199,7 +199,7 @@ class AlertController extends Controller
 
         if ($alert->latitude && $alert->longitude) {
             try {
-                PushNotificationService::notifyNearbyUsers(
+                dispatch(new \App\Jobs\SendNearbyPushNotification(
                     title: $alert->title,
                     message: $alert->description,
                     latitude: (float) $alert->latitude,
@@ -207,9 +207,9 @@ class AlertController extends Controller
                     radiusKm: 20,
                     data: ['type' => 'alert', 'id' => $alert->id],
                     settingsKey: 'notifications_enabled',
-                );
+                ));
             } catch (\Throwable $e) {
-                Log::warning('Alert push notification failed: ' . $e->getMessage());
+                Log::warning('Alert push dispatch failed: ' . $e->getMessage());
             }
         }
 

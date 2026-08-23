@@ -411,7 +411,7 @@ class CodeCard extends StatelessWidget {
                 Expanded(
                   child: OutlinedButton.icon(
                     onPressed: () async {
-                      final copiedMsg = context.t('Code copied to clipboard');
+                      final copiedMsg = context.tr('Code copied to clipboard');
                       await Clipboard.setData(ClipboardData(text: redemption.code));
                       if (context.mounted) {
                         ScaffoldMessenger.of(context).showSnackBar(

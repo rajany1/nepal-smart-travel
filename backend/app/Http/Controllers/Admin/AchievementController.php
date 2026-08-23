@@ -133,6 +133,7 @@ class AchievementController extends Controller
         }
 
         $achievement->delete();
+        \App\Support\LiveFeed::bump('achievements', $achievement->id);
 
         $this->moderatorService->log(
             Auth::user(),

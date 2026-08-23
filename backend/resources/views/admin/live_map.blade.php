@@ -7,6 +7,28 @@
     <!-- Toolbar -->
     <div class="flex items-center justify-between mb-3">
         <div class="flex items-center gap-2">
+            <!-- District radio picker -->
+            <details class="relative" id="districtPicker">
+                <summary class="flex items-center gap-2 pl-8 pr-3 py-1.5 text-sm border border-gray-300 rounded-lg cursor-pointer hover:bg-gray-50 select-none" style="list-style:none;">
+                    <i class="fas fa-map-pin absolute left-3 top-1/2 -translate-y-1/2 text-primary-600"></i>
+                    <span id="districtLabel" class="font-medium">All Nepal</span>
+                    <span id="districtCount" class="text-xs text-gray-400"></span>
+                    <i class="fas fa-chevron-down text-xs text-gray-400 ml-auto"></i>
+                </summary>
+                <div class="absolute left-0 top-full mt-1 w-64 max-h-80 overflow-y-auto bg-white rounded-xl border border-gray-200 shadow-2xl z-[1200] p-2">
+                    <label class="flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-gray-50 cursor-pointer">
+                        <input type="radio" name="districtRadio" value="all" checked onchange="selectDistrict(this.value, 'All Nepal')" class="accent-primary-600">
+                        <span class="text-sm">All Nepal</span>
+                    </label>
+                    <div class="my-1 border-t border-gray-100"></div>
+                    @foreach($districts as $d)
+                    <label class="flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-gray-50 cursor-pointer">
+                        <input type="radio" name="districtRadio" value="{{ $d }}" onchange="selectDistrict(this.value, this.value)" class="accent-primary-600">
+                        <span class="text-sm">{{ $d }}</span>
+                    </label>
+                    @endforeach
+                </div>
+            </details>
             <div class="relative">
                 <i class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-xs"></i>
                 <input type="text" id="mapSearch" placeholder="Search places, reports..." oninput="filterMarkers(this.value)" class="pl-8 pr-3 py-1.5 text-sm border border-gray-300 rounded-lg w-72 focus:ring-2 focus:ring-primary-200 focus:border-primary-400 outline-none">
@@ -37,6 +59,12 @@
     </div>
 
     <div id="liveMap" style="height: 78vh;" class="rounded-xl border border-slate-200 shadow-sm"></div>
+
+    <!-- Loading overlay for district place loads -->
+    <div id="placeLoading" class="hidden absolute top-16 left-1/2 -translate-x-1/2 z-[1100] bg-white/95 backdrop-blur rounded-full shadow-lg border border-gray-200 px-4 py-2 text-sm text-gray-700 flex items-center gap-2">
+        <i class="fas fa-spinner fa-spin text-primary-600"></i>
+        <span>Loading places...</span>
+    </div>
 
     <!-- Info Panel (replaces browser popup) -->
     <div id="infoPanel" class="hidden absolute bottom-6 left-1/2 -translate-x-1/2 bg-white rounded-xl shadow-2xl border border-gray-200 p-0 w-[420px] max-w-[90vw] overflow-hidden z-[1000] transition-all duration-200" style="box-shadow: 0 8px 32px rgba(0,0,0,0.18);">
@@ -81,7 +109,8 @@
 .leaflet-popup-tip { box-shadow:none !important; }
 </style>
 <script>
-const resources = {!! $resources !!};
+const reports = @json($reports);
+const alerts = @json($alerts);
 const nepalBounds = L.latLngBounds([26.0, 79.5], [31.0, 89.0]);
 let selectedLat = null, selectedLng = null;
 
@@ -187,8 +216,11 @@ function renderWeatherOverlay() {
 fetchWeatherGrid();
 
 const allMarkers = [];
+let placeMarkers = [];
+let placeAbort = null;
+let currentDistrict = 'all';
 
-resources.places.forEach(function(p) {
+function createPlaceMarker(p) {
     const ico = p.icon || 'map-marker-alt';
     const color = p.color || '#00695C';
     const marker = L.marker([p.latitude, p.longitude], {
@@ -198,12 +230,147 @@ resources.places.forEach(function(p) {
     marker._type = 'place';
     marker.bindPopup(buildPopup(p));
     marker.on('click', function() { showInfoPanel(p); });
-    placeCluster.addLayer(marker);
-    allMarkers.push(marker);
-});
-map.addLayer(placeCluster);
+    return marker;
+}
 
-resources.reports.forEach(function(r) {
+function removePlaceMarker(marker) {
+    const i = allMarkers.indexOf(marker);
+    if (i >= 0) allMarkers.splice(i, 1);
+    placeCluster.removeLayer(marker);
+}
+
+function showPlaceLoading(on) {
+    document.getElementById('placeLoading').classList.toggle('hidden', !on);
+}
+
+function loadPlaces(district, label) {
+    if (placeAbort) placeAbort.abort();
+    placeAbort = new AbortController();
+    showPlaceLoading(true);
+    currentDistrict = district;
+
+    fetch('/admin/live-map/places?district=' + encodeURIComponent(district), { signal: placeAbort.signal })
+        .then(r => r.json())
+        .then(res => {
+            if (!res.success) return;
+
+            placeCluster.clearLayers();
+            placeMarkers.forEach(function(m) {
+                const i = allMarkers.indexOf(m);
+                if (i >= 0) allMarkers.splice(i, 1);
+            });
+            placeMarkers = [];
+
+            res.places.forEach(function(p) {
+                const marker = createPlaceMarker(p);
+                placeCluster.addLayer(marker);
+                placeMarkers.push(marker);
+                allMarkers.push(marker);
+            });
+
+            map.addLayer(placeCluster);
+            document.getElementById('districtCount').textContent = res.count.toLocaleString();
+            document.getElementById('districtLabel').textContent = label;
+            if (document.getElementById('mapSearch').value) filterMarkers(document.getElementById('mapSearch').value);
+        })
+        .catch(err => {
+            if (err.name === 'AbortError') return;
+            document.getElementById('districtCount').textContent = 'error';
+        })
+        .finally(() => {
+            if (placeAbort && !placeAbort.signal.aborted) showPlaceLoading(false);
+        });
+}
+
+function applyPlaceDelta(change) {
+    const ids = change.new.concat(change.updated);
+
+    // Deletes first — drop markers no longer on the server.
+    const delSet = new Set(change.deleted.map(String));
+    placeMarkers = placeMarkers.filter(function(m) {
+        if (delSet.has(String(m._resource.id))) {
+            removePlaceMarker(m);
+            return false;
+        }
+        return true;
+    });
+
+    if (ids.length === 0) return;
+
+    fetch('/admin/live-map/places?ids=' + ids.join(','))
+        .then(r => r.json())
+        .then(res => {
+            if (!res.success) return;
+            res.places.forEach(function(p) {
+                // Skip places outside the currently selected district.
+                if (currentDistrict !== 'all' && p.district !== currentDistrict) return;
+
+                const existing = placeMarkers.find(m => m._resource.id === p.id);
+                if (existing) {
+                    removePlaceMarker(existing);
+                    placeMarkers.splice(placeMarkers.indexOf(existing), 1);
+                }
+                const marker = createPlaceMarker(p);
+                placeCluster.addLayer(marker);
+                placeMarkers.push(marker);
+                allMarkers.push(marker);
+            });
+        })
+        .catch(() => {});
+}
+
+function refreshLayers() {
+    fetch('/admin/live-feed/map-layers')
+        .then(r => r.json())
+        .then(res => {
+            if (!res.success) return;
+
+            reportCluster.clearLayers();
+            alertGroup.clearLayers();
+            allMarkers.forEach(function(m) {
+                if (m._type === 'report') { const i = allMarkers.indexOf(m); if (i >= 0) allMarkers.splice(i, 1); }
+                if (m._type === 'alert') { const i = allMarkers.indexOf(m); if (i >= 0) allMarkers.splice(i, 1); }
+            });
+
+            res.reports.forEach(function(r) {
+                const color = r.color || '#f97316';
+                const marker = L.marker([r.latitude, r.longitude], { icon: makeMarkerIcon(color, 'flag', 22) });
+                marker._resource = r;
+                marker._type = 'report';
+                marker.bindPopup(buildPopup(r));
+                marker.on('click', function() { showInfoPanel(r); });
+                reportCluster.addLayer(marker);
+                allMarkers.push(marker);
+            });
+
+            res.alerts.forEach(function(a) {
+                const color = a.color || '#eab308';
+                const marker = L.marker([a.latitude, a.longitude], { icon: makeMarkerIcon(color, 'bell', 22) });
+                marker._resource = a;
+                marker._type = 'alert';
+                marker.bindPopup(buildPopup(a));
+                marker.on('click', function() { showInfoPanel(a); });
+                alertGroup.addLayer(marker);
+                allMarkers.push(marker);
+            });
+        })
+        .catch(() => {});
+}
+
+window.addEventListener('livefeed:change', function(e) {
+    const ch = e.detail.changes || {};
+    if (ch.places) applyPlaceDelta(ch.places);
+    if (ch.reports || ch.alerts) refreshLayers();
+});
+
+function selectDistrict(name, label) {
+    loadPlaces(name, label);
+    document.getElementById('districtPicker').removeAttribute('open');
+}
+
+loadPlaces('all', 'All Nepal');
+
+reports.forEach(function(r) {
     const color = r.color || '#f97316';
     const marker = L.marker([r.latitude, r.longitude], {
         icon: makeMarkerIcon(color, 'flag', 22),
@@ -217,7 +384,7 @@ resources.reports.forEach(function(r) {
 });
 map.addLayer(reportCluster);
 
-resources.alerts.forEach(function(a) {
+alerts.forEach(function(a) {
     const color = a.color || '#eab308';
     const marker = L.marker([a.latitude, a.longitude], {
         icon: makeMarkerIcon(color, 'bell', 22),

@@ -7,7 +7,6 @@ use App\Models\Place;
 use App\Models\PlaceReview;
 use App\Models\PlaceCategories;
 use App\Helpers\GeoHelper;
-use App\Jobs\ModerateReview;
 use App\Jobs\TranslateContent;
 use App\Models\GameSetting;
 use App\Services\AchievementService;
@@ -16,6 +15,7 @@ use App\Models\PlaceImage;
 use App\Models\AuditLog;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Str;
 
 class PlaceController extends Controller
@@ -136,6 +136,8 @@ class PlaceController extends Controller
             'ip_address' => $request->ip(),
         ]);
 
+        \App\Services\PlacesCache::bump();
+
         return response()->json([
             'success' => true,
             'message' => 'Place submitted for review.',
@@ -198,6 +200,91 @@ class PlaceController extends Controller
         ])->toArray();
 
         $data = TranslationService::attachToPlaces($data);
+
+        return response()->json([
+            'success' => true,
+            'data' => $data,
+        ]);
+    }
+
+    /**
+     * Nepal-wide places — unified result of admin + OSM + user places.
+     * Lightweight map/list payload, Redis-cached for 10 minutes.
+     * Ordering: featured → rating → review count → name.
+     */
+    public function all(Request $request)
+    {
+        $request->validate([
+            'limit' => 'nullable|integer|min:1|max:1000',
+            'category' => 'nullable|string|max:100',
+        ]);
+
+        $limit = $request->limit ?? 500;
+
+        // Cached payload: plain array (never Eloquent models — Redis
+        // serialization of models is unreliable across requests). The
+        // show-on-map privacy filter is applied per request afterwards,
+        // because it depends on the requesting viewer.
+        $places = Cache::remember(\App\Services\PlacesCache::allKey(), \App\Services\PlacesCache::ALL_TTL, function () {
+            return Place::with(['category', 'images'])->active()
+                ->whereIn('source', ['admin', 'osm', 'user_submitted'])
+                ->orderBy('is_featured', 'desc')
+                ->orderBy('average_rating', 'desc')
+                ->orderBy('total_reviews', 'desc')
+                ->orderBy('name')
+                ->limit(1000)
+                ->get()
+                ->map(fn($place) => [
+                    'id' => $place->id,
+                    'uuid' => $place->uuid,
+                    'created_by' => $place->created_by !== null ? (int) $place->created_by : null,
+                    'name' => $place->name,
+                    'description' => $place->description,
+                    'address' => $place->address,
+                    'district' => $place->district,
+                    'latitude' => $place->latitude !== null ? (float) $place->latitude : null,
+                    'longitude' => $place->longitude !== null ? (float) $place->longitude : null,
+                    'phone' => $place->phone,
+                    'category' => $place->category ? $place->category->name : null,
+                    'source' => $place->source ?? 'admin',
+                    'osm_id' => $place->osm_id,
+                    'average_rating' => $place->average_rating !== null ? (float) $place->average_rating : null,
+                    'total_reviews' => $place->total_reviews,
+                    'is_featured' => $place->is_featured,
+                    'image' => $this->placeImageUrls($place->images)[0] ?? null,
+                ])
+                ->values()
+                ->toArray();
+        });
+
+        // Per-request "Show on Map" privacy filter (mirrors applyShowOnMapFilter).
+        $viewerId = $request->user()?->id;
+        $hiddenAuthorIds = \App\Models\User::whereRaw("JSON_EXTRACT(settings, '$.show_on_map') = 'false'")
+            ->pluck('id')
+            ->map(fn($v) => (int) $v)
+            ->all();
+        $filtered = array_values(array_filter($places, function ($place) use ($hiddenAuthorIds, $viewerId) {
+            if ($place['created_by'] === null) return true;
+            if ($viewerId !== null && (int) $place['created_by'] === (int) $viewerId) return true;
+            return !in_array((int) $place['created_by'], $hiddenAuthorIds, true);
+        }));
+
+        if ($request->filled('category')) {
+            $needle = mb_strtolower($request->category);
+            $filtered = array_values(array_filter($filtered, fn($place) => $place['category'] !== null
+                && mb_strpos(mb_strtolower($place['category']), $needle) !== false));
+        }
+
+        $data = array_slice($filtered, 0, $limit);
+
+        $data = TranslationService::attachToPlaces($data);
+        foreach ($data as &$item) {
+            $item['translated_name'] = $item['name_ne'] ?? $item['name'] ?? '';
+            $item['rating'] = $item['average_rating'];
+            $item['review_count'] = $item['total_reviews'];
+            $item['featured'] = $item['is_featured'];
+        }
+        unset($item);
 
         return response()->json([
             'success' => true,
@@ -441,6 +528,17 @@ class PlaceController extends Controller
      */
     private function fetchOsmNearby(float $lat, float $lng, float $radiusKm): array
     {
+        // Redis bbox raw-response cache (24h): repeated viewport requests for
+        // the same area skip Overpass entirely.
+        $bbox = \App\Services\OsmOverpassService::radiusToBbox($lat, $lng, $radiusKm);
+        $bboxKey = \App\Services\OsmOverpassService::bboxCacheKey(
+            $bbox['minLat'], $bbox['minLng'], $bbox['maxLat'], $bbox['maxLng'], $radiusKm
+        );
+        $raw = \App\Services\OsmOverpassService::getCachedRaw($bboxKey);
+        if ($raw !== null) {
+            return $this->parseOsmElements($lat, $lng, $raw['elements'] ?? []);
+        }
+
         // Cache key based on approximate location (rounded to 3 decimal places ~ 111m)
         $cacheKey = 'osm_nearby_' . round($lat, 3) . '_' . round($lng, 3) . '_' . $radiusKm;
         $cached = Cache::get($cacheKey);
@@ -555,6 +653,8 @@ class PlaceController extends Controller
                 // so a flaky/empty response never blocks fresh fetches)
                 if (!empty($places)) {
                     Cache::put($cacheKey, $places, 600);
+                    // Raw Overpass payload under the bbox key (24h TTL)
+                    \App\Services\OsmOverpassService::putCachedRaw($bboxKey, $data);
                 }
 
                 return $places;
@@ -773,8 +873,7 @@ class PlaceController extends Controller
         ]);
 
         // Auto-create Place from OSM if not in DB yet
-        if (str_starts_with($id, 'osm_')) {
-            $osmId = substr($id, 4);
+        if (str_starts_with($id, 'osm_')) {            $osmId = substr($id, 4);
             $place = Place::where('osm_id', $osmId)->first();
 
             if (!$place) {
@@ -808,18 +907,32 @@ class PlaceController extends Controller
             $id = (string) $place->id;
         }
 
-        $place = Place::findOrFail($id);
+        $place = Place::findOrFail($this->resolveDbId($id));
         $user = $request->user();
 
-        // Re-submitting an existing review resets moderation so it gets re-moderated
+        // Redis daily review cap (5 reviews per user per day) — the minute-level
+        // burst guard is the throttle:reviews middleware; this counter caps the
+        // total across all places so one user can't review hundreds of places.
+        $dailyKey = 'rl:reviews:daily:' . $user->id;
+        $dailyCount = (int) Cache::get($dailyKey, 0);
+        if ($dailyCount >= 5) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Daily review limit reached (5 reviews per day). Please try again tomorrow.',
+            ], 429, ['Retry-After' => '3600']);
+        }
+        Cache::put($dailyKey, $dailyCount + 1, now()->endOfDay());
+
+        // Re-submitting an existing review overwrites it; reviews publish directly
+        // (admin can edit/hide later from the places list -> Reviews)
         $review = PlaceReview::updateOrCreate(
             ['place_id' => $place->id, 'user_id' => $user->id],
             [
                 'title' => $request->title,
                 'description' => $request->description,
                 'rating' => $request->rating,
-                'moderation_status' => null,
-                'moderated_at' => null,
+                'moderation_status' => 'approved',
+                'moderated_at' => now(),
             ]
         );
 
@@ -841,10 +954,7 @@ class PlaceController extends Controller
             );
         }
 
-        dispatch(new ModerateReview($review->id));
-        if ($request->description) {
-            dispatch(new TranslateContent('place_review', $review->id, 'description'));
-        }
+        dispatch(new TranslateContent('place_review', $review->id, 'description'));
 
         // Handle uploaded images
         if ($request->hasFile('images')) {
@@ -858,6 +968,8 @@ class PlaceController extends Controller
         $place->average_rating = $place->approvedReviews()->avg('rating');
         $place->total_reviews = $place->approvedReviews()->count();
         $place->save();
+
+        \App\Services\PlacesCache::bump();
 
         return response()->json([
             'success' => true,
@@ -879,6 +991,98 @@ class PlaceController extends Controller
         ]);
     }
 
+    /**
+     * Nearby list returns DB places with a source prefix ("admin_3705"); resolve back to the raw DB id.
+     */
+    private function resolveDbId($id): string
+    {
+        return str_starts_with($id, 'admin_') ? (string) ((int) substr($id, 6)) : $id;
+    }
+
+    /**
+     * Directions proxy: the app calls our server (reliable on any network),
+     * we fetch OSRM and return clean route data. Cached 15 min.
+     */
+    public function directions(Request $request)
+    {
+        $request->validate([
+            'from_lat' => 'required|numeric|between:-90,90',
+            'from_lng' => 'required|numeric|between:-180,180',
+            'to_lat' => 'required|numeric|between:-90,90',
+            'to_lng' => 'required|numeric|between:-180,180',
+        ]);
+
+        $fromLng = $request->from_lng;
+        $fromLat = $request->from_lat;
+        $toLng = $request->to_lng;
+        $toLat = $request->to_lat;
+
+        try {
+            $routes = Cache::remember("directions:v2:$fromLng,$fromLat;$toLng,$toLat", 900, function () use ($fromLng, $fromLat, $toLng, $toLat) {
+                $resp = Http::timeout(15)
+                    ->withHeaders(['User-Agent' => 'NepalSmartTravel/1.0'])
+                    ->get('https://router.project-osrm.org/route/v1/driving/'
+                        . $fromLng . ',' . $fromLat . ';' . $toLng . ',' . $toLat
+                        . '?geometries=geojson&overview=full&steps=true&alternatives=3');
+
+                if (!$resp->successful()) {
+                    throw new \RuntimeException('routing_upstream_' . $resp->status());
+                }
+
+                $json = $resp->json();
+                if (($json['code'] ?? '') !== 'Ok') {
+                    return [];
+                }
+
+                // OSRM snaps off-road points to the nearest road, so the route
+                // alone never reaches the user's real position (or a place that
+                // sits away from the road). Compare each requested coordinate
+                // with OSRM's snapped waypoints and, when the gap is meaningful,
+                // prepend/append the raw coordinate as a straight off-road leg
+                // (walked at ~5 km/h) so the app draws the complete path.
+                $offRoadThreshold = 25; // meters
+                $waypoints = $json['waypoints'] ?? [];
+                $originSnapped = $waypoints[0]['location'] ?? null; // [lng, lat]
+                $destSnapped = $waypoints[1]['location'] ?? null;   // [lng, lat]
+
+                $originOffRoad = $originSnapped !== null
+                    && GeoHelper::haversineMeters($fromLat, $fromLng, $originSnapped[1], $originSnapped[0]) > $offRoadThreshold;
+                $destOffRoad = $destSnapped !== null
+                    && GeoHelper::haversineMeters($toLat, $toLng, $destSnapped[1], $destSnapped[0]) > $offRoadThreshold;
+
+                return array_map(function ($r) use ($originOffRoad, $destOffRoad, $fromLat, $fromLng, $toLat, $toLng) {
+                    $points = array_map(
+                        fn($c) => ['lat' => (float) $c[1], 'lng' => (float) $c[0], 'offRoad' => false],
+                        $r['geometry']['coordinates'] ?? []
+                    );
+
+                    $extraKm = 0.0;
+                    if ($originOffRoad && count($points) > 0) {
+                        $roadStart = $points[0];
+                        array_unshift($points, ['lat' => (float) $fromLat, 'lng' => (float) $fromLng, 'offRoad' => true]);
+                        $extraKm += GeoHelper::haversineKm($fromLat, $fromLng, $roadStart['lat'], $roadStart['lng']);
+                    }
+                    if ($destOffRoad && count($points) > 0) {
+                        $roadEnd = $points[count($points) - 1];
+                        $points[] = ['lat' => (float) $toLat, 'lng' => (float) $toLng, 'offRoad' => true];
+                        $extraKm += GeoHelper::haversineKm($toLat, $toLng, $roadEnd['lat'], $roadEnd['lng']);
+                    }
+
+                    return [
+                        'points' => $points,
+                        'distance' => round((float) ($r['distance'] ?? 0) / 1000 + $extraKm, 2),
+                        'duration' => round((float) ($r['duration'] ?? 0) / 60 + $extraKm * 12, 1),
+                    ];
+                }, $json['routes'] ?? []);
+            });
+        } catch (\Throwable $e) {
+            Log::warning('routing upstream failed', ['error' => $e->getMessage()]);
+            return response()->json(['success' => false, 'message' => 'Routing service unavailable'], 502);
+        }
+
+        return response()->json(['success' => true, 'routes' => $routes]);
+    }
+
     public function reviews($id)
     {
         if (str_starts_with($id, 'osm_')) {
@@ -891,7 +1095,7 @@ class PlaceController extends Controller
         }
 
         $reviews = PlaceReview::with('user')
-            ->where('place_id', $id)
+            ->where('place_id', $this->resolveDbId($id))
             ->where(function ($q) {
                 $q->whereNull('moderation_status')
                     ->orWhere('moderation_status', 'approved');
@@ -934,7 +1138,7 @@ class PlaceController extends Controller
                 return response()->json(['success' => true, 'data' => null]);
             }
         } else {
-            $place = Place::with(['category', 'approvedReviews', 'images'])->findOrFail($id);
+            $place = Place::with(['category', 'approvedReviews', 'images'])->findOrFail($this->resolveDbId($id));
         }
         $data = TranslationService::attachToModel($place, 'place');
         return response()->json([
@@ -946,7 +1150,7 @@ class PlaceController extends Controller
     public function translations($id)
     {
         $translations = \App\Models\ModelTranslation::where('translatable_type', 'place')
-            ->where('translatable_id', $id)
+            ->where('translatable_id', $this->resolveDbId($id))
             ->where('locale', 'ne')
             ->get(['field', 'value']);
 

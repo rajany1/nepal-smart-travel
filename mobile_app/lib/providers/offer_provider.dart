@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import "../../core/services/localization_service.dart";
 import '../core/api/api_client.dart';
 import '../core/models/offer_model.dart';
 
@@ -59,6 +58,14 @@ class OfferProvider extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Inserts (or replaces) a redemption in the local list so screens know
+  /// instantly that the offer was claimed — no repeated claim attempts.
+  void addRedemption(OfferRedemptionModel redemption) {
+    _myRedemptions.removeWhere((r) => r.offerId == redemption.offerId);
+    _myRedemptions.insert(0, redemption);
+    notifyListeners();
+  }
+
   /// Returns the redemption on success, throws ApiException-like message on failure.
   Future<OfferRedemptionModel> claimOffer(int offerId) async {
     _claimingOfferId = '$offerId';
@@ -69,7 +76,7 @@ class OfferProvider extends ChangeNotifier {
       final redemption = OfferRedemptionModel.fromJson(
         (res.data['redemption'] as Map<String, dynamic>?) ?? {},
       );
-      _myRedemptions.insert(0, redemption);
+      addRedemption(redemption);
       _claimingOfferId = null;
       notifyListeners();
       return redemption;

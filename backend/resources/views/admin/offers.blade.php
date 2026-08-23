@@ -1,4 +1,4 @@
-@extends('admin.layout')
+﻿@extends('admin.layout')
 
 @section('title', 'Reward Offers')
 
@@ -40,6 +40,7 @@
 
 <div class="bg-white rounded-2xl shadow overflow-hidden">
     <div class="overflow-x-auto">
+<div id="liveTable">
         <table class="w-full text-sm">
             <thead class="bg-slate-50 text-slate-500 text-xs uppercase tracking-wide">
                 <tr>
@@ -66,7 +67,7 @@
                             @endif
                         </td>
                         <td class="px-4 py-4">
-                            <div class="text-slate-700">{{ $offer->business?->name ?? '—' }}</div>
+                            <div class="text-slate-700">{{ $offer->business?->name ?? 'â€”' }}</div>
                             @if($offer->business && $offer->business->verification_status === 'verified')
                                 <span class="text-xs text-emerald-600"><i class="fas fa-check-circle"></i> verified</span>
                             @endif
@@ -98,7 +99,7 @@
                         <td class="px-4 py-4">
                             <span class="text-xs px-2.5 py-1 rounded-lg bg-primary-50 text-primary-700 font-semibold">{{ $offer->price_xp }} XP</span>
                         </td>
-                        <td class="px-4 py-4 text-slate-700">{{ $offer->used_count }} / {{ $offer->usage_limit ?: '∞' }}</td>
+                        <td class="px-4 py-4 text-slate-700">{{ $offer->used_count }} / {{ $offer->usage_limit ?: 'âˆž' }}</td>
                         <td class="px-4 py-4 {{ $offer->ends_at && $offer->ends_at->lte(now()) ? 'text-red-500' : 'text-slate-600' }}">{{ $offer->ends_at ? $offer->ends_at->format('M j, Y') : 'No expiry' }}</td>
                         <td class="px-4 py-4">
                             @if($offer->trashed())
@@ -106,7 +107,7 @@
                             @else
                                 <span class="text-xs px-3 py-1 rounded-full border {{ $statusColors[$offer->status] ?? '' }}">{{ ucfirst($offer->status) }}</span>
                                 @if($offer->paused_by === 'system')
-                                    <span class="block text-[10px] text-red-500 mt-0.5">Ended — locked by system</span>
+                                    <span class="block text-[10px] text-red-500 mt-0.5">Ended â€” locked by system</span>
                                 @elseif($offer->paused_by === 'admin')
                                     <span class="block text-[10px] text-orange-500 mt-0.5">Paused by admin</span>
                                 @elseif($offer->paused_by === 'partner')
@@ -176,6 +177,7 @@
         </table>
     </div>
     <div class="px-6 py-4">{{ $offers->links() }}</div>
+</div>
 </div>
 
 <!-- Reject modal -->

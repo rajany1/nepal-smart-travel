@@ -13,6 +13,7 @@
         </button>
     </div>
 
+    <div id="liveTable">
     @foreach($permissions as $group => $perms)
     <div class="bg-white rounded-2xl shadow-sm border border-slate-200">
         <div class="px-5 py-3 border-b border-slate-100">
@@ -49,6 +50,7 @@
         </div>
     </div>
     @endforeach
+    </div>
 </div>
 
 <!-- Create Modal -->

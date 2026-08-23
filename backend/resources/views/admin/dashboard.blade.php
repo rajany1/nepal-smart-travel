@@ -21,7 +21,7 @@
                             <span class="inline-flex h-12 w-12 flex-shrink-0 items-center justify-center rounded-3xl bg-primary-600 text-white"><i class="fas fa-users"></i></span>
                             <div class="min-w-0 w-full sm:w-auto">
                                 <p class="text-xs uppercase tracking-[0.2em] text-slate-400">Users</p>
-                                <p class="mt-3 text-3xl font-semibold text-slate-900">{{ number_format($stats['total_users']) }}</p>
+                                <p class="mt-3 text-3xl font-semibold text-slate-900" data-count="total_users">{{ number_format($stats['total_users']) }}</p>
                                 <p class="mt-2 text-sm text-slate-500">Active users registered</p>
                             </div>
                         </div>
@@ -37,7 +37,7 @@
                             <span class="inline-flex h-12 w-12 flex-shrink-0 items-center justify-center rounded-3xl bg-sky-600 text-white"><i class="fas fa-flag"></i></span>
                             <div class="min-w-0 w-full sm:w-auto">
                                 <p class="text-xs uppercase tracking-[0.2em] text-slate-400">Reports</p>
-                                <p class="mt-3 text-3xl font-semibold text-slate-900">{{ number_format($stats['total_reports']) }}</p>
+                                <p class="mt-3 text-3xl font-semibold text-slate-900" data-count="total_reports">{{ number_format($stats['total_reports']) }}</p>
                                 <p class="mt-2 text-sm text-slate-500">Total reports submitted</p>
                             </div>
                         </div>
@@ -53,7 +53,7 @@
                             <span class="inline-flex h-12 w-12 flex-shrink-0 items-center justify-center rounded-3xl bg-amber-600 text-white"><i class="fas fa-hourglass-half"></i></span>
                             <div class="min-w-0 w-full sm:w-auto">
                                 <p class="text-xs uppercase tracking-[0.2em] text-slate-400">Pending</p>
-                                <p class="mt-3 text-3xl font-semibold text-amber-600">{{ number_format($stats['pending_reports']) }}</p>
+                                <p class="mt-3 text-3xl font-semibold text-amber-600" data-count="pending_reports">{{ number_format($stats['pending_reports']) }}</p>
                                 <p class="mt-2 text-sm text-slate-500">Reports waiting review</p>
                             </div>
                         </div>
@@ -69,7 +69,7 @@
                             <span class="inline-flex h-12 w-12 flex-shrink-0 items-center justify-center rounded-3xl bg-rose-600 text-white"><i class="fas fa-bell"></i></span>
                             <div class="min-w-0 w-full sm:w-auto">
                                 <p class="text-xs uppercase tracking-[0.2em] text-slate-400">Alerts</p>
-                                <p class="mt-3 text-3xl font-semibold text-slate-900">{{ number_format($stats['total_alerts']) }}</p>
+                                <p class="mt-3 text-3xl font-semibold text-slate-900" data-count="total_alerts">{{ number_format($stats['total_alerts']) }}</p>
                                 <p class="mt-2 text-sm text-slate-500">Active alerts today</p>
                             </div>
                         </div>
@@ -87,7 +87,7 @@
                             <span class="inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-2xl bg-primary-600 text-white"><i class="fas fa-cogs"></i></span>
                             <div class="min-w-0 w-full sm:w-auto">
                                 <p class="text-xs uppercase tracking-[0.2em] text-slate-400">Operations</p>
-                                <p class="mt-3 text-3xl font-semibold text-slate-900">{{ $stats['operations_efficiency'] }}%</p>
+                                <p class="mt-3 text-3xl font-semibold text-slate-900" data-count="operations_efficiency">{{ $stats['operations_efficiency'] }}%</p>
                                 <p class="mt-2 text-sm text-slate-500">Efficiency across approvals and reviews</p>
                             </div>
                         </div>
@@ -99,7 +99,7 @@
                             <span class="inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-2xl bg-sky-600 text-white"><i class="fas fa-chart-bar"></i></span>
                             <div class="min-w-0 w-full sm:w-auto">
                                 <p class="text-xs uppercase tracking-[0.2em] text-slate-400">Analytics</p>
-                                <p class="mt-3 text-3xl font-semibold text-slate-900">{{ $stats['analytics_score'] }} / 100</p>
+                                <p class="mt-3 text-3xl font-semibold text-slate-900" data-count="analytics_score">{{ $stats['analytics_score'] }} / 100</p>
                                 <p class="mt-2 text-sm text-slate-500">Data readiness and activity score</p>
                             </div>
                         </div>
@@ -111,7 +111,7 @@
                             <span class="inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-2xl bg-emerald-600 text-white"><i class="fas fa-dollar-sign"></i></span>
                             <div class="min-w-0 w-full sm:w-auto">
                                 <p class="text-xs uppercase tracking-[0.2em] text-slate-400">Ads income</p>
-                                <p class="mt-3 text-3xl font-semibold text-slate-900">${{ number_format($stats['ads_income']) }}</p>
+                                <p class="mt-3 text-3xl font-semibold text-slate-900" data-count="ads_income">${{ number_format($stats['ads_income']) }}</p>
                                 <p class="mt-2 text-sm text-slate-500">Projected monthly revenue</p>
                             </div>
                         </div>
@@ -123,8 +123,8 @@
                             <span class="inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-2xl bg-rose-600 text-white"><i class="fas fa-heartbeat"></i></span>
                             <div class="min-w-0 w-full sm:w-auto">
                                 <p class="text-xs uppercase tracking-[0.2em] text-slate-400">System Health</p>
-                                <p class="mt-3 text-3xl font-semibold text-slate-900">{{ $stats['system_health_score'] }}%</p>
-                                <p class="mt-2 text-sm text-slate-500">{{ $stats['system_health_status'] }}</p>
+                                <p class="mt-3 text-3xl font-semibold text-slate-900" data-count="system_health_score">{{ $stats['system_health_score'] }}%</p>
+                                <p class="mt-2 text-sm text-slate-500" data-count="system_health_status">{{ $stats['system_health_status'] }}</p>
                             </div>
                         </div>
                     </div>
@@ -144,15 +144,15 @@
                 <div class="mt-5 grid gap-3 sm:grid-cols-3">
                     <div class="rounded-3xl bg-white p-4 shadow-sm">
                         <p class="text-xs uppercase tracking-[0.2em] text-slate-400">Today</p>
-                        <p class="mt-2 text-2xl font-semibold text-slate-900">{{ number_format($stats['chart_values'][6] ?? 0) }}</p>
+                        <p class="mt-2 text-2xl font-semibold text-slate-900" data-count="chart_today">{{ number_format($stats['chart_values'][6] ?? 0) }}</p>
                     </div>
                     <div class="rounded-3xl bg-white p-4 shadow-sm">
                         <p class="text-xs uppercase tracking-[0.2em] text-slate-400">Weekly peak</p>
-                        <p class="mt-2 text-2xl font-semibold text-slate-900">{{ number_format(max($stats['chart_values'])) }}</p>
+                        <p class="mt-2 text-2xl font-semibold text-slate-900" data-count="chart_peak">{{ number_format(max($stats['chart_values'])) }}</p>
                     </div>
                     <div class="rounded-3xl bg-white p-4 shadow-sm">
                         <p class="text-xs uppercase tracking-[0.2em] text-slate-400">Average</p>
-                        <p class="mt-2 text-2xl font-semibold text-slate-900">{{ number_format(round(collect($stats['chart_values'])->avg())) }}</p>
+                        <p class="mt-2 text-2xl font-semibold text-slate-900" data-count="chart_avg">{{ number_format(round(collect($stats['chart_values'])->avg())) }}</p>
                     </div>
                 </div>
             </div>
@@ -172,7 +172,7 @@
                         <div class="flex items-center justify-between gap-3">
                             <div>
                                 <p class="text-sm text-slate-500">Report approval XP</p>
-                                <p class="mt-1 text-xl font-semibold text-slate-900">{{ $stats['xp_rates']['report_approval_xp'] }} XP</p>
+                                <p class="mt-1 text-xl font-semibold text-slate-900" data-count="xp_report_approval">{{ $stats['xp_rates']['report_approval_xp'] }} XP</p>
                             </div>
                             <span class="inline-flex h-11 w-11 items-center justify-center rounded-2xl bg-primary-600 text-white"><i class="fas fa-check"></i></span>
                         </div>
@@ -181,7 +181,7 @@
                         <div class="flex items-center justify-between gap-3">
                             <div>
                                 <p class="text-sm text-slate-500">Alert post XP</p>
-                                <p class="mt-1 text-xl font-semibold text-slate-900">{{ $stats['xp_rates']['alert_post_xp'] }} XP</p>
+                                <p class="mt-1 text-xl font-semibold text-slate-900" data-count="xp_alert_post">{{ $stats['xp_rates']['alert_post_xp'] }} XP</p>
                             </div>
                             <span class="inline-flex h-11 w-11 items-center justify-center rounded-2xl bg-amber-600 text-white"><i class="fas fa-bell"></i></span>
                         </div>
@@ -190,7 +190,7 @@
                         <div class="flex items-center justify-between gap-3">
                             <div>
                                 <p class="text-sm text-slate-500">Review XP</p>
-                                <p class="mt-1 text-xl font-semibold text-slate-900">{{ $stats['xp_rates']['review_xp'] }} XP</p>
+                                <p class="mt-1 text-xl font-semibold text-slate-900" data-count="xp_review">{{ $stats['xp_rates']['review_xp'] }} XP</p>
                             </div>
                             <span class="inline-flex h-11 w-11 items-center justify-center rounded-2xl bg-emerald-600 text-white"><i class="fas fa-star"></i></span>
                         </div>
@@ -199,7 +199,7 @@
                         <div class="flex items-center justify-between gap-3">
                             <div>
                                 <p class="text-sm text-slate-500">Place Submit XP</p>
-                                <p class="mt-1 text-xl font-semibold text-slate-900">{{ $stats['xp_rates']['place_submit_xp'] }} XP</p>
+                                <p class="mt-1 text-xl font-semibold text-slate-900" data-count="xp_place_submit">{{ $stats['xp_rates']['place_submit_xp'] }} XP</p>
                             </div>
                             <span class="inline-flex h-11 w-11 items-center justify-center rounded-2xl bg-violet-600 text-white"><i class="fas fa-map-pin"></i></span>
                         </div>
@@ -280,7 +280,7 @@
                         <div class="flex items-center justify-between gap-4">
                             <div>
                                 <p class="text-sm text-slate-500">Approved</p>
-                                <p class="mt-1 text-xl font-semibold text-slate-900">{{ number_format($stats['approved_reports']) }}</p>
+                                <p class="mt-1 text-xl font-semibold text-slate-900" data-count="approved_reports">{{ number_format($stats['approved_reports']) }}</p>
                             </div>
                             <span class="rounded-2xl bg-emerald-100 px-3 py-1 text-sm font-semibold text-emerald-700">Good</span>
                         </div>
@@ -289,7 +289,7 @@
                         <div class="flex items-center justify-between gap-4">
                             <div>
                                 <p class="text-sm text-slate-500">Rejected</p>
-                                <p class="mt-1 text-xl font-semibold text-slate-900">{{ number_format($stats['rejected_reports']) }}</p>
+                                <p class="mt-1 text-xl font-semibold text-slate-900" data-count="rejected_reports">{{ number_format($stats['rejected_reports']) }}</p>
                             </div>
                             <span class="rounded-2xl bg-rose-100 px-3 py-1 text-sm font-semibold text-rose-700">Needs review</span>
                         </div>
@@ -298,7 +298,7 @@
                         <div class="flex items-center justify-between gap-4">
                             <div>
                                 <p class="text-sm text-slate-500">Moderation Queue</p>
-                                <p class="mt-1 text-xl font-semibold text-amber-600">{{ number_format($stats['pending_queue']) }}</p>
+                                <p class="mt-1 text-xl font-semibold text-amber-600" data-count="pending_queue">{{ number_format($stats['pending_queue']) }}</p>
                             </div>
                             <span class="rounded-2xl bg-amber-100 px-3 py-1 text-sm font-semibold text-amber-700">Pending</span>
                         </div>

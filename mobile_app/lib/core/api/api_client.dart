@@ -216,6 +216,13 @@ class ApiClient {
     return _dio.get('/places/featured', queryParameters: queryParams);
   }
 
+  /// Nepal-wide places (admin + OSM + user submitted) in one lightweight
+  /// payload. The backend caches this for 10 minutes (Redis), so the map
+  /// opens instantly without waiting for GPS or a viewport query.
+  Future<Response> getNepalPlaces({int limit = 1000}) async {
+    return _dio.get('/places/all', queryParameters: {'limit': limit});
+  }
+
   Future<Response> getCombinedNearbyPlaces({
     required double lat,
     required double lng,
@@ -255,6 +262,20 @@ class ApiClient {
 
   Future<Response> getPlaceReviews(String placeId) async {
     return _dio.get('/places/$placeId/reviews');
+  }
+
+  Future<Response> getDirections({
+    required double fromLat,
+    required double fromLng,
+    required double toLat,
+    required double toLng,
+  }) {
+    return _dio.get('/routing/directions', queryParameters: {
+      'from_lat': fromLat,
+      'from_lng': fromLng,
+      'to_lat': toLat,
+      'to_lng': toLng,
+    });
   }
 
   Future<Response> addPlaceReview(
@@ -363,14 +384,22 @@ class ApiClient {
     double? lat,
     double? lng,
   }) async {
-    return _dio.post('/assistant/chat', data: {
-      'message': message,
-      'context': {
-        if (lat != null) 'lat': lat,
-        if (lng != null) 'lng': lng,
-      },
-    });
+    return _dio.post('/assistant/chat',
+        data: {
+          'message': message,
+          'context': {
+            if (lat != null) 'lat': lat,
+            if (lng != null) 'lng': lng,
+          },
+        },
+        options: Options(receiveTimeout: const Duration(seconds: 90)));
   }
+
+  /// Daily AI chat quota for the logged-in user (limit/used/remaining/reset_at).
+  Future<Response> getAssistantQuota() async {
+    return _dio.get('/assistant/quota');
+  }
+
   // ✅ Profile Completion endpoints
 
   // Sponsors removed — replaced by ad campaigns (2026-08)

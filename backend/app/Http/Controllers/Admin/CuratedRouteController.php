@@ -58,6 +58,7 @@ class CuratedRouteController extends Controller
         $this->requireAdmin(request());
         $this->moderatorService->log(Auth::user(), 'route.deleted', 'curated_route', $route->id, 'Deleted route: ' . $route->title);
         $route->delete();
+        \App\Support\LiveFeed::bump('curated_routes', $route->id);
         return redirect()->route('admin.routes')->with('success', 'Route deleted.');
     }
 

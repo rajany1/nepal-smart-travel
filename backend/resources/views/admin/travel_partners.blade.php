@@ -1,4 +1,4 @@
-@extends('admin.layout')
+﻿@extends('admin.layout')
 @section('title', 'Travel Partners')
 
 @section('content')
@@ -15,6 +15,7 @@
 
     <div class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
         <div class="overflow-x-auto">
+<div id="liveTable">
             <table class="w-full">
                 <thead class="bg-slate-50">
                     <tr>
@@ -38,13 +39,13 @@
                                 </div>
                                 <div>
                                     <p class="font-semibold">{{ $p->name }}</p>
-                                    <p class="text-xs text-slate-400">{{ $p->district ?? '—' }}{{ $p->phone ? ' • '.$p->phone : '' }}</p>
+                                    <p class="text-xs text-slate-400">{{ $p->district ?? 'â€”' }}{{ $p->phone ? ' â€¢ '.$p->phone : '' }}</p>
                                 </div>
                             </div>
                         </td>
                         <td class="px-6 py-4"><span class="text-xs bg-slate-100 text-slate-600 px-2 py-1 rounded-full">{{ str_replace('_', ' ', $p->type) }}</span></td>
                         <td class="px-6 py-4 text-center"><span class="font-semibold text-green-600">{{ $p->commission_rate }}%</span>@if($p->commission_fixed > 0) <span class="text-xs text-slate-400">+ Rs.{{ number_format($p->commission_fixed) }}</span>@endif</td>
-                        <td class="px-6 py-4 text-center font-semibold text-green-600">@if($p->value_npr > 0)Rs. {{ number_format($p->value_npr, 2) }}@else<span class="text-slate-300">—</span>@endif</td>
+                        <td class="px-6 py-4 text-center font-semibold text-green-600">@if($p->value_npr > 0)Rs. {{ number_format($p->value_npr, 2) }}@else<span class="text-slate-300">â€”</span>@endif</td>
                         <td class="px-6 py-4 text-center text-sm text-slate-600">{{ $p->bookings_count }}</td>
                         <td class="px-6 py-4 text-center">
                             @if($p->verification_status === 'pending')
@@ -77,6 +78,7 @@
         </div>
     </div>
     <div class="mt-4">{{ $partners->links() }}</div>
+</div>
 </div>
 
 <div id="createModal" class="hidden fixed inset-0 z-50 bg-black/40 grid place-items-center" onclick="if(event.target===this)this.classList.add('hidden')">

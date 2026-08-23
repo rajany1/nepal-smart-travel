@@ -1,4 +1,4 @@
-@extends('admin.layout')
+﻿@extends('admin.layout')
 @section('title', 'Activity Log')
 
 @section('content')
@@ -59,6 +59,7 @@
 
     <!-- Table -->
     <div class="overflow-x-auto">
+<div id="liveTable">
         <table class="w-full">
             <thead class="bg-gray-50">
                 <tr>
@@ -163,6 +164,7 @@
     @if($logs->hasPages())
     <div class="px-6 py-4 border-t border-gray-100">
         {{ $logs->links() }}
+</div>
     </div>
     @endif
 </div>

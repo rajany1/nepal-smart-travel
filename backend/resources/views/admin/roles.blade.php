@@ -13,7 +13,7 @@
         </button>
     </div>
 
-    <div class="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
+    <div id="liveTable" class="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
         @foreach($roles as $role)
         <div class="bg-white rounded-2xl shadow-sm border border-slate-200 p-5 hover:shadow-md transition">
             <div class="flex items-start justify-between mb-4">

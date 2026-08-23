@@ -141,6 +141,7 @@ class SubscriptionController extends Controller
         }
         $name = $subscriptionPlan->name;
         $subscriptionPlan->delete();
+        \App\Support\LiveFeed::bump('subscription_plans', $subscriptionPlan->id);
         $this->moderatorService->log(Auth::user(), 'subscription-plan.deleted', 'subscription_plan', $subscriptionPlan->id, 'Deleted plan: ' . $name);
         return redirect()->route('admin.subscription.plans')->with('success', 'Plan deleted.');
     }

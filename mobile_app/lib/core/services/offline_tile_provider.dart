@@ -16,8 +16,49 @@ import 'offline_db_service.dart';
 /// is persisted so previously visited areas keep working without internet.
 ///
 /// Offline-first order: cache -> network (save unless Data Saver is on).
+/// [tileType] keeps layer caches separate (e.g. 'default' vs 'satellite') so
+/// satellite imagery never collides with the OSM layer's cache.
 class OfflineTileProvider extends NetworkTileProvider {
-  OfflineTileProvider({super.headers});
+  /// Cached map tiles older than this (90 days) are treated as stale and
+  /// re-downloaded on the next visit. Guard against corrupt/blank responses
+  /// that got persisted once and otherwise show as a gray tile forever.
+  static const int tileCacheStaleAfterMs = 90 * 24 * 60 * 60 * 1000;
+
+  /// Whether [bytes] is a plausible OSM/satellite image. OSM serves PNG
+  /// (`89 50 4E 47 …`), the satellite/fallback layers serve JPEG (`FF D8 FF`).
+  static bool _isPlausibleImage(Uint8List bytes) {
+    if (bytes.isEmpty) return false;
+    // PNG signature: 89 50 4E 47 0D 0A 1A 0A
+    if (bytes.length >= 8 &&
+        bytes[0] == 0x89 &&
+        bytes[1] == 0x50 &&
+        bytes[2] == 0x4E &&
+        bytes[3] == 0x47) {
+      return true;
+    }
+    // JPEG signature: FF D8 FF
+    if (bytes.length >= 3 &&
+        bytes[0] == 0xFF &&
+        bytes[1] == 0xD8 &&
+        bytes[2] == 0xFF) {
+      return true;
+    }
+    return false;
+  }
+
+  OfflineTileProvider({
+    super.headers,
+    this.tileType = 'default',
+    this.bypassNetworkCache = false,
+  });
+
+  final String tileType;
+
+  /// When `true`, never read from or write to the on-device SQLite tile cache:
+  /// every tile is fetched fresh from the network (OSM/Carto/satellite source).
+  /// Use this for layers whose cached tiles are known to be blank/corrupt (e.g.
+  /// OSM serving valid-but-empty PNGs) so the map always shows real tiles.
+  final bool bypassNetworkCache;
 
   @override
   ImageProvider getImage(TileCoordinates coordinates, TileLayer options) {
@@ -26,6 +67,8 @@ class OfflineTileProvider extends NetworkTileProvider {
       fallbackUrl: getTileFallbackUrl(coordinates, options),
       headers: headers,
       coordinates: coordinates,
+      tileType: tileType,
+      bypassNetworkCache: bypassNetworkCache,
     );
   }
 }
@@ -35,12 +78,16 @@ class _CachedTileImage extends ImageProvider<_CachedTileImage> {
   final String? fallbackUrl;
   final Map<String, String> headers;
   final TileCoordinates coordinates;
+  final String tileType;
+  final bool bypassNetworkCache;
 
   const _CachedTileImage({
     required this.url,
     required this.fallbackUrl,
     required this.headers,
     required this.coordinates,
+    required this.tileType,
+    required this.bypassNetworkCache,
   });
 
   @override
@@ -62,45 +109,76 @@ class _CachedTileImage extends ImageProvider<_CachedTileImage> {
   Future<ui.Codec> _load(ImageDecoderCallback decode) async {
     final db = OfflineDbService.instance;
 
-    // 1) Cache hit — works offline, no network involved.
-    final cached = await db.getCachedTile(
-      z: coordinates.z,
-      x: coordinates.x,
-      y: coordinates.y,
-    );
-    if (cached != null) {
-      return decode(await ui.ImmutableBuffer.fromUint8List(cached));
+    // 1) Cache hit — works offline, no network involved. Skipped entirely when
+    //    [bypassNetworkCache] is set (used for a layer whose cached tiles are
+    //    blank/corrupt) so a fresh tile is always pulled from the network.
+    if (!bypassNetworkCache) {
+      final cached = await db.getCachedTile(
+        z: coordinates.z,
+        x: coordinates.x,
+        y: coordinates.y,
+        tileType: tileType,
+        maxAgeMs: OfflineTileProvider.tileCacheStaleAfterMs,
+      );
+      if (cached != null && OfflineTileProvider._isPlausibleImage(cached)) {
+        try {
+          return decode(await ui.ImmutableBuffer.fromUint8List(cached));
+        } catch (_) {
+          // Corrupt/cannot-decode cached tile — fall through and re-fetch below.
+          debugPrint('OSM cached tile decode failed: $coordinates');
+        }
+        // A bad cached tile must not block a fresh download: purge it.
+        await db.clearTile(
+          z: coordinates.z,
+          x: coordinates.x,
+          y: coordinates.y,
+          tileType: tileType,
+        );
+      }
     }
 
     // 2) Cache miss — fetch from the network and persist for next time.
+    //    Any failure (non-200 OR timeout/exception) falls back to
+    //    [fallbackUrl] before giving up with a transparent tile.
+    final client = http.Client();
     try {
-      final client = http.Client();
+      Uint8List? bytes;
       try {
-        var response = await client
+        final response = await client
             .get(Uri.parse(url), headers: headers)
             .timeout(const Duration(seconds: 20));
-        if (response.statusCode != 200 && fallbackUrl != null) {
-          response = await client
+        if (response.statusCode == 200 && response.bodyBytes.isNotEmpty) {
+          bytes = response.bodyBytes;
+        }
+      } catch (_) {
+        // Primary source unreachable — try the fallback below.
+      }
+      if (bytes == null && fallbackUrl != null) {
+        try {
+          final response = await client
               .get(Uri.parse(fallbackUrl!), headers: headers)
               .timeout(const Duration(seconds: 20));
-        }
-        if (response.statusCode == 200 && response.bodyBytes.isNotEmpty) {
-          final bytes = response.bodyBytes;
-          if (!await AppSettingsService.dataSaverMode) {
-            await db.saveTile(
-              z: coordinates.z,
-              x: coordinates.x,
-              y: coordinates.y,
-              bytes: bytes,
-            );
+          if (response.statusCode == 200 && response.bodyBytes.isNotEmpty) {
+            bytes = response.bodyBytes;
           }
-          return decode(await ui.ImmutableBuffer.fromUint8List(bytes));
+        } catch (_) {
+          // Both sources unreachable — transparent tile below.
         }
-      } finally {
-        client.close();
       }
-    } catch (_) {
-      // Offline / unreachable — return a transparent tile.
+      if (bytes != null) {
+        if (!bypassNetworkCache && !await AppSettingsService.dataSaverMode) {
+          await db.saveTile(
+            z: coordinates.z,
+            x: coordinates.x,
+            y: coordinates.y,
+            tileType: tileType,
+            bytes: bytes,
+          );
+        }
+        return decode(await ui.ImmutableBuffer.fromUint8List(bytes));
+      }
+    } finally {
+      client.close();
     }
 
     return decode(
@@ -122,8 +200,16 @@ class _CachedTileImage extends ImageProvider<_CachedTileImage> {
 class OfflineTileDownloader {
   static bool _running = false;
 
+  /// Full-Nepal bounding box (same constants as the map screen).
+  static const double nepalMinLat = 26.347;
+  static const double nepalMaxLat = 30.447;
+  static const double nepalMinLng = 80.058;
+  static const double nepalMaxLng = 88.201;
+
   /// Download tiles covering [minLat/maxLat/minLng/maxLng] for zooms
   /// [minZoom..maxZoom] (defaults 8..16). Skips when Data Saver is on.
+  /// [onProgress] reports (done, total) every few tiles; [isCancelled] is
+  /// polled per tile so the user can abort a full-country download.
   static Future<void> downloadRegion({
     required double minLat,
     required double maxLat,
@@ -132,13 +218,25 @@ class OfflineTileDownloader {
     int minZoom = 8,
     int maxZoom = 16,
     Map<String, String>? headers,
+    void Function(int done, int total)? onProgress,
+    bool Function()? isCancelled,
+    bool ignoreDataSaver = false,
   }) async {
     if (_running) return;
-    if (await AppSettingsService.dataSaverMode) return;
+    if (!ignoreDataSaver && await AppSettingsService.dataSaverMode) return;
 
     _running = true;
     final db = OfflineDbService.instance;
     final client = http.Client();
+    final total = regionTileCount(
+      minLat: minLat,
+      maxLat: maxLat,
+      minLng: minLng,
+      maxLng: maxLng,
+      minZoom: minZoom,
+      maxZoom: maxZoom,
+    );
+    var done = 0;
 
     try {
       for (var z = minZoom; z <= maxZoom; z++) {
@@ -150,7 +248,12 @@ class OfflineTileDownloader {
 
         for (var x = xMin; x <= xMax; x++) {
           for (var y = yMin; y <= yMax; y++) {
-            if (await db.hasTile(z: z, x: x, y: y)) continue;
+            if (isCancelled != null && isCancelled()) return;
+            if (await db.hasTile(z: z, x: x, y: y)) {
+              done++;
+              if (done % 5 == 0) onProgress?.call(done, total);
+              continue;
+            }
             final url = 'https://tile.openstreetmap.org/$z/$x/$y.png';
             try {
               final response = await client
@@ -167,7 +270,9 @@ class OfflineTileDownloader {
             } catch (_) {
               // Skip failed tiles; continue with the rest of the region.
             }
-            await Future.delayed(const Duration(milliseconds: 60));
+            done++;
+            if (done % 5 == 0) onProgress?.call(done, total);
+            await Future.delayed(const Duration(milliseconds: 40));
           }
         }
       }
@@ -175,6 +280,58 @@ class OfflineTileDownloader {
       client.close();
       _running = false;
     }
+  }
+
+  /// Downloads the full-Nepal offline pack (zooms 8..12, ~6500 tiles) and
+  /// records its validity window. Cities visited later get extra detail via
+  /// the auto-downloader. Explicit user action — ignores Data Saver.
+  static Future<void> downloadNepalMap({
+    required int validDays,
+    Map<String, String>? headers,
+    void Function(int done, int total)? onProgress,
+    bool Function()? isCancelled,
+  }) async {
+    await downloadRegion(
+      minLat: nepalMinLat,
+      maxLat: nepalMaxLat,
+      minLng: nepalMinLng,
+      maxLng: nepalMaxLng,
+      minZoom: 8,
+      maxZoom: 12,
+      headers: headers,
+      onProgress: onProgress,
+      isCancelled: isCancelled,
+      ignoreDataSaver: true,
+    );
+    if (isCancelled != null && isCancelled()) return;
+    await OfflineDbService.instance.saveOfflineRegion(
+      name: 'nepal',
+      minLat: nepalMinLat,
+      maxLat: nepalMaxLat,
+      minLng: nepalMinLng,
+      maxLng: nepalMaxLng,
+      minZoom: 8,
+      maxZoom: 12,
+      validDays: validDays,
+    );
+  }
+
+  /// Number of tiles a region download would fetch (for progress + size UI).
+  static int regionTileCount({
+    required double minLat,
+    required double maxLat,
+    required double minLng,
+    required double maxLng,
+    required int minZoom,
+    required int maxZoom,
+  }) {
+    var total = 0;
+    for (var z = minZoom; z <= maxZoom; z++) {
+      final n = 1 << z;
+      total += (_lonToTileX(maxLng, n) - _lonToTileX(minLng, n) + 1) *
+          (_latToTileY(minLat, n) - _latToTileY(maxLat, n) + 1);
+    }
+    return total;
   }
 
   static int _lonToTileX(double lng, int n) {

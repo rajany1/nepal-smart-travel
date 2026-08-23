@@ -129,6 +129,10 @@ class _PlaceCorrectionScreenState extends State<PlaceCorrectionScreen> {
           const SnackBar(content: Text('Please log in to report a problem.'), backgroundColor: Colors.red),
         );
         Navigator.push(context, MaterialPageRoute(builder: (_) => const LoginScreen()));
+      } else if (e.response?.statusCode == 429) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Too many corrections. Please try again later.'), backgroundColor: Colors.red),
+        );
       } else {
         final raw = e.response?.data is Map ? e.response?.data['message'] : null;
         final msg = raw != null ? raw.toString() : 'Could not submit. Please try again.';

@@ -5,7 +5,6 @@ import '../../config/themes/app_theme.dart';
 import '../../providers/auth_provider.dart';
 import '../../providers/profile_provider.dart';
 import '../../providers/report_provider.dart';
-import '../../core/models/user.dart';
 import '../../core/models/report.dart';
 import '../../core/widgets/shimmer_loading.dart';
 import '../../widgets/section_card.dart';
@@ -14,6 +13,7 @@ import '../../widgets/badge_chip.dart';
 import '../../widgets/verification_badge.dart';
 import '../../widgets/report_card.dart';
 import '../store/store_screen.dart';
+import '../reporting/reports_list_screen.dart';
 
 class ProfileScreen extends StatefulWidget {
   const ProfileScreen({super.key});
@@ -102,8 +102,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
               if (profile != null && profile.recentActivity.isNotEmpty)
                 ListTile(
                   leading: const Icon(Icons.history, color: AppTheme.infoColor),
-                  title: const Text('Recent Activity'),
-                  subtitle: Text('${profile.recentActivity.length} items',
+                  title: Text(context.t('Recent Activity')),
+                  subtitle: Text('${profile.recentActivity.length} ${context.t('items')}',
                       style: const TextStyle(fontSize: AppTheme.textSm)),
                   trailing: const Icon(Icons.chevron_right),
                   onTap: () {
@@ -115,7 +115,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
               // Reward Store
               ListTile(
                 leading: const Icon(Icons.store, color: AppTheme.secondaryColor),
-                title: const Text('Reward Store'),
+                title: Text(context.t('Reward Store')),
                 trailing: const Icon(Icons.chevron_right),
                 onTap: () {
                   Navigator.pop(ctx);
@@ -126,7 +126,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
               // Subscriptions
               ListTile(
                 leading: const Icon(Icons.subscriptions, color: Colors.red),
-                title: const Text('Subscriptions'),
+                title: Text(context.t('Subscriptions')),
                 trailing: const Icon(Icons.chevron_right),
                 onTap: () {
                   Navigator.pop(ctx);
@@ -137,7 +137,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
               // Settings
               ListTile(
                 leading: const Icon(Icons.settings, color: AppTheme.textSecondary),
-                title: const Text('Settings'),
+                title: Text(context.t('Settings')),
                 trailing: const Icon(Icons.chevron_right),
                 onTap: () {
                   Navigator.pop(ctx);
@@ -148,7 +148,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
               // Policies
               ListTile(
                 leading: const Icon(Icons.description, color: AppTheme.textSecondary),
-                title: const Text('Policies & Info'),
+                title: Text(context.t('Policies & Info')),
                 trailing: const Icon(Icons.chevron_right),
                 onTap: () {
                   Navigator.pop(ctx);
@@ -159,7 +159,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
               // Offline Maps
               ListTile(
                 leading: const Icon(Icons.map, color: AppTheme.textSecondary),
-                title: const Text('Offline Maps'),
+                title: Text(context.t('Offline Maps')),
                 trailing: const Icon(Icons.chevron_right),
                 onTap: () {
                   Navigator.pop(ctx);
@@ -169,7 +169,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
               // About
               ListTile(
                 leading: const Icon(Icons.info, color: AppTheme.textSecondary),
-                title: const Text('About'),
+                title: Text(context.t('About')),
                 trailing: const Icon(Icons.chevron_right),
                 onTap: () {
                   Navigator.pop(ctx);
@@ -195,6 +195,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
     return Scaffold(
       appBar: AppBar(
         title: const Text('Profile'),
+        backgroundColor: AppTheme.primaryColor,
+        foregroundColor: Colors.white,
         actions: [
           Consumer<AuthProvider>(
             builder: (context, auth, _) {
@@ -352,6 +354,25 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       )
                     : null,
               ),
+              // Faded Edit button centered on the avatar
+              Positioned.fill(
+                child: GestureDetector(
+                  onTap: () {
+                    Navigator.of(context).pushNamed('/profile-edit');
+                  },
+                  child: Container(
+                    decoration: BoxDecoration(
+                      color: Colors.black.withValues(alpha: 0.25),
+                      shape: BoxShape.circle,
+                    ),
+                    child: Icon(
+                      Icons.edit,
+                      size: 26,
+                      color: Colors.white.withValues(alpha: 0.8),
+                    ),
+                  ),
+                ),
+              ),
               if (profile.verificationTick != 'none')
                 Positioned(
                   bottom: 0,
@@ -369,28 +390,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     ),
                   ),
                 ),
-              // Edit Profile button at bottom-right of avatar
-              Positioned(
-                bottom: -4,
-                right: -4,
-                child: GestureDetector(
-                  onTap: () {
-                    Navigator.of(context).pushNamed('/profile-edit');
-                  },
-                  child: Container(
-                    padding: const EdgeInsets.all(6),
-                    decoration: const BoxDecoration(
-                      color: AppTheme.primaryColor,
-                      shape: BoxShape.circle,
-                    ),
-                    child: const Icon(
-                      Icons.edit,
-                      size: 16,
-                      color: Colors.white,
-                    ),
-                  ),
-                ),
-              ),
             ],
           ),
           const SizedBox(height: 12),
@@ -407,15 +406,15 @@ class _ProfileScreenState extends State<ProfileScreen> {
           Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              _buildHeaderChip(Icons.stars, 'Level ${profile.currentLevel} - ${profile.levelName}'),
+              _buildHeaderChip(Icons.stars, '${context.t('Level')} ${profile.currentLevel} - ${profile.levelName}'),
               const SizedBox(width: 8),
-              _buildHeaderChip(Icons.emoji_events, 'Rank #${profile.rank}'),
+              _buildHeaderChip(Icons.emoji_events, '${context.t('Rank')} #${profile.rank}'),
             ],
           ),
           if (profile.memberSinceDays > 0) ...[
             const SizedBox(height: 6),
             Text(
-              'Member for ${profile.memberSinceDays} days',
+              '${context.t('Member for')} ${profile.memberSinceDays} ${context.t('days')}',
               style: const TextStyle(color: Colors.white60, fontSize: AppTheme.textSm),
             ),
           ],
@@ -446,14 +445,14 @@ class _ProfileScreenState extends State<ProfileScreen> {
   Widget _buildStatsCard(BuildContext context, FullProfileData profile) {
     return SectionCard(
       child: StatsRow(stats: [
-        StatItem(icon: Icons.emoji_events, value: '${profile.totalXp}', label: 'Total XP', color: AppTheme.secondaryColor),
-        StatItem(icon: Icons.assignment, value: '${profile.totalReports}', label: 'Reports', color: AppTheme.infoColor),
-        StatItem(icon: Icons.check_circle, value: '${profile.approvedReports}', label: 'Approved', color: AppTheme.successColor),
-        StatItem(icon: Icons.trending_up, value: '${profile.approvalRate}%', label: 'Rate', color: AppTheme.primaryColor),
-        StatItem(icon: Icons.warning_amber, value: '${profile.totalAlerts}', label: 'Alerts', color: AppTheme.warningColor),
-        StatItem(icon: Icons.rate_review, value: '${profile.totalReviews}', label: 'Reviews', color: AppTheme.infoColor),
-        StatItem(icon: Icons.comment, value: '${profile.totalComments}', label: 'Comments', color: AppTheme.accentColor),
-        StatItem(icon: Icons.cancel, value: '${profile.rejectedReports}', label: 'Rejected', color: AppTheme.errorColor),
+        StatItem(icon: Icons.emoji_events, value: '${profile.totalXp}', label: context.t('Total XP'), color: AppTheme.secondaryColor),
+        StatItem(icon: Icons.assignment, value: '${profile.totalReports}', label: context.t('Reports'), color: AppTheme.infoColor),
+        StatItem(icon: Icons.check_circle, value: '${profile.approvedReports}', label: context.t('Approved'), color: AppTheme.successColor),
+        StatItem(icon: Icons.trending_up, value: '${profile.approvalRate}%', label: context.t('Rate'), color: AppTheme.primaryColor),
+        StatItem(icon: Icons.warning_amber, value: '${profile.totalAlerts}', label: context.t('Alerts'), color: AppTheme.warningColor),
+        StatItem(icon: Icons.rate_review, value: '${profile.totalReviews}', label: context.t('Reviews'), color: AppTheme.infoColor),
+        StatItem(icon: Icons.comment, value: '${profile.totalComments}', label: context.t('Comments'), color: AppTheme.accentColor),
+        StatItem(icon: Icons.cancel, value: '${profile.rejectedReports}', label: context.t('Rejected'), color: AppTheme.errorColor),
       ]),
     );
   }
@@ -469,7 +468,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
             children: [
               const Icon(Icons.trending_up, size: 18, color: AppTheme.secondaryColor),
               const SizedBox(width: 8),
-              Text('Level Progress', style: TextStyle(fontWeight: FontWeight.w600, fontSize: AppTheme.textBase, color: levelColor)),
+              Text(context.t('Level Progress'), style: TextStyle(fontWeight: FontWeight.w600, fontSize: AppTheme.textBase, color: levelColor)),
               const Spacer(),
               Text('${profile.totalXp}/${profile.nextLevelXp} XP', style: const TextStyle(color: AppTheme.textSecondary, fontSize: AppTheme.textSm)),
             ],
@@ -489,7 +488,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               Text('${profile.levelName} (Lv.${profile.currentLevel})', style: const TextStyle(color: AppTheme.textSecondary, fontSize: AppTheme.textSm)),
-              Text('Next: ${profile.nextLevelName}', style: const TextStyle(color: AppTheme.textSecondary, fontSize: AppTheme.textSm)),
+              Text('${context.t('Next')}: ${profile.nextLevelName}', style: const TextStyle(color: AppTheme.textSecondary, fontSize: AppTheme.textSm)),
             ],
           ),
         ],
@@ -501,7 +500,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   Widget _buildStoreButton(BuildContext context) {
     return SizedBox(
       width: double.infinity,
-      child: OutlinedButton.icon(
+      child: ElevatedButton.icon(
         onPressed: () {
           Navigator.push(
             context,
@@ -509,12 +508,13 @@ class _ProfileScreenState extends State<ProfileScreen> {
           );
         },
         icon: const Icon(Icons.store, size: 18),
-        label: const Text('XP Reward Store'),
-        style: OutlinedButton.styleFrom(
-          foregroundColor: AppTheme.secondaryColor,
-          side: const BorderSide(color: AppTheme.secondaryColor),
-          padding: const EdgeInsets.symmetric(vertical: 12),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        label: Text(context.t('XP Reward Store'), style: const TextStyle(fontWeight: FontWeight.w700)),
+        style: ElevatedButton.styleFrom(
+          backgroundColor: AppTheme.secondaryColor,
+          foregroundColor: Colors.white,
+          elevation: 0,
+          padding: const EdgeInsets.symmetric(vertical: 14),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
         ),
       ),
     );
@@ -522,6 +522,32 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   // ============ Verification Tick ============
   Widget _buildVerificationTick(BuildContext context, FullProfileData profile) {
+    if (profile.verificationTick == 'none') {
+      return SectionCard(
+        child: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: AppTheme.dividerColor.withOpacity(0.5),
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(Icons.workspace_premium_outlined, color: AppTheme.textSecondary, size: 28),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(context.t('Get Verified'), style: const TextStyle(fontWeight: FontWeight.bold, fontSize: AppTheme.textBase, color: AppTheme.textPrimary)),
+                  Text(context.t('Earn a verification tick by getting reports approved'), style: const TextStyle(color: AppTheme.textSecondary, fontSize: AppTheme.textSm)),
+                ],
+              ),
+            ),
+          ],
+        ),
+      );
+    }
     return SectionCard(
       child: Row(
         children: [
@@ -561,7 +587,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
             children: [
               const Icon(Icons.emoji_events, size: 18, color: AppTheme.secondaryColor),
               const SizedBox(width: 8),
-              Text('Badges & Achievements', style: TextStyle(fontWeight: FontWeight.bold, fontSize: AppTheme.textLg, color: AppTheme.textPrimary)),
+              Text(context.t('Badges & Achievements'), style: TextStyle(fontWeight: FontWeight.bold, fontSize: AppTheme.textLg, color: AppTheme.textPrimary)),
               const Spacer(),
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
@@ -575,13 +601,13 @@ class _ProfileScreenState extends State<ProfileScreen> {
             Wrap(spacing: 8, runSpacing: 8, children: unlocked.map((b) => BadgeChip(icon: b.iconData, label: b.name, unlocked: true, unlockedColor: AppTheme.secondaryColor, tooltip: '${b.name}\n${b.description}')).toList()),
           if (unlocked.isNotEmpty && locked.isNotEmpty) const SizedBox(height: 12),
           if (locked.isNotEmpty) ...[
-            Text('Locked Badges', style: TextStyle(fontSize: AppTheme.textSm, fontWeight: FontWeight.w500, color: AppTheme.textSecondary)),
+            Text(context.t('Locked Badges'), style: TextStyle(fontSize: AppTheme.textSm, fontWeight: FontWeight.w500, color: AppTheme.textSecondary)),
             const SizedBox(height: 6),
             Wrap(spacing: 8, runSpacing: 8, children: locked.take(6).map((b) => BadgeChip(icon: b.iconData, label: b.name, unlocked: false, tooltip: '${b.name}\n${b.description}')).toList()),
             if (locked.length > 6)
               Padding(
                 padding: const EdgeInsets.only(top: 6),
-                child: Text('+${locked.length - 6} more locked badges', style: const TextStyle(color: AppTheme.textSecondary, fontSize: AppTheme.textXs, fontStyle: FontStyle.italic)),
+                child: Text('+${locked.length - 6} ${context.t('more locked badges')}', style: const TextStyle(color: AppTheme.textSecondary, fontSize: AppTheme.textXs, fontStyle: FontStyle.italic)),
               ),
           ],
           if (unlocked.isEmpty && locked.isEmpty)
@@ -613,12 +639,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 const Icon(Icons.my_library_books, size: 18, color: AppTheme.infoColor),
                 const SizedBox(width: 8),
                 Text(
-                  'My Reports',
+                  context.t('My Reports'),
                   style: TextStyle(fontWeight: FontWeight.bold, fontSize: AppTheme.textLg, color: AppTheme.textPrimary),
                 ),
                 const Spacer(),
                 Text(
-                  '${profile.totalReports} total',
+                  '${profile.totalReports} ${context.t('total')}',
                   style: const TextStyle(color: AppTheme.textSecondary, fontSize: AppTheme.textSm),
                 ),
               ],
@@ -651,10 +677,25 @@ class _ProfileScreenState extends State<ProfileScreen> {
                           children: [
                             Icon(Icons.inbox, size: 36, color: AppTheme.textSecondary.withOpacity(0.3)),
                             const SizedBox(height: 6),
-                            const Text('No reports yet', style: TextStyle(color: AppTheme.textSecondary, fontSize: AppTheme.textSm)),
+                            Text(context.t('No reports yet'), style: const TextStyle(color: AppTheme.textSecondary, fontSize: AppTheme.textSm)),
                             Text(
-                              'Tap + in Reports to submit',
+                              context.t('Tap + in Reports to submit'),
                               style: TextStyle(color: AppTheme.textSecondary.withOpacity(0.6), fontSize: AppTheme.textXs),
+                            ),
+                            const SizedBox(height: 12),
+                            OutlinedButton.icon(
+                              onPressed: () => Navigator.push(
+                                context,
+                                MaterialPageRoute(builder: (_) => const ReportsListScreen()),
+                              ),
+                              icon: const Icon(Icons.add, size: 16),
+                              label: Text(context.t('Go to Reports')),
+                              style: OutlinedButton.styleFrom(
+                                foregroundColor: AppTheme.primaryColor,
+                                side: BorderSide(color: AppTheme.primaryColor.withOpacity(0.4)),
+                                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+                              ),
                             ),
                           ],
                         ),
@@ -967,11 +1008,12 @@ class _ProfileReportDetailsSheet extends StatelessWidget {
                 children: [
                   const Icon(Icons.location_on, size: 14, color: AppTheme.textSecondary),
                   const SizedBox(width: 4),
-                  Text(
-                    report.latitude != null && report.longitude != null
-                        ? '${report.latitude!.toStringAsFixed(4)}, ${report.longitude!.toStringAsFixed(4)}'
-                        : 'No location data',
-                    style: const TextStyle(fontSize: AppTheme.textSm, color: AppTheme.textSecondary),
+                  Flexible(
+                    child: Text(
+                      report.district ?? context.t('No location data'),
+                      style: const TextStyle(fontSize: AppTheme.textSm, color: AppTheme.textSecondary),
+                      overflow: TextOverflow.ellipsis,
+                    ),
                   ),
                 ],
               ),

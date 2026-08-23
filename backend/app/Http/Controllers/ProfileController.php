@@ -205,11 +205,33 @@ class ProfileController extends Controller
         $user = $request->user();
         
         $request->validate([
-            'avatar' => 'required|string', // Base64 or URL
+            'avatar' => 'required|string', // Base64 data URI or URL
         ]);
         
+        $avatar = $request->avatar;
+        
+        // Convert base64 data URI into a stored file (returns public URL)
+        if (preg_match('/^data:image\/(\w+);base64,/', $avatar, $m)) {
+            try {
+                $ext = strtolower($m[1]) === 'png' ? 'png' : 'jpg';
+                $base64 = substr($avatar, strpos($avatar, ',') + 1);
+                $bytes = base64_decode($base64, true);
+                if ($bytes !== false && strlen($bytes) < 5 * 1024 * 1024) {
+                    $dir = public_path('uploads/avatars');
+                    if (!is_dir($dir)) {
+                        @mkdir($dir, 0775, true);
+                    }
+                    $name = 'avatar_' . $user->id . '_' . time() . '.' . $ext;
+                    file_put_contents($dir . '/' . $name, $bytes);
+                    $avatar = url('uploads/avatars/' . $name);
+                }
+            } catch (\Throwable $e) {
+                // Fall back to storing the raw string
+            }
+        }
+        
         $user->update([
-            'avatar' => $request->avatar,
+            'avatar' => $avatar,
         ]);
         
         return response()->json([

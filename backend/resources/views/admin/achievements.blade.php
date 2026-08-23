@@ -1,4 +1,4 @@
-@extends('admin.layout')
+﻿@extends('admin.layout')
 @section('title', 'Achievements')
 
 @section('content')
@@ -15,6 +15,7 @@
 
     <div class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
         <div class="overflow-x-auto">
+<div id="liveTable">
             <table class="w-full">
                 <thead class="bg-slate-50">
                     <tr>
@@ -51,7 +52,7 @@
                             @if($achievement->is_system)
                             <span class="text-xs bg-primary-100 text-primary-700 px-2 py-0.5 rounded-full font-medium">System</span>
                             @else
-                            <span class="text-xs text-slate-400">—</span>
+                            <span class="text-xs text-slate-400">â€”</span>
                             @endif
                         </td>
                         <td class="px-6 py-4 text-right">
@@ -80,6 +81,7 @@
         </div>
         @if($achievements->hasPages())
         <div class="px-6 py-4 border-t border-slate-100">{{ $achievements->links() }}</div>
+</div>
         @endif
     </div>
 </div>

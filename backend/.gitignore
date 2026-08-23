@@ -15,6 +15,7 @@
 /auth.json
 /node_modules
 /public/build
+/public/uploads
 /public/fonts-manifest.dev.json
 /public/hot
 /public/storage
@@ -22,6 +23,8 @@
 /storage/pail
 /vendor
 _ide_helper.php
+_query.txt
+_redistest.php
 Homestead.json
 Homestead.yaml
 Thumbs.db

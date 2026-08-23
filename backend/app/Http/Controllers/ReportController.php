@@ -21,10 +21,14 @@ use App\Services\TranslationService;
 use App\Helpers\GeoHelper;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Schema;
 
 class ReportController extends Controller
 {
+    /** Daily AI assistant chat quota per user (Redis-backed, resets at NPT midnight). */
+    private const ASSISTANT_DAILY_LIMIT = 5;
+
     /**
      * Get all report categories (dynamic, from DB)
      */
@@ -456,19 +460,20 @@ class ReportController extends Controller
             // Non-fatal: queue failure shouldn't block report creation
         }
 
-        // Send push notification for emergency/critical reports within 20km
+        // Send push notification for emergency/critical reports within 20km.
+        // Queued so the slow FCM fan-out never blocks the submit response.
         if (in_array($report->priority, ['high', 'critical']) && $report->latitude && $report->longitude) {
             try {
-                \App\Services\PushNotificationService::notifyNearbyUsers(
-                    title: ($report->priority === 'critical' ? '🚨' : '⚠️') . ' ' . $report->title,
+                dispatch(new \App\Jobs\SendNearbyPushNotification(
+                    title: ($report->priority === 'critical' ? '🚨' : '⚠️ ') . $report->title,
                     message: str($report->description)->limit(100),
                     latitude: (float) $report->latitude,
                     longitude: (float) $report->longitude,
                     radiusKm: 20,
                     data: ['type' => 'report', 'id' => $report->id],
-                );
+                ));
             } catch (\Throwable $e) {
-                \Illuminate\Support\Facades\Log::warning('Report submit push notification failed: ' . $e->getMessage());
+                \Illuminate\Support\Facades\Log::warning('Report push dispatch failed: ' . $e->getMessage());
             }
         }
 
@@ -537,20 +542,20 @@ class ReportController extends Controller
             app(AchievementService::class)->revokeReportApprovalXp($report);
         }
 
-        // Notify nearby users when report is approved
+        // Notify nearby users when report is approved (queued - no sync block)
         if (isset($validated['status']) && $validated['status'] === 'approved') {
             if ($report->latitude && $report->longitude) {
                 try {
-                    \App\Services\PushNotificationService::notifyNearbyUsers(
+                    dispatch(new \App\Jobs\SendNearbyPushNotification(
                         title: '⚠️ ' . $report->title,
                         message: str($report->description)->limit(100),
                         latitude: (float) $report->latitude,
                         longitude: (float) $report->longitude,
                         radiusKm: 20,
                         data: ['type' => 'report', 'id' => $report->id],
-                    );
+                    ));
                 } catch (\Throwable $e) {
-                    \Illuminate\Support\Facades\Log::warning('Report approval push notification failed: ' . $e->getMessage());
+                    \Illuminate\Support\Facades\Log::warning('Report approval push dispatch failed: ' . $e->getMessage());
                 }
             }
         }
@@ -578,6 +583,7 @@ class ReportController extends Controller
         }
 
         $report->delete();
+        \App\Support\LiveFeed::bump('reports', $id);
 
         return response()->json([
             'success' => true,
@@ -723,6 +729,7 @@ class ReportController extends Controller
         }
 
         $comment->delete();
+        \App\Support\LiveFeed::bump('report_comments', $commentId);
         $report->decrement('comments_count');
 
         return response()->json([
@@ -855,6 +862,44 @@ class ReportController extends Controller
     }
 
     /**
+     * Redis key for the user's daily assistant usage (NPT calendar day).
+     */
+    private function assistantDailyKey(int $userId): string
+    {
+        return 'assistant:daily:' . $userId . ':' . now()->format('Ymd');
+    }
+
+    private function assistantResetAt(): \Carbon\CarbonInterface
+    {
+        return now()->startOfDay()->addDay();
+    }
+
+    private function assistantQuotaPayload(int $used): array
+    {
+        return [
+            'limit' => self::ASSISTANT_DAILY_LIMIT,
+            'used' => $used,
+            'remaining' => max(0, self::ASSISTANT_DAILY_LIMIT - $used),
+            'reset_at' => $this->assistantResetAt()->toISOString(),
+        ];
+    }
+
+    /**
+     * Current daily AI chat quota for the authenticated user.
+     */
+    public function assistantQuota(Request $request)
+    {
+        $user = $request->user();
+        $key = $this->assistantDailyKey($user->id);
+        $used = (int) Cache::store('redis')->get($key, 0);
+
+        return response()->json([
+            'success' => true,
+            'data' => $this->assistantQuotaPayload($used),
+        ]);
+    }
+
+    /**
      * Haversine distance between two lat/lng points in meters
      */
     public function assistantChat(Request $request)
@@ -865,6 +910,38 @@ class ReportController extends Controller
             'context.lng' => 'nullable|numeric',
         ]);
 
+        $user = $request->user();
+
+        // Atomic daily counter — increment first so concurrent requests
+        // cannot slip past the limit; refund when the AI call fails.
+        $store = Cache::store('redis');
+        $key = $this->assistantDailyKey($user->id);
+
+        if (!$store->has($key)) {
+            $ttl = max(60, now()->secondsUntilEndOfDay() + 1);
+            $store->put($key, 0, $ttl);
+        }
+
+        $used = (int) $store->increment($key);
+
+        if ($used > self::ASSISTANT_DAILY_LIMIT) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Daily chat limit reached. Your quota resets at midnight (NPT).',
+                'data' => $this->assistantQuotaPayload($used),
+            ], 429);
+        }
+
+        try {
+            return $this->runAssistantChat($request, $user);
+        } catch (\Throwable $e) {
+            $store->decrement($key);
+            throw $e;
+        }
+    }
+
+    private function runAssistantChat(Request $request, $user)
+    {
         $agent = AiAgent::where('agent_type', 'customer_support')
             ->where('status', '!=', 'paused')
             ->first();
@@ -885,7 +962,7 @@ class ReportController extends Controller
                 'message' => $request->input('message'),
                 'lat' => $request->input('context.lat'),
                 'lng' => $request->input('context.lng'),
-                'user_id' => $request->user()?->id,
+                'user_id' => $user?->id,
             ],
         ]);
 
@@ -893,6 +970,11 @@ class ReportController extends Controller
         $result = $orchestrator->executeTask($task);
 
         $task->refresh();
+
+        if ($task->status !== 'completed') {
+            // Failed replies do not consume the user's daily quota.
+            Cache::store('redis')->decrement($this->assistantDailyKey($user->id));
+        }
 
         $output = $task->output_data;
 
@@ -907,6 +989,7 @@ class ReportController extends Controller
                 'actions' => $output['actions'] ?? [],
                 'screen' => $output['screen'] ?? null,
                 'deep_link' => $output['deep_link'] ?? null,
+                'quota' => $this->assistantQuotaPayload((int) Cache::store('redis')->get($this->assistantDailyKey($user->id), 0)),
             ],
         ]);
     }

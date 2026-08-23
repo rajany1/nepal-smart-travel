@@ -14,6 +14,10 @@ return Application::configure(basePath: dirname(__DIR__))
     ->withMiddleware(function (Middleware $middleware): void {
         $middleware->api(prepend: [
             \Laravel\Sanctum\Http\Middleware\EnsureFrontendRequestsAreStateful::class,
+            \App\Http\Middleware\AccessLog::class,
+        ]);
+        $middleware->web(prepend: [
+            \App\Http\Middleware\AccessLog::class,
         ]);
         $middleware->alias([
 'profile.completed' => \App\Http\Middleware\ProfileCompleted::class,
@@ -28,6 +32,8 @@ return Application::configure(basePath: dirname(__DIR__))
         $schedule->command('ai:auto-work')->everyThirtyMinutes()->withoutOverlapping(300);
         // Review AI agent: 24/7 content safety sweep (censoring + strike escalation)
         $schedule->command('ai:safety-sweep')->everyMinute()->withoutOverlapping(120);
+        // Weekly refresh of imported OSM districts (queue-backed, upsert only)
+        $schedule->command('osm:refresh')->weekly()->sundays()->at('03:00')->withoutOverlapping();
     })
     ->withExceptions(function (Exceptions $exceptions): void {
         //

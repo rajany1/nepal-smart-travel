@@ -374,11 +374,15 @@ class ReportProvider extends ChangeNotifier {
       notifyListeners();
       return true;
     } on DioException catch (e) {
-      final responseData = e.response?.data;
-      if (responseData is Map<String, dynamic>) {
-        _submissionErrorMessage = responseData['message']?.toString() ?? e.message;
+      if (e.response?.statusCode == 429) {
+        _submissionErrorMessage = 'Too many reports. Please try again later.';
       } else {
-        _submissionErrorMessage = e.message;
+        final responseData = e.response?.data;
+        if (responseData is Map<String, dynamic>) {
+          _submissionErrorMessage = responseData['message']?.toString() ?? e.message;
+        } else {
+          _submissionErrorMessage = e.message;
+        }
       }
       notifyListeners();
       print('❌ Failed to submit report: $_submissionErrorMessage');

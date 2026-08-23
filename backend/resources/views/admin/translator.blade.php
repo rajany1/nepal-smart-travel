@@ -1,4 +1,4 @@
-@extends('admin.layout')
+﻿@extends('admin.layout')
 
 @section('title', 'Translator')
 
@@ -14,7 +14,7 @@
   <div class="bg-white rounded-xl shadow-sm border border-gray-100 mb-6">
     <div class="px-6 py-4 border-b border-gray-100 flex items-center justify-between">
       <h3 class="text-lg font-semibold text-gray-800">Add / Edit Word</h3>
-      <span class="text-xs text-gray-500">App UI (English → Nepali) dictionary. Words go live on the app's next fetch.</span>
+      <span class="text-xs text-gray-500">App UI (English â†’ Nepali) dictionary. Words go live on the app's next fetch.</span>
     </div>
     <div class="p-6">
       <form method="POST" action="{{ route('admin.translator.store') }}" class="grid grid-cols-1 md:grid-cols-4 gap-4">
@@ -25,7 +25,7 @@
         </div>
         <div>
           <label class="block text-sm font-medium text-gray-700 mb-1">Nepali word</label>
-          <input name="nepali" class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-primary-500 focus:border-primary-500" placeholder="e.g. सेटिङ्स" required>
+          <input name="nepali" class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-primary-500 focus:border-primary-500" placeholder="e.g. à¤¸à¥‡à¤Ÿà¤¿à¤™à¥à¤¸" required>
         </div>
         <div>
           <label class="block text-sm font-medium text-gray-700 mb-1">Context <span class="text-gray-400">(optional)</span></label>
@@ -50,8 +50,8 @@
         @csrf
         <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
           <div class="md:col-span-3">
-            <label class="block text-sm font-medium text-gray-700 mb-1">One pair per line — <code class="text-xs bg-gray-100 px-1.5 py-0.5 rounded">English word = Nepali word</code></label>
-            <textarea name="bulk_text" rows="5" class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm font-mono focus:ring-2 focus:ring-primary-500 focus:border-primary-500" placeholder="Home = गृह&#10;Alerts = सूचनाहरू&#10;Emergency = आपतकालीन"></textarea>
+            <label class="block text-sm font-medium text-gray-700 mb-1">One pair per line â€” <code class="text-xs bg-gray-100 px-1.5 py-0.5 rounded">English word = Nepali word</code></label>
+            <textarea name="bulk_text" rows="5" class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm font-mono focus:ring-2 focus:ring-primary-500 focus:border-primary-500" placeholder="Home = à¤—à¥ƒà¤¹&#10;Alerts = à¤¸à¥‚à¤šà¤¨à¤¾à¤¹à¤°à¥‚&#10;Emergency = à¤†à¤ªà¤¤à¤•à¤¾à¤²à¥€à¤¨"></textarea>
           </div>
           <div>
             <label class="block text-sm font-medium text-gray-700 mb-1">Context <span class="text-gray-400">(optional)</span></label>
@@ -75,6 +75,7 @@
       </form>
     </div>
     <div class="overflow-x-auto">
+<div id="liveTable">
       <table class="w-full">
         <thead class="bg-gray-50">
           <tr>
@@ -133,6 +134,7 @@
     </div>
     @if($translations->hasPages())
       <div class="px-6 py-4 border-t border-gray-100">{{ $translations->links() }}</div>
+</div>
     @endif
   </div>
 </div>

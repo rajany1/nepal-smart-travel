@@ -1,14 +1,16 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:dio/dio.dart';
 import "../../core/services/localization_service.dart";
 import 'package:provider/provider.dart';
 import '../../config/themes/app_theme.dart';
 import '../../core/api/api_client.dart';
 import '../../config/constants/app_constants.dart';
 import '../../core/services/location_service.dart';
-import '../places/nearby_places_screen.dart';
+import '../../providers/auth_provider.dart';
+import '../places/nearby_map_screen.dart';
 import '../places/place_details_screen.dart';
 import '../../core/models/place.dart';
-import '../../core/services/localization_service.dart';
 
 class AssistantScreen extends StatefulWidget {
   const AssistantScreen({super.key});
@@ -23,6 +25,14 @@ class _AssistantScreenState extends State<AssistantScreen> {
   final List<ChatMessage> _messages = [];
   bool _isTyping = false;
 
+  // Daily quota state (backend: 5 chats/day, Redis counter)
+  bool _isGuest = false;
+  int _limit = 5;
+  int _remaining = 5;
+  DateTime? _cooldownUntil;
+  Timer? _cooldownTimer;
+  int _tick = 0;
+
   final List<String> _suggestions = [
     'Best places near Pokhara?',
     'Road conditions to Mustang?',
@@ -31,6 +41,10 @@ class _AssistantScreenState extends State<AssistantScreen> {
     'Weather in Pokhara today?',
     'Emergency numbers in Nepal?',
   ];
+
+  bool get _isCoolingDown =>
+      _cooldownUntil != null &&
+      DateTime.now().isBefore(_cooldownUntil!);
 
   @override
   void initState() {
@@ -41,17 +55,91 @@ class _AssistantScreenState extends State<AssistantScreen> {
       ),
       isUser: false,
     ));
+    _isGuest = !context.read<AuthProvider>().isAuthenticated;
+    if (!_isGuest) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => _fetchQuota());
+    }
+  }
+
+  Future<void> _fetchQuota() async {
+    try {
+      final response = await ApiClient.instance.getAssistantQuota();
+      if (!mounted) return;
+      final data = response.data is Map ? response.data['data'] : null;
+      if (data is Map) {
+        setState(() {
+          _limit = (data['limit'] as num?)?.toInt() ?? _limit;
+          _remaining = (data['remaining'] as num?)?.toInt() ?? _remaining;
+          if (_remaining <= 0) {
+            _startCooldown(_parseResetAt(data['reset_at']));
+          }
+        });
+      }
+    } catch (_) {
+      // Quota fetch failures shouldn't block chatting — backend enforces anyway.
+    }
+  }
+
+  DateTime? _parseResetAt(dynamic value) {
+    if (value is String && value.isNotEmpty) {
+      return DateTime.tryParse(value)?.toLocal();
+    }
+    return null;
+  }
+
+  void _applyQuotaFromChat(Map? data) {
+    final quota = data is Map ? data['quota'] : null;
+    if (quota is Map) {
+      _limit = (quota['limit'] as num?)?.toInt() ?? _limit;
+      _remaining = (quota['remaining'] as num?)?.toInt() ?? 0;
+      if (_remaining <= 0) {
+        _startCooldown(_parseResetAt(quota['reset_at']));
+      }
+    }
+    if (mounted) setState(() {});
+  }
+
+  void _startCooldown(DateTime? until) {
+    _cooldownTimer?.cancel();
+    _cooldownUntil =
+        until ?? DateTime.now().add(const Duration(hours: 12));
+    _remaining = 0;
+    _cooldownTimer = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (!mounted) return;
+      if (!_isCoolingDown) {
+        _cooldownTimer?.cancel();
+        _cooldownUntil = null;
+        _remaining = _limit;
+        setState(() {});
+        _fetchQuota();
+      } else {
+        setState(() => _tick++);
+      }
+    });
+  }
+
+  String get _countdownText {
+    final remaining = _cooldownUntil?.difference(DateTime.now());
+    if (remaining == null || remaining.isNegative) return '';
+    final h = remaining.inHours;
+    final m = remaining.inMinutes % 60;
+    final s = remaining.inSeconds % 60;
+    if (h > 0) return '${h}h ${m}m';
+    if (m > 0) return '${m}m ${s}s';
+    return '${s}s';
   }
 
   @override
   void dispose() {
     _messageController.dispose();
     _scrollController.dispose();
+    _cooldownTimer?.cancel();
     super.dispose();
   }
 
   void _sendMessage(String text) {
     if (text.trim().isEmpty) return;
+    if (_isGuest || _isTyping || _isCoolingDown) return;
 
     setState(() {
       _messages.add(ChatMessage(text: text, isUser: true));
@@ -94,9 +182,34 @@ class _AssistantScreenState extends State<AssistantScreen> {
               (data['actions'] as List).whereType<Map>())
           : <Map<String, dynamic>>[];
 
+      _applyQuotaFromChat(data is Map ? data : null);
+
       setState(() {
         _isTyping = false;
         _messages.add(ChatMessage(text: reply, isUser: false, actions: actions));
+      });
+    } on DioException catch (e) {
+      if (!mounted) return;
+      final isRateLimited = e.response?.statusCode == 429;
+      if (isRateLimited) {
+        final body = e.response?.data;
+        final bodyData = body is Map ? body['data'] : null;
+        _startCooldown(_parseResetAt(
+            bodyData is Map ? bodyData['reset_at'] : null));
+        setState(() => _isTyping = false);
+        _messages.add(ChatMessage(
+          text: context.t('Daily chat limit reached — you can chat again tomorrow. 🌏'),
+          isUser: false,
+        ));
+        _scrollToBottom();
+        return;
+      }
+      setState(() {
+        _isTyping = false;
+        _messages.add(ChatMessage(
+          text: context.t('Sorry, I couldn\'t reach the server. Please check your connection and try again.'),
+          isUser: false,
+        ));
       });
     } catch (e) {
       if (!mounted) return;
@@ -193,6 +306,61 @@ class _AssistantScreenState extends State<AssistantScreen> {
               ),
             ),
 
+          // Guest gate — AI chat requires a login (per-user daily quota)
+          if (_isGuest)
+            Container(
+              width: double.infinity,
+              margin: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+              decoration: BoxDecoration(
+                color: AppTheme.primaryLight.withOpacity(0.12),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Row(
+                children: [
+                  const Icon(Icons.lock_outline,
+                      size: 18, color: AppTheme.primaryColor),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      context.t('Login to chat with the AI assistant'),
+                      style: const TextStyle(fontSize: AppTheme.textSm),
+                    ),
+                  ),
+                  TextButton(
+                    onPressed: () => Navigator.pushNamed(context, '/login'),
+                    child: Text(context.t('Login')),
+                  ),
+                ],
+              ),
+            ),
+
+          // Daily limit cooldown banner
+          if (!_isGuest && _isCoolingDown)
+            Container(
+              width: double.infinity,
+              key: ValueKey(_tick),
+              margin: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+              decoration: BoxDecoration(
+                color: Colors.orange.withOpacity(0.12),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Row(
+                children: [
+                  const Icon(Icons.hourglass_bottom,
+                      size: 18, color: Colors.orange),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      '${context.t('Daily limit reached')} ($_remaining/$_limit) — ${context.t('resets in')} $_countdownText',
+                      style: const TextStyle(fontSize: AppTheme.textSm),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+
           // Input Area
           Container(
             padding: const EdgeInsets.all(12),
@@ -208,8 +376,13 @@ class _AssistantScreenState extends State<AssistantScreen> {
                   Expanded(
                     child: TextField(
                       controller: _messageController,
+                      enabled: !_isGuest && !_isTyping && !_isCoolingDown,
                       decoration: InputDecoration(
-                        hintText: context.t('Ask about Nepal travel...'),
+                        hintText: _isGuest
+                            ? context.t('Login to start chatting')
+                            : _isCoolingDown
+                                ? context.t('Daily limit reached')
+                                : context.t('Ask about Nepal travel...'),
                         border: OutlineInputBorder(
                           borderRadius: BorderRadius.circular(24),
                           borderSide: BorderSide.none,
@@ -224,8 +397,10 @@ class _AssistantScreenState extends State<AssistantScreen> {
                   ),
                   const SizedBox(width: 8),
                   Container(
-                    decoration: const BoxDecoration(
-                      color: AppTheme.primaryColor,
+                    decoration: BoxDecoration(
+                      color: (_isGuest || _isTyping || _isCoolingDown)
+                          ? AppTheme.textSecondary.withOpacity(0.4)
+                          : AppTheme.primaryColor,
                       shape: BoxShape.circle,
                     ),
                     child: IconButton(
@@ -337,7 +512,7 @@ class _MessageBubble extends StatelessWidget {
                         ));
                       } else if (type == 'nearby') {
                         Navigator.push(context, MaterialPageRoute(
-                          builder: (_) => const NearbyPlacesScreen(),
+                          builder: (_) => const NearbyMapScreen(),
                         ));
                       }
                     },

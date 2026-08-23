@@ -2,6 +2,7 @@
 
 use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\AdminController;
+use App\Http\Controllers\Admin\LiveFeedController;
 use App\Http\Controllers\WebAuthController;
 use App\Http\Controllers\Admin\RoleController;
 use App\Http\Controllers\Admin\PermissionController;
@@ -30,7 +31,7 @@ Route::get('/login', function () {
 })->name('login');
 Route::prefix('admin')->name('admin.')->group(function () {
     Route::get('/login', [WebAuthController::class, 'showLoginForm'])->name('login');
-    Route::post('/login', [WebAuthController::class, 'login'])->name('login.post');
+    Route::post('/login', [WebAuthController::class, 'login'])->name('login.post')->middleware('throttle:admin-login');
 });
 
 // ============ ADMIN LOGOUT ============
@@ -39,9 +40,9 @@ Route::post('/logout', [WebAuthController::class, 'logout'])->name('logout');
 // ============ PARTNER PORTAL (BUSINESS) ============
 Route::prefix('partner')->name('partner.')->group(function () {
     Route::get('/register', [\App\Http\Controllers\Partner\PartnerAuthController::class, 'showRegister'])->name('register');
-    Route::post('/register', [\App\Http\Controllers\Partner\PartnerAuthController::class, 'register'])->name('register.post');
+    Route::post('/register', [\App\Http\Controllers\Partner\PartnerAuthController::class, 'register'])->name('register.post')->middleware('throttle:partner-register');
     Route::get('/login', [\App\Http\Controllers\Partner\PartnerAuthController::class, 'showLogin'])->name('login');
-    Route::post('/login', [\App\Http\Controllers\Partner\PartnerAuthController::class, 'login'])->name('login.post');
+    Route::post('/login', [\App\Http\Controllers\Partner\PartnerAuthController::class, 'login'])->name('login.post')->middleware('throttle:partner-login');
     Route::post('/logout', [\App\Http\Controllers\Partner\PartnerAuthController::class, 'logout'])->name('logout');
 });
 
@@ -115,6 +116,9 @@ Route::prefix('admin')->name('admin.')->middleware(['auth', 'status'])->group(fu
     Route::get('/places/osm', [AdminController::class, 'placesOsm'])->name('places.osm');
     Route::get('/places/corrections', [AdminController::class, 'corrections'])->name('places.corrections');
     Route::get('/places/{id}', [AdminController::class, 'showPlace'])->name('places.view');
+    Route::get('/places/{id}/reviews', [AdminController::class, 'placeReviews'])->name('places.reviews');
+    Route::post('/places/reviews/{id}/update', [AdminController::class, 'updatePlaceReview'])->name('places.reviews.update');
+    Route::post('/places/reviews/{id}/delete', [AdminController::class, 'deletePlaceReview'])->name('places.reviews.delete');
     Route::post('/places', [AdminController::class, 'createPlace'])->name('places.create');
     Route::post('/places/{id}/update', [AdminController::class, 'updatePlace'])->name('places.update');
     Route::post('/places/{id}/delete', [AdminController::class, 'deletePlace'])->name('places.delete');
@@ -135,6 +139,12 @@ Route::prefix('admin')->name('admin.')->middleware(['auth', 'status'])->group(fu
 
     // Live Map
     Route::get('/live-map', [AdminController::class, 'liveMap'])->name('live-map');
+    Route::get('/live-map/places', [AdminController::class, 'liveMapPlaces'])->name('live-map.places');
+
+    // Realtime feed
+    Route::get('/live-feed/changes', [LiveFeedController::class, 'changes'])->name('live-feed.changes');
+    Route::get('/live-feed/map-layers', [LiveFeedController::class, 'mapLayers'])->name('live-feed.map-layers');
+    Route::get('/live-feed/stats', [AdminController::class, 'liveFeedStats'])->name('live-feed.stats');
 
     // Audit Logs
     Route::get('/audit-logs', [AdminController::class, 'auditLogs'])->name('audit-logs');

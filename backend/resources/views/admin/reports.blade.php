@@ -1,4 +1,4 @@
-@extends('admin.layout')
+﻿@extends('admin.layout')
 @section('title', 'Reports Management')
 
 @section('content')
@@ -29,6 +29,7 @@
         </div>
     </div>
     <div class="overflow-x-auto">
+<div id="liveTable">
         <table class="w-full">
             <thead class="bg-gray-50">
                 <tr>
@@ -95,7 +96,7 @@
                             {{ round($trust * 100) }}%
                         </span>
                         @else
-                        <span class="text-xs text-gray-400">—</span>
+                        <span class="text-xs text-gray-400">â€”</span>
                         @endif
                     </td>
                     <td class="px-6 py-4">
@@ -104,7 +105,7 @@
                             {{ $report->moderation_message }}
                         </p>
                         @else
-                        <p class="text-xs text-gray-400">—</p>
+                        <p class="text-xs text-gray-400">â€”</p>
                         @endif
                     </td>
                     <td class="px-6 py-4 text-sm text-gray-500">{{ $report->created_at->format('M d, Y') }}</td>
@@ -150,6 +151,7 @@
     @if($reports->hasPages())
     <div class="px-6 py-4 border-t border-gray-100">
         {{ $reports->links() }}
+</div>
     </div>
     @endif
 </div>

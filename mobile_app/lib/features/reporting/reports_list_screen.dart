@@ -3,6 +3,7 @@ import "../../core/services/localization_service.dart";
 import 'dart:io';
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
+import 'package:dio/dio.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:image_picker/image_picker.dart';
@@ -18,7 +19,6 @@ import '../../core/services/location_service.dart';
 import '../../core/services/offline_tile_provider.dart';
 import '../../core/services/camera_service.dart';
 import '../../core/services/exif_embedder_service.dart';
-import '../../core/services/localization_service.dart';
 import '../../core/widgets/dynamic_form_field.dart';
 import '../../widgets/image_carousel_widget.dart';
 import '../../core/widgets/shimmer_loading.dart';
@@ -26,6 +26,7 @@ import '../../config/constants/app_constants.dart';
 import '../../core/api/api_client.dart';
 import '../../providers/auth_provider.dart';
 import '../../providers/ad_provider.dart';
+import '../places/utils/route_polyline_utils.dart';
 import '../../widgets/ad_cards.dart';
 import '../profile/user_public_profile_screen.dart';
 
@@ -51,8 +52,13 @@ class _ReportsListScreenState extends State<ReportsListScreen>
   void initState() {
     super.initState();
     _tabController = TabController(length: 2, vsync: this);
+    _tabController.addListener(_onTabChanged);
     _reportProvider = context.read<ReportProvider>();
     _loadInitialData();
+  }
+
+  void _onTabChanged() {
+    if (mounted) setState(() {});
   }
 
   Future<void> _loadInitialData() async {
@@ -77,6 +83,7 @@ class _ReportsListScreenState extends State<ReportsListScreen>
   void dispose() {
     _searchDebounce?.cancel();
     // FL-28: provider captured in initState — no context.read inside dispose()
+    _tabController.removeListener(_onTabChanged);
     _reportProvider.stopAutoRefresh();
     _tabController.dispose();
     super.dispose();
@@ -90,14 +97,39 @@ class _ReportsListScreenState extends State<ReportsListScreen>
           children: [
             Container(
               color: AppTheme.backgroundColor,
-              child: TabBar(
-                controller: _tabController,
-                indicatorColor: AppTheme.primaryColor,
-                labelColor: AppTheme.textPrimary,
-                unselectedLabelColor: AppTheme.textSecondary,
-                tabs: [
-                  Tab(text: context.t('Recent'), icon: const Icon(Icons.history, size: 18)),
-                  Tab(text: context.t('Emergency'), icon: const Icon(Icons.warning, size: 18)),
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 10),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Text(context.t('Reports'),
+                          style: const TextStyle(
+                              fontSize: AppTheme.text2xl,
+                              fontWeight: FontWeight.bold,
+                              color: AppTheme.textPrimary)),
+                      const Spacer(),
+                      _buildLiveBadge(),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  Container(
+                    height: 44,
+                    padding: const EdgeInsets.all(4),
+                    decoration: BoxDecoration(
+                      color: AppTheme.dividerColor.withOpacity(0.35),
+                      borderRadius: BorderRadius.circular(22),
+                    ),
+                    child: Row(
+                      children: [
+                        _buildTabSegment(0, Icons.history,
+                            context.t('Recent'), AppTheme.primaryColor),
+                        const SizedBox(width: 4),
+                        _buildTabSegment(1, Icons.warning,
+                            context.t('Emergency'), AppTheme.errorColor),
+                      ],
+                    ),
+                  ),
                 ],
               ),
             ),
@@ -126,6 +158,82 @@ class _ReportsListScreenState extends State<ReportsListScreen>
   }
 
   Timer? _searchDebounce;
+
+  Widget _buildLiveBadge() {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+      decoration: BoxDecoration(
+        color: AppTheme.successColor.withOpacity(0.08),
+        borderRadius: BorderRadius.circular(20),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: 8,
+            height: 8,
+            decoration: BoxDecoration(
+              color: AppTheme.successColor,
+              shape: BoxShape.circle,
+              boxShadow: [
+                BoxShadow(
+                  color: AppTheme.successColor.withOpacity(0.6),
+                  blurRadius: 4,
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 6),
+          Text(
+            context.t('Live'),
+            style: const TextStyle(
+              fontSize: AppTheme.textXs,
+              fontWeight: FontWeight.w600,
+              color: AppTheme.successColor,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildTabSegment(
+      int index, IconData icon, String label, Color activeColor) {
+    final selected = _tabController.index == index;
+    return Expanded(
+      child: GestureDetector(
+        onTap: () => _tabController.animateTo(index),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 200),
+          curve: Curves.easeOut,
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            color: selected ? activeColor : Colors.transparent,
+            borderRadius: BorderRadius.circular(18),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(icon,
+                  size: 16,
+                  color: selected ? Colors.white : activeColor),
+              const SizedBox(width: 6),
+              Text(
+                label,
+                style: TextStyle(
+                  fontSize: AppTheme.textSm + 1,
+                  fontWeight: FontWeight.w600,
+                  color: selected
+                      ? Colors.white
+                      : AppTheme.textSecondary,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
 
   void _onFilterChanged(String query, int? categoryId) {
     final provider = context.read<ReportProvider>();
@@ -536,6 +644,20 @@ IconData _getCategoryIcon(String? icon) {
   switch (icon) { case 'road': return Icons.traffic; case 'warning': return Icons.warning_amber; case 'ac_unit': return Icons.ac_unit; case 'directions_bus': return Icons.directions_bus; case 'explore': return Icons.explore; case 'local_gas_station': return Icons.local_gas_station; case 'event': return Icons.event; case 'info': return Icons.info_outline; default: return Icons.assignment; }
 }
 
+Color _getReportCategoryColor(String? icon) {
+  switch (icon) {
+    case 'road': return const Color(0xFFF39C12);
+    case 'warning': return AppTheme.errorColor;
+    case 'ac_unit': return const Color(0xFF5C6BC0);
+    case 'directions_bus': return const Color(0xFF8E44AD);
+    case 'explore': return AppTheme.primaryColor;
+    case 'local_gas_station': return const Color(0xFF16A085);
+    case 'event': return const Color(0xFFE91E63);
+    case 'info': return AppTheme.infoColor;
+    default: return AppTheme.primaryColor;
+  }
+}
+
 // ============ REPORT CARD ============
 class _ReportCard extends StatelessWidget {
   final ReportModel report; final bool highlightEmergency; final bool showStatusBadge;
@@ -544,6 +666,7 @@ class _ReportCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final isHighPriority = report.isEmergency;
+    final catColor = _getReportCategoryColor(report.categoryIcon);
     Color statusColor; IconData statusIcon;
     switch (report.status) {
       case 'approved': statusColor = AppTheme.successColor; statusIcon = Icons.check_circle; break;
@@ -558,7 +681,18 @@ class _ReportCard extends StatelessWidget {
         borderRadius: BorderRadius.circular(16),
         onTap: () => _showReportDetails(context, report),
         child: Container(
-          decoration: highlightEmergency ? BoxDecoration(borderRadius: BorderRadius.circular(16), border: Border.all(color: AppTheme.errorColor.withOpacity(0.15), width: 1.2)) : BoxDecoration(borderRadius: BorderRadius.circular(16), border: Border.all(color: AppTheme.dividerColor.withOpacity(0.5), width: 1)),
+          decoration: highlightEmergency
+              ? BoxDecoration(
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border(
+                    left: const BorderSide(color: AppTheme.errorColor, width: 4),
+                    top: BorderSide(color: AppTheme.errorColor.withOpacity(0.12), width: 1),
+                    right: BorderSide(color: AppTheme.errorColor.withOpacity(0.12), width: 1),
+                    bottom: BorderSide(color: AppTheme.errorColor.withOpacity(0.12), width: 1),
+                  ),
+                  color: AppTheme.errorColor.withOpacity(0.03),
+                )
+              : BoxDecoration(borderRadius: BorderRadius.circular(16), border: Border.all(color: AppTheme.dividerColor.withOpacity(0.5), width: 1)),
           padding: const EdgeInsets.all(14),
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             GestureDetector(
@@ -579,14 +713,31 @@ class _ReportCard extends StatelessWidget {
                   Row(children: [
                     Text(report.timeAgo.isNotEmpty ? report.timeAgo : _formatTimeAgo(context, report.createdAt), style: const TextStyle(color: AppTheme.textSecondary, fontSize: AppTheme.textSm)),
                     const SizedBox(width: 6), Text('·', style: TextStyle(color: AppTheme.textSecondary.withOpacity(0.7))), const SizedBox(width: 6),
-                    Text(report.categoryName, style: const TextStyle(color: AppTheme.textSecondary, fontSize: AppTheme.textSm)),
+                    Container(padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2), decoration: BoxDecoration(color: catColor.withOpacity(0.12), borderRadius: BorderRadius.circular(5)), child: Text(report.categoryName, style: TextStyle(fontSize: AppTheme.textXs, color: catColor, fontWeight: FontWeight.w600))),
                   ]),
                 ])),
                 if (showStatusBadge) Container(padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4), decoration: BoxDecoration(color: statusColor.withOpacity(0.12), borderRadius: BorderRadius.circular(12)), child: Text(report.status.toUpperCase(), style: TextStyle(fontSize: AppTheme.textXs, color: statusColor, fontWeight: FontWeight.w700))),
               ]),
             ),
             const SizedBox(height: 12),
-            Text(report.title, style: const TextStyle(fontSize: AppTheme.textLg, fontWeight: FontWeight.w700)),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(child: Text(report.title, style: const TextStyle(fontSize: AppTheme.textLg, fontWeight: FontWeight.w700))),
+                if (report.isEmergency) ...[
+                  const SizedBox(width: 8),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                    decoration: BoxDecoration(color: AppTheme.errorColor, borderRadius: BorderRadius.circular(8)),
+                    child: const Row(mainAxisSize: MainAxisSize.min, children: [
+                      Icon(Icons.bolt, size: 12, color: Colors.white),
+                      SizedBox(width: 3),
+                      Text('EMERGENCY', style: TextStyle(fontSize: 9, color: Colors.white, fontWeight: FontWeight.w800)),
+                    ]),
+                  ),
+                ],
+              ],
+            ),
             const SizedBox(height: 8),
             Text(report.description, style: const TextStyle(fontSize: AppTheme.textBase, height: 1.6)),
             if (report.imageUrls.isNotEmpty) ...[
@@ -606,7 +757,7 @@ class _ReportCard extends StatelessWidget {
               const SizedBox(width: 16),
               GestureDetector(onTap: () => _shareReport(context, report), child: Container(padding: const EdgeInsets.all(6), decoration: BoxDecoration(color: AppTheme.primaryLight.withOpacity(0.1), borderRadius: BorderRadius.circular(8)), child: const Icon(Icons.share, size: 16, color: AppTheme.primaryColor))),
               const Spacer(),
-              GestureDetector(onTap: () => _showOnMap(context, report), child: Container(padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4), decoration: BoxDecoration(color: AppTheme.infoColor.withOpacity(0.1), borderRadius: BorderRadius.circular(8)), child: Row(mainAxisSize: MainAxisSize.min, children: [Icon(Icons.navigation, size: 14, color: AppTheme.infoColor), const SizedBox(width: 4), Text(report.latitude != null && report.longitude != null ? '${report.latitude!.toStringAsFixed(4)}, ${report.longitude!.toStringAsFixed(4)}' : context.t('No location'), style: const TextStyle(fontSize: AppTheme.textXs, color: AppTheme.infoColor))]))),
+              GestureDetector(onTap: () => _showOnMap(context, report), child: Container(padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4), decoration: BoxDecoration(color: AppTheme.infoColor.withOpacity(0.1), borderRadius: BorderRadius.circular(8)), child: Row(mainAxisSize: MainAxisSize.min, children: [Icon(Icons.map_outlined, size: 14, color: AppTheme.infoColor), const SizedBox(width: 4), Text(context.t('View map'), style: const TextStyle(fontSize: AppTheme.textXs, color: AppTheme.infoColor, fontWeight: FontWeight.w600))]))),
             ]),
           ]),
         ),
@@ -636,7 +787,7 @@ class _ReportCard extends StatelessWidget {
   }
 
   Future<void> _shareReport(BuildContext context, ReportModel report) async {
-    final copiedMsg = context.t('Report link copied to clipboard!');
+    final copiedMsg = context.tr('Report link copied to clipboard!');
     final text = '📍 ${report.title}\n\n${report.description}';
     final uri = Uri.parse('https://api.whatsapp.com/send?text=${Uri.encodeComponent(text)}');
     if (await canLaunchUrl(uri)) { await launchUrl(uri); }
@@ -745,6 +896,9 @@ class _ReportMapScreenState extends State<_ReportMapScreen> {
   final OfflineTileProvider _offlineTiles = OfflineTileProvider();
   final LocationService _locationService = LocationService();
   double? _myLat; double? _myLng;
+  List<LatLng> _routePoints = [];
+  List<bool> _routeOffRoad = [];
+  bool _isLoadingRoute = false;
 
   @override void initState() { super.initState(); _getMyLocation(); }
 
@@ -753,18 +907,72 @@ class _ReportMapScreenState extends State<_ReportMapScreen> {
     if (pos != null && mounted) setState(() { _myLat = pos.latitude; _myLng = pos.longitude; });
   }
 
-  void _openDirections() async {
+  Future<void> _openDirections() async {
     final report = widget.report;
     if (report.latitude == null || report.longitude == null) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(context.t('This report has no location data'))),
+          SnackBar(content: Text(context.tr('This report has no location data'))),
         );
       }
       return;
     }
-    final uri = Uri.parse('https://www.google.com/maps/dir/?api=1&destination=${report.latitude},${report.longitude}${_myLat != null && _myLng != null ? '&origin=$_myLat,$_myLng' : ''}');
-    if (await canLaunchUrl(uri)) await launchUrl(uri, mode: LaunchMode.externalApplication);
+    if (_myLat == null || _myLng == null) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(context.tr('Could not determine your location'))),
+        );
+      }
+      return;
+    }
+    setState(() => _isLoadingRoute = true);
+    try {
+      final response = await ApiClient.instance.getDirections(
+        fromLat: _myLat!,
+        fromLng: _myLng!,
+        toLat: report.latitude!,
+        toLng: report.longitude!,
+      );
+      final data = response.data['routes'] as List? ?? [];
+      if (data.isNotEmpty) {
+        final pts = <LatLng>[];
+        final offRoad = <bool>[];
+        for (final p in (data.first['points'] as List)) {
+          final m = p as Map;
+          pts.add(LatLng(
+            ((m['lat'] as num)).toDouble(),
+            ((m['lng'] as num)).toDouble(),
+          ));
+          offRoad.add(m['offRoad'] == true);
+        }
+        if (pts.length > 1) {
+          setState(() {
+            _routePoints = pts;
+            _routeOffRoad = offRoad;
+          });
+          final bounds = LatLngBounds.fromPoints(pts);
+          _mapController.fitCamera(
+            CameraFit.bounds(bounds: bounds, padding: const EdgeInsets.all(60)),
+          );
+        } else if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text(context.tr('No valid routes found'))),
+          );
+        }
+      } else if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(context.tr('No valid routes found'))),
+        );
+      }
+    } catch (e) {
+      debugPrint('Report route error: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(context.tr('Could not fetch route. Please try again.'))),
+        );
+      }
+    }
+    if (mounted) setState(() => _isLoadingRoute = false);
   }
 
   @override
@@ -772,7 +980,7 @@ class _ReportMapScreenState extends State<_ReportMapScreen> {
     final report = widget.report;
     final hasCoords = report.latitude != null && report.longitude != null;
     return Scaffold(
-      appBar: AppBar(title: Text(context.t('Report Location')), actions: [IconButton(icon: const Icon(Icons.directions), tooltip: context.t('Get Directions'), onPressed: _openDirections)]),
+      appBar: AppBar(title: Text(context.t('Report Location')), actions: [IconButton(icon: _isLoadingRoute ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2)) : const Icon(Icons.directions), tooltip: context.t('Get Directions'), onPressed: _isLoadingRoute ? null : _openDirections)]),
       body: Column(children: [
         Container(width: double.infinity, padding: const EdgeInsets.all(16), decoration: BoxDecoration(color: Colors.white, border: Border(bottom: BorderSide(color: AppTheme.dividerColor))),
           child: Row(children: [
@@ -785,6 +993,17 @@ class _ReportMapScreenState extends State<_ReportMapScreen> {
         if (hasCoords)
           Expanded(child: FlutterMap(mapController: _mapController, options: MapOptions(initialCenter: LatLng(report.latitude!, report.longitude!), initialZoom: 15.0, interactionOptions: const InteractionOptions(flags: InteractiveFlag.all)), children: [
             TileLayer(urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png', userAgentPackageName: 'np.com.nepalsmarttravel', tileProvider: _offlineTiles),
+            if (_routePoints.length > 1)
+              PolylineLayer(
+                polylines: buildRoutePolylines(
+                  _routePoints,
+                  _routeOffRoad.isEmpty
+                      ? List<bool>.filled(_routePoints.length, false)
+                      : _routeOffRoad,
+                  color: const Color(0xFF4285F4).withOpacity(0.85),
+                  strokeWidth: 5,
+                ),
+              ),
             MarkerLayer(markers: [
               Marker(point: LatLng(report.latitude!, report.longitude!), child: Column(mainAxisSize: MainAxisSize.min, children: [const Icon(Icons.location_on, size: 40, color: AppTheme.errorColor), Text(context.t('Report'), style: const TextStyle(fontSize: AppTheme.textXs, fontWeight: FontWeight.bold))])),
               if (_myLat != null && _myLng != null) Marker(point: LatLng(_myLat!, _myLng!), child: Column(mainAxisSize: MainAxisSize.min, children: [Container(padding: const EdgeInsets.all(6), decoration: const BoxDecoration(color: AppTheme.infoColor, shape: BoxShape.circle), child: const Icon(Icons.person, size: 16, color: Colors.white))])),
@@ -795,7 +1014,7 @@ class _ReportMapScreenState extends State<_ReportMapScreen> {
         Container(padding: const EdgeInsets.all(16), decoration: BoxDecoration(color: Colors.white, border: Border(top: BorderSide(color: AppTheme.dividerColor))),
           child: SafeArea(top: false, child: Row(children: [
             Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text(context.t('Location'), style: const TextStyle(fontWeight: FontWeight.w600, fontSize: AppTheme.textBase)), const SizedBox(height: 4), Text(hasCoords ? '${report.latitude!.toStringAsFixed(6)}, ${report.longitude!.toStringAsFixed(6)}' : context.t('Unknown'), style: const TextStyle(fontSize: AppTheme.textSm, color: AppTheme.textSecondary)), if (report.district != null) Text(report.district!, style: const TextStyle(fontSize: AppTheme.textSm, color: AppTheme.textSecondary))])),
-            ElevatedButton.icon(onPressed: _openDirections, icon: const Icon(Icons.directions, size: 18), label: Text(context.t('Directions')), style: ElevatedButton.styleFrom(backgroundColor: AppTheme.primaryColor, foregroundColor: Colors.white)),
+            ElevatedButton.icon(onPressed: _isLoadingRoute ? null : _openDirections, icon: _isLoadingRoute ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2)) : const Icon(Icons.directions, size: 18), label: Text(context.t('Directions')), style: ElevatedButton.styleFrom(backgroundColor: AppTheme.primaryColor, foregroundColor: Colors.white)),
           ])),
         ),
       ]),
@@ -816,6 +1035,8 @@ class _ReportDetailsSheet extends StatelessWidget {
         return Padding(
           padding: const EdgeInsets.all(20),
           child: ListView(controller: scrollController, children: [
+            Center(child: Container(width: 40, height: 4, decoration: BoxDecoration(color: AppTheme.textSecondary.withOpacity(0.3), borderRadius: BorderRadius.circular(2)))),
+            const SizedBox(height: 16),
             Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
               CircleAvatar(backgroundColor: report.isEmergency ? AppTheme.errorColor.withOpacity(0.1) : AppTheme.primaryLight.withOpacity(0.1), child: Icon(report.isEmergency ? Icons.warning : Icons.assignment, color: report.isEmergency ? AppTheme.errorColor : AppTheme.primaryColor)),
               const SizedBox(width: 12),
@@ -833,7 +1054,7 @@ class _ReportDetailsSheet extends StatelessWidget {
             ]),
             const SizedBox(height: 16),
             if (report.imageUrls.isNotEmpty) ...[ClipRRect(borderRadius: BorderRadius.circular(16), child: ImageCarouselWidget(images: report.imageUrls, height: 240)), const SizedBox(height: 16)],
-            GestureDetector(onTap: () { Navigator.pop(context); Navigator.push(context, MaterialPageRoute(builder: (context) => _ReportMapScreen(report: report))); }, child: Row(children: [const Icon(Icons.location_on, size: 16, color: AppTheme.textSecondary), const SizedBox(width: 6), Text(report.district ?? context.t('Unknown location'), style: const TextStyle(color: AppTheme.textSecondary)), const SizedBox(width: 16), Text(report.latitude != null && report.longitude != null ? '${report.latitude!.toStringAsFixed(4)}, ${report.longitude!.toStringAsFixed(4)}' : context.t('No location data'), style: const TextStyle(fontSize: AppTheme.textXs + 1, color: AppTheme.textSecondary)), const Spacer(), const Icon(Icons.chevron_right, size: 16, color: AppTheme.primaryColor)])),
+            GestureDetector(onTap: () { Navigator.pop(context); Navigator.push(context, MaterialPageRoute(builder: (context) => _ReportMapScreen(report: report))); }, child: Container(padding: const EdgeInsets.all(12), decoration: BoxDecoration(color: AppTheme.infoColor.withOpacity(0.06), borderRadius: BorderRadius.circular(12), border: Border.all(color: AppTheme.infoColor.withOpacity(0.2))), child: Row(children: [const Icon(Icons.location_on, size: 18, color: AppTheme.infoColor), const SizedBox(width: 8), Expanded(child: Text(report.district ?? context.t('Unknown location'), style: const TextStyle(fontWeight: FontWeight.w600, fontSize: AppTheme.textBase), maxLines: 1, overflow: TextOverflow.ellipsis)), const SizedBox(width: 8), Text(context.t('View on map'), style: TextStyle(fontSize: AppTheme.textSm, color: AppTheme.infoColor, fontWeight: FontWeight.w600)), const Icon(Icons.chevron_right, size: 18, color: AppTheme.infoColor)]))),
             const SizedBox(height: 12),
             Text(report.description, style: const TextStyle(fontSize: AppTheme.textBase + 1, height: 1.5)),
             const SizedBox(height: 20),
@@ -863,7 +1084,7 @@ const SizedBox(height: 20),
   }
 
   void _toggleHelpful(BuildContext context, ReportModel report) {
-    final helpfulMsg = context.t('Marked as helpful');
+    final helpfulMsg = context.tr('Marked as helpful');
     ApiClient.instance.dio.post('/reports/${report.id}/reactions', data: {'reaction_type': 'helpful'}).then((_) { if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(helpfulMsg), duration: const Duration(seconds: 1))); }).catchError((_) {});
   }
 
@@ -872,7 +1093,7 @@ const SizedBox(height: 20),
   }
 
   Future<void> _shareReport(BuildContext context, ReportModel report) async {
-    final copiedMsg = context.t('Report link copied to clipboard!');
+    final copiedMsg = context.tr('Report link copied to clipboard!');
     final text = '📍 ${report.title}\n\n${report.description}';
     final uri = Uri.parse('https://api.whatsapp.com/send?text=${Uri.encodeComponent(text)}');
     if (await canLaunchUrl(uri)) await launchUrl(uri);
@@ -945,7 +1166,7 @@ class _CommentsSheetState extends State<_CommentsSheet> {
   Future<void> _submitComment() async {
     final content = _commentController.text.trim();
     if (content.isEmpty) return;
-    final failMsg = context.t('Failed to post comment. Please try again.');
+    final failMsg = context.tr('Failed to post comment. Please try again.');
     setState(() => _isSubmitting = true);
     try {
       final api = ApiClient.instance;
@@ -962,7 +1183,17 @@ class _CommentsSheetState extends State<_CommentsSheet> {
       });
       if (context.mounted) context.read<ReportProvider>().fetchReports(refresh: false, lat: context.read<ReportProvider>().lastFetchLat, lng: context.read<ReportProvider>().lastFetchLng, radiusKm: 20.0);
     } catch (e) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(failMsg), backgroundColor: AppTheme.errorColor));
+      final is429 = e is DioException && e.response?.statusCode == 429;
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              is429 ? context.tr('Too many comments. Please try again later.') : failMsg,
+            ),
+            backgroundColor: AppTheme.errorColor,
+          ),
+        );
+      }
     }
     if (mounted) setState(() => _isSubmitting = false);
   }
@@ -1137,26 +1368,22 @@ class _SubmitReportSheetState extends State<_SubmitReportSheet> {
   @override void dispose() { super.dispose(); }
 
   Future<void> _capturePhoto() async {
-    final locRequiredMsg = context.t('Location access is required to take a photo. Please enable GPS and location permission.');
-    final tooLargeMsg = context.t('Photo is too large. Max 5MB.');
-    final captureFailMsg = context.t('Failed to capture photo.');
+    final tooLargeMsg = context.tr('Photo is too large. Max 5MB.');
+    final captureFailMsg = context.tr('Failed to capture photo.');
     setState(() => _isCapturingPhoto = true);
     try {
-      final loc = LocationService();
-      final pos = await loc.getAccurateLocationForReport();
-      if (pos == null) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(locRequiredMsg), backgroundColor: AppTheme.errorColor));
-          setState(() => _isCapturingPhoto = false);
-        }
-        return;
-      }
-      if (mounted) setState(() { _lat = pos.latitude; _lng = pos.longitude; });
-      final photo = await _cameraService.capturePhoto();
+      // Open the camera immediately — never block on a slow high-accuracy GPS
+      // fix. Pre-capture GPS was blocking the button up to ~25s.
+      final photo = await _cameraService.capturePhoto(
+        maxWidth: 1600,
+        maxHeight: 1600,
+        imageQuality: 88,
+      );
       if (photo != null && mounted) {
         if (await CameraService.isWithinSizeLimit(photo)) {
           setState(() => _capturedPhoto = photo);
-          await _captureLocationService.captureLocationAfterPhoto();
+          // Capture capture-time GPS in the background (no UI blocking).
+          unawaited(_refreshCaptureLocation());
         } else {
           await CameraService.cleanUp(photo);
           if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(tooLargeMsg), backgroundColor: AppTheme.errorColor));
@@ -1166,20 +1393,31 @@ class _SubmitReportSheetState extends State<_SubmitReportSheet> {
     if (mounted) setState(() => _isCapturingPhoto = false);
   }
 
+  /// Grab capture-time GPS coords off the UI thread, and upgrade the report
+  /// pin with them when they arrive. Never blocks the photo/submit flow.
+  Future<void> _refreshCaptureLocation() async {
+    await _captureLocationService.captureLocationAfterPhoto();
+    if (!mounted || !_captureLocationService.hasCaptureLocation) return;
+    setState(() {
+      _lat = _captureLocationService.captureLatitude;
+      _lng = _captureLocationService.captureLongitude;
+    });
+  }
+
   Future<void> _retakePhoto() async { if (_capturedPhoto != null) await CameraService.cleanUp(_capturedPhoto!); setState(() => _capturedPhoto = null); await _capturePhoto(); }
 
   Future<void> _submitReport() async {
     if (!_formKey.currentState!.validate()) return;
     final provider = context.read<ReportProvider>();
-    final captureMsg = context.t('Please capture a live photo.');
-    final fileMissingMsg = context.t('Photo file missing.');
-    final locUnavailableMsg = context.t('Location unavailable. Please enable GPS and try again.');
-    final successMsg = context.t('Report submitted!');
+    final captureMsg = context.tr('Please capture a live photo.');
+    final fileMissingMsg = context.tr('Photo file missing.');
+    final locUnavailableMsg = context.tr('Location unavailable. Please enable GPS and try again.');
+    final successMsg = context.tr('Report submitted!');
     if (_capturedPhoto == null) { ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(captureMsg), backgroundColor: AppTheme.errorColor)); return; }
     if (!await File(_capturedPhoto!.path).exists()) { ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(fileMissingMsg), backgroundColor: AppTheme.errorColor)); return; }
     setState(() => _isSubmitting = true);
-    final loc = LocationService(); final pos = await loc.getAccurateLocationForReport();
-    if (pos != null) { _lat = pos.latitude; _lng = pos.longitude; }
+    // Reuse the pin already captured during photo/screen init — do NOT block
+    // submit on another high-accuracy GPS fix (was a 10-25s spinner).
     if (_lat == null || _lng == null) {
       if (mounted) {
         setState(() => _isSubmitting = false);
@@ -1210,10 +1448,69 @@ class _SubmitReportSheetState extends State<_SubmitReportSheet> {
         if (formConfig == null || !_configReady) Padding(padding: const EdgeInsets.symmetric(vertical: 24), child: Center(child: Column(children: [const CircularProgressIndicator(strokeWidth: 2), const SizedBox(height: 12), Text(context.t('Loading...'), style: const TextStyle(color: AppTheme.textSecondary))])))
         else ...[
           ...formConfig.fields.map((field) => Padding(padding: const EdgeInsets.only(bottom: 12), child: DynamicFormField(config: field, currentValue: _formValues[field.name], categories: provider.categories, onChanged: (v) => setState(() => _formValues[field.name] = v)))),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            margin: const EdgeInsets.only(bottom: 12),
+            decoration: BoxDecoration(
+              color: (_lat != null ? AppTheme.successColor : AppTheme.errorColor).withOpacity(0.08),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Row(children: [
+              if (_isLoadingLocation)
+                const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+              else
+                Icon(_lat != null ? Icons.gps_fixed : Icons.gps_off, size: 18, color: _lat != null ? AppTheme.successColor : AppTheme.errorColor),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  _isLoadingLocation
+                      ? context.t('Getting your location...')
+                      : _district != null
+                          ? _district!
+                          : _lat != null
+                              ? context.t('Location detected')
+                              : context.t('GPS needed for photo & report'),
+                  style: TextStyle(fontSize: AppTheme.textSm, fontWeight: FontWeight.w600, color: _lat != null ? AppTheme.successColor : AppTheme.errorColor),
+                ),
+              ),
+            ]),
+          ),
           if (_capturedPhoto != null) ...[ClipRRect(borderRadius: BorderRadius.circular(8), child: Stack(children: [Image.file(File(_capturedPhoto!.path), height: 160, width: double.infinity, fit: BoxFit.cover), Positioned(top: 8, right: 8, child: GestureDetector(onTap: _retakePhoto, child: Container(padding: const EdgeInsets.all(6), decoration: BoxDecoration(color: Colors.black54, borderRadius: BorderRadius.circular(20)), child: const Icon(Icons.refresh, color: Colors.white, size: 18))))])), const SizedBox(height: 8)]
-          else SizedBox(height: 44, child: OutlinedButton.icon(onPressed: _isCapturingPhoto ? null : _capturePhoto, icon: _isCapturingPhoto ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2)) : const Icon(Icons.camera_alt, size: 18), label: Text(_isCapturingPhoto ? context.t('Opening camera...') : context.t('Take Photo')))),
+          else
+            GestureDetector(
+              onTap: _isCapturingPhoto ? null : _capturePhoto,
+              child: Container(
+                height: 110,
+                decoration: BoxDecoration(
+                  color: AppTheme.primaryLight.withOpacity(0.06),
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(color: AppTheme.primaryColor.withOpacity(0.4), width: 1.5),
+                ),
+                child: _isCapturingPhoto
+                    ? const Center(child: CircularProgressIndicator(strokeWidth: 2))
+                    : Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+                        const Icon(Icons.photo_camera_outlined, size: 30, color: AppTheme.primaryColor),
+                        const SizedBox(height: 6),
+                        Text(context.t('Tap to capture live photo'), style: TextStyle(fontSize: AppTheme.textSm, color: AppTheme.textSecondary)),
+                      ]),
+              ),
+            ),
           const SizedBox(height: 8),
-          SizedBox(height: 48, child: ElevatedButton(onPressed: _isSubmitting ? null : _submitReport, child: _isSubmitting ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white)) : Text(formConfig?.submitButtonText ?? context.t('Submit')))),
+          SizedBox(
+            height: 50,
+            child: ElevatedButton(
+              onPressed: _isSubmitting ? null : _submitReport,
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppTheme.primaryColor,
+                foregroundColor: Colors.white,
+                elevation: 0,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+              ),
+              child: _isSubmitting
+                  ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                  : Text(formConfig?.submitButtonText ?? context.t('Submit'), style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+            ),
+          ),
         ],
       ]))),
     );

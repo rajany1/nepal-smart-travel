@@ -214,6 +214,13 @@ class _AddPlaceScreenState extends State<AddPlaceScreen> {
           context,
           MaterialPageRoute(builder: (_) => const LoginScreen()),
         );
+      } else if (status == 429) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Too many submissions. Please try again later.'),
+            backgroundColor: Colors.red,
+          ),
+        );
       } else if (status == 409) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
