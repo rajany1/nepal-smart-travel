@@ -24,7 +24,7 @@ class TestPushNotification extends Command
             return 1;
         }
 
-        $this->info("Sending push to {$count} device(s)...");
+        $this->info("Sending push to {$count} device(s) via FCM v1...");
 
         PushNotificationService::notifyNearbyUsers(
             title: $title,
@@ -36,6 +36,7 @@ class TestPushNotification extends Command
         );
 
         $this->info("Done! Check your device.");
+        $this->line("If nothing arrived, check storage/logs/laravel.log for 'FCM' lines.");
         return 0;
     }
 }

@@ -5,11 +5,48 @@ namespace App\Services;
 use App\Models\PushToken;
 use App\Models\TranslationGlossary;
 use App\Models\User;
-use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
+use Kreait\Firebase\Contract\Messaging;
+use Kreait\Firebase\Exception\MessagingException;
+use Kreait\Firebase\Exception\Messaging\NotFound as TokenNotFound;
+use Kreait\Firebase\Factory;
+use Kreait\Firebase\Messaging\CloudMessage;
 
 class PushNotificationService
 {
+    protected static ?Messaging $messaging = null;
+
+    /**
+     * Lazy-shared FCM v1 messaging client (service-account based).
+     * The legacy server-key API (fcm.googleapis.com/fcm/send) was shut
+     * down by Google, so all sends must go through HTTP v1.
+     */
+    protected static function messaging(): ?Messaging
+    {
+        if (self::$messaging !== null) {
+            return self::$messaging;
+        }
+
+        $credentials = (string) config('services.firebase.credentials');
+        if ($credentials === '') {
+            Log::warning('FCM credentials not configured (FIREBASE_CREDENTIALS).');
+            return null;
+        }
+
+        $path = file_exists($credentials) ? $credentials : base_path($credentials);
+        if (!file_exists($path)) {
+            Log::warning('Firebase credentials file missing.', ['path' => $credentials]);
+            return null;
+        }
+
+        try {
+            self::$messaging = (new Factory)->withServiceAccount($path)->createMessaging();
+            return self::$messaging;
+        } catch (\Throwable $e) {
+            Log::error('Firebase init failed: ' . $e->getMessage());
+            return null;
+        }
+    }
     /**
      * Send a push notification to a specific user.
      * Sends both English and Nepali versions based on user's language preference.
@@ -98,7 +135,7 @@ class PushNotificationService
     }
 
     /**
-     * Send FCM payload with bilingual support.
+     * Send FCM payload via HTTP v1 with bilingual support.
      * If language is 'ne', includes Nepali translations in data payload.
      */
     protected static function sendFcm(
@@ -108,55 +145,54 @@ class PushNotificationService
         array $data = [],
         string $language = 'en'
     ): void {
-        $serverKey = config('services.firebase.server_key');
-        if (empty($serverKey)) {
-            Log::warning('FCM server key not configured.');
+        $messaging = self::messaging();
+        if ($messaging === null) {
             return;
         }
 
-        $payload = [
-            'registration_ids' => $tokens,
-            'notification' => [
-                'title' => $title,
-                'body' => $body,
-                'sound' => 'default',
-            ],
-            'data' => array_merge($data, [
-                'title_en' => $title,
-                'body_en' => $body,
-                'lang' => $language,
-            ]),
-            'priority' => 'high',
-        ];
+        $payloadData = array_merge($data, [
+            'title_en' => $title,
+            'body_en' => $body,
+            'lang' => $language,
+        ]);
 
         // Add Nepali translations to data payload for 'ne' language
         if ($language === 'ne') {
-            $payload['data']['title_ne'] = self::translate($title);
-            $payload['data']['body_ne'] = self::translate($body);
-            // Also translate data values if they exist
+            $payloadData['title_ne'] = self::translate($title);
+            $payloadData['body_ne'] = self::translate($body);
             foreach ($data as $key => $value) {
                 if (is_string($value)) {
-                    $payload['data'][$key . '_ne'] = self::translate($value);
+                    $payloadData[$key . '_ne'] = self::translate($value);
                 }
             }
         }
 
-        // Chunk tokens to avoid FCM limits (1000 per request)
-        $chunks = array_chunk($tokens, 1000);
-        foreach ($chunks as $chunk) {
-            $payload['registration_ids'] = $chunk;
-            try {
-                $response = Http::withHeaders([
-                    'Authorization' => 'key=' . config('services.firebase.server_key'),
-                    'Content-Type' => 'application/json',
-                ])->timeout(15)->post('https://fcm.googleapis.com/fcm/send', $payload);
+        $sent = 0;
+        $pruned = 0;
 
-                if (!$response->successful()) {
-                    Log::warning('FCM push failed: ' . $response->body());
-                }
-            } catch (\Exception $e) {
-                Log::error('FCM push error: ' . $e->getMessage());
+        foreach ($tokens as $token) {
+            try {
+                $message = CloudMessage::new()
+                    ->withHighestPossiblePriority()
+                    ->withNotification(['title' => $title, 'body' => $body])
+                    ->withData($payloadData)
+                    ->withChangedTarget('token', (string) $token);
+
+                $messaging->send($message);
+                $sent++;
+            } catch (TokenNotFound $e) {
+                // Stale token (app uninstalled/token rotated): stop targeting it.
+                PushToken::where('fcm_token', $token)->update(['subscribed' => false]);
+                $pruned++;
+            } catch (MessagingException $e) {
+                Log::warning('FCM v1 send failed for token: ' . substr($e->getMessage(), 0, 200));
+            } catch (\Throwable $e) {
+                Log::error('FCM send error: ' . $e->getMessage());
             }
+        }
+
+        if ($sent > 0 || $pruned > 0) {
+            Log::info("FCM push result: sent={$sent}, pruned={$pruned}, lang={$language}");
         }
     }
 

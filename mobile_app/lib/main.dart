@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import "../../core/services/localization_service.dart";
 import 'package:flutter/services.dart';
+import 'package:firebase_core/firebase_core.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:provider/provider.dart';
 import 'config/themes/app_theme.dart';
 import 'config/constants/app_constants.dart';
@@ -47,7 +49,28 @@ import 'features/subscriptions/subscription_plans_screen.dart';
 import 'features/store/store_screen.dart';
 
 import 'services/push_notification_service.dart';
+import 'core/services/local_notification_service.dart';
 import 'core/services/sync_service.dart';
+
+/// Background/terminated FCM handler. Must be top-level and annotated so
+/// the AOT snapshot keeps it. Runs in its own isolate - re-initializes
+/// what it needs.
+@pragma('vm:entry-point')
+Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
+  await Firebase.initializeApp();
+  final title = message.notification?.title ??
+      message.data['title_en'] ??
+      'Travel Alert';
+  final body = message.notification?.body ?? message.data['body_en'] ?? '';
+  if (title.isEmpty && body.isEmpty) return;
+  await LocalNotificationService.instance.showPush(
+    id: (message.messageId ?? message.sentTime?.millisecondsSinceEpoch
+            .toString() ?? 'bg')
+        .hashCode & 0x7fffffff,
+    title: title,
+    body: body,
+  );
+}
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -61,6 +84,13 @@ void main() async {
 
   // Apply Data Saver image-cache limits before the first frame
   AppSettingsService.applyDataSaverLimits();
+
+  try {
+    await Firebase.initializeApp();
+    FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
+  } catch (e) {
+    debugPrint('Firebase init failed: $e');
+  }
 
   final authProvider = AuthProvider();
   await authProvider.initializeAuth();

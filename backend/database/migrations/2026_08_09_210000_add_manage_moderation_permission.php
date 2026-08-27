@@ -13,7 +13,7 @@ return new class extends Migration
             'description' => 'View violations, strike history and manage user warnings/suspensions/bans',
             'group' => 'moderation',
             'menu_label' => 'Content Safety',
-            'menu_icon' => 'fa-shield-halved',
+            'menu_icon' => 'shield-halved',
             'menu_order' => 105,
             'menu_group' => 'main',
             'route_name' => 'admin.moderation',

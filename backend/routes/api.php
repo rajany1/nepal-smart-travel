@@ -152,6 +152,7 @@ Route::prefix('v1')->group(function () {
 
         // Push notification tokens
         Route::post('/push-tokens', [PushTokenController::class, 'store']);
+        Route::put('/push-tokens/location', [PushTokenController::class, 'updateLocation'])->middleware('throttle:30,1');
         Route::put('/push-tokens/unsubscribe', [PushTokenController::class, 'unsubscribe']);
 
         // Subscription

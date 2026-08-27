@@ -460,22 +460,9 @@ class ReportController extends Controller
             // Non-fatal: queue failure shouldn't block report creation
         }
 
-        // Send push notification for emergency/critical reports within 20km.
-        // Queued so the slow FCM fan-out never blocks the submit response.
-        if (in_array($report->priority, ['high', 'critical']) && $report->latitude && $report->longitude) {
-            try {
-                dispatch(new \App\Jobs\SendNearbyPushNotification(
-                    title: ($report->priority === 'critical' ? '🚨' : '⚠️ ') . $report->title,
-                    message: str($report->description)->limit(100),
-                    latitude: (float) $report->latitude,
-                    longitude: (float) $report->longitude,
-                    radiusKm: 20,
-                    data: ['type' => 'report', 'id' => $report->id],
-                ));
-            } catch (\Throwable $e) {
-                \Illuminate\Support\Facades\Log::warning('Report push dispatch failed: ' . $e->getMessage());
-            }
-        }
+        // Push notifications are intentionally NOT sent at submission time:
+        // users only get notified once moderators/AI approve the report
+        // (see AlertPublisherService).
 
         $responseData = $this->formatReport($report->fresh()->load(['user', 'category', 'media']));
         $responseData['gps_verification'] = $gpsVerificationResult;
@@ -542,22 +529,12 @@ class ReportController extends Controller
             app(AchievementService::class)->revokeReportApprovalXp($report);
         }
 
-        // Notify nearby users when report is approved (queued - no sync block)
-        if (isset($validated['status']) && $validated['status'] === 'approved') {
-            if ($report->latitude && $report->longitude) {
-                try {
-                    dispatch(new \App\Jobs\SendNearbyPushNotification(
-                        title: '⚠️ ' . $report->title,
-                        message: str($report->description)->limit(100),
-                        latitude: (float) $report->latitude,
-                        longitude: (float) $report->longitude,
-                        radiusKm: 20,
-                        data: ['type' => 'report', 'id' => $report->id],
-                    ));
-                } catch (\Throwable $e) {
-                    \Illuminate\Support\Facades\Log::warning('Report approval push dispatch failed: ' . $e->getMessage());
-                }
-            }
+        // Publish proximity alert + notify nearby users on the pending ->
+        // approved transition only (queued - no sync block).
+        if (isset($validated['status'])
+            && $validated['status'] === 'approved'
+            && !$wasApproved) {
+            app(\App\Services\AlertPublisherService::class)->publishFromReport($report);
         }
 
         return response()->json([

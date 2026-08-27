@@ -11,15 +11,19 @@ return new class extends Migration
      */
     public function up(): void
     {
-        Schema::table('ai_agent_tasks', function (Blueprint $table) {
-            $table->string('task_type', 255)->nullable()->change();
-        });
+        if (Schema::hasColumn('ai_agent_tasks', 'task_type')) {
+            Schema::table('ai_agent_tasks', function (Blueprint $table) {
+                $table->string('task_type', 255)->nullable()->change();
+            });
+        }
     }
 
     public function down(): void
     {
-        Schema::table('ai_agent_tasks', function (Blueprint $table) {
-            $table->string('task_type', 255)->nullable(false)->change();
-        });
+        if (Schema::hasColumn('ai_agent_tasks', 'task_type')) {
+            Schema::table('ai_agent_tasks', function (Blueprint $table) {
+                $table->string('task_type', 255)->nullable(false)->change();
+            });
+        }
     }
 };

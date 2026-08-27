@@ -18,6 +18,8 @@ class Alert extends Model
         'expires_at',
         'affected_district',
         'created_by',
+        'source_type',
+        'source_id',
     ];
 
     protected function casts(): array

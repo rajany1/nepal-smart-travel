@@ -21,6 +21,7 @@ use App\Services\ModeratorService;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Str;
 use Carbon\Carbon;
 use App\Models\GameSetting;
@@ -647,20 +648,7 @@ class AdminController extends Controller
             }
         }
 
-        if ($report->latitude && $report->longitude) {
-            try {
-                dispatch(new \App\Jobs\SendNearbyPushNotification(
-                    title: 'âš ï¸ ' . $report->title,
-                    message: str($report->description)->limit(100),
-                    latitude: (float) $report->latitude,
-                    longitude: (float) $report->longitude,
-                    radiusKm: 20,
-                    data: ['type' => 'report', 'id' => $report->id],
-                ));
-            } catch (\Throwable $e) {
-                Log::warning('Report approval push dispatch failed: ' . $e->getMessage());
-            }
-        }
+        app(\App\Services\AlertPublisherService::class)->publishFromReport($report);
 
         $this->logAction('report.approved', 'report', $report->id, "Approved report #{$report->id}: {$report->title}");
 
@@ -1183,6 +1171,8 @@ class AdminController extends Controller
         $validated['uuid'] = (string) Str::uuid();
         $validated['created_by'] = Auth::id();
         $alert = Alert::create($validated);
+
+        app(\App\Services\AlertPublisherService::class)->dispatchForAlert($alert);
 
         $this->logAction('alert.created', 'alert', $alert->id, "Created alert: {$validated['title']}");
 

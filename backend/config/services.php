@@ -73,4 +73,9 @@ return [
         'server_key' => env('FIREBASE_SERVER_KEY'),
     ],
 
+    'alerts' => [
+        'push_radius_km' => (float) env('ALERT_PUSH_RADIUS_KM', 5),
+        'report_alert_ttl_hours' => (int) env('REPORT_ALERT_TTL_HOURS', 48),
+    ],
+
 ];

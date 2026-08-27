@@ -13,9 +13,11 @@ return new class extends Migration
                 $table->renameColumn('player_id', 'fcm_token');
             });
         }
-        Schema::table('push_tokens', function (Blueprint $table) {
-            $table->string('device_type')->nullable()->after('fcm_token');
-        });
+        if (!Schema::hasColumn('push_tokens', 'device_type')) {
+            Schema::table('push_tokens', function (Blueprint $table) {
+                $table->string('device_type')->nullable()->after('fcm_token');
+            });
+        }
     }
 
     public function down(): void

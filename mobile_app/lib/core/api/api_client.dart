@@ -152,6 +152,15 @@ class ApiClient {
     return _dio.get('/alerts', queryParameters: queryParams);
   }
 
+  /// Alerts + approved reports merged around a point (server-side bbox).
+  Future<Response> getNearbyAlerts({required double lat, required double lng, double radiusKm = 5.0}) async {
+    return _dio.get('/alerts/nearby', queryParameters: {
+      'lat': lat,
+      'lng': lng,
+      'radius_km': radiusKm,
+    });
+  }
+
   // Push token endpoints
   Future<Response> registerPushToken(String fcmToken, {String? deviceType, double? latitude, double? longitude}) async {
     return _dio.post('/push-tokens', data: {
@@ -164,6 +173,16 @@ class ApiClient {
 
   Future<Response> unsubscribePushToken(String fcmToken) async {
     return _dio.put('/push-tokens/unsubscribe', data: {'fcm_token': fcmToken});
+  }
+
+  /// Refreshes the device's stored location so nearby push targeting
+  /// stays accurate while the user moves.
+  Future<Response> updatePushTokenLocation({String? fcmToken, required double latitude, required double longitude}) async {
+    return _dio.put('/push-tokens/location', data: {
+      if (fcmToken != null) 'fcm_token': fcmToken,
+      'latitude': latitude,
+      'longitude': longitude,
+    });
   }
 
   // Place endpoints

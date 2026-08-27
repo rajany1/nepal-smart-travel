@@ -15,6 +15,7 @@ import '../../core/services/location_service.dart';
 import '../../core/services/offline_db_service.dart';
 import '../../core/services/offline_tile_provider.dart';
 import '../../core/services/app_settings_service.dart';
+import '../../core/services/proximity_alert_service.dart';
 import '../../core/models/place.dart';
 import '../../core/models/route_model.dart';
 import '../../core/api/api_client.dart';
@@ -165,9 +166,29 @@ class _NearbyMapScreenState extends State<NearbyMapScreen>
     _destinationLng = widget.destinationLng;
     _destinationName = widget.destinationName;
     _syncStreamController = StreamController<int>.broadcast();
+    ProximityAlertService.instance.onProximityAlert = _showProximityBanner;
     _pollSyncCount();
     _initCompass();
     WidgetsBinding.instance.addPostFrameCallback((_) => _initMap());
+  }
+
+  /// In-app banner when the user walks into an alert zone while
+  /// navigating (the system notification fires in parallel).
+  void _showProximityBanner(ProximityAlertItem item) {
+    if (!mounted) return;
+    HapticFeedback.heavyImpact();
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(
+        behavior: SnackBarBehavior.floating,
+        duration: const Duration(seconds: 6),
+        backgroundColor: Colors.red.shade800,
+        content: Text('${item.severityEmoji} ${item.title}'),
+        action: SnackBarAction(
+          label: context.tr('OK'),
+          onPressed: () {},
+        ),
+      ));
   }
 
   void _initCompass() {
@@ -198,6 +219,7 @@ class _NearbyMapScreenState extends State<NearbyMapScreen>
 
   @override
   void dispose() {
+    ProximityAlertService.instance.stopNavigationMonitoring();
     _debounceTimer?.cancel();
     _autoDownloadTimer?.cancel();
     _positionStream?.cancel();
@@ -819,6 +841,8 @@ class _NearbyMapScreenState extends State<NearbyMapScreen>
       if (parsed.isNotEmpty) {
         debugPrint('Directions OK: ${parsed.length} route(s) for ${place.name}');
         setState(() => _routes = parsed);
+        // Following a route -> watch for alerts/reports along the way.
+        ProximityAlertService.instance.startNavigationMonitoring();
         final allPoints = parsed.expand((r) => r['points'] as List<LatLng>).toList();
         final bounds = _latLngBoundsFromPoints(allPoints);
         final cameraFit = CameraFit.bounds(bounds: bounds, padding: const EdgeInsets.all(60));
@@ -851,6 +875,7 @@ class _NearbyMapScreenState extends State<NearbyMapScreen>
 
   void _clearRoute() {
     _hasArrived = false;
+    ProximityAlertService.instance.stopNavigationMonitoring();
     setState(() => _routes = []);
   }
 
@@ -897,6 +922,8 @@ class _NearbyMapScreenState extends State<NearbyMapScreen>
       }
       if (parsed.isNotEmpty) {
         setState(() => _routes = parsed);
+        // Following a route -> watch for alerts/reports along the way.
+        ProximityAlertService.instance.startNavigationMonitoring();
         final allPoints = parsed.expand((r) => r['points'] as List<LatLng>).toList()
           ..add(LatLng(_destinationLat!, _destinationLng!))
           ..add(LatLng(originLat, originLng));

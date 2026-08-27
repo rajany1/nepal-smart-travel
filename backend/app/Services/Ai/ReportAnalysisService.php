@@ -77,6 +77,12 @@ class ReportAnalysisService
             }
         });
 
+        // AI approval counts as moderation approval: publish proximity alert
+        // + nearby push (deduped inside the publisher).
+        if (($analysis['action'] ?? 'approve') === 'approve') {
+            app(\App\Services\AlertPublisherService::class)->publishFromReport($report->fresh() ?? $report);
+        }
+
         return [
             'report_id' => $report->id,
             'action' => $analysis['action'] ?? 'approve',
@@ -131,6 +137,11 @@ class ReportAnalysisService
                 app(AchievementService::class)->revokeReportApprovalXp($report);
             }
         });
+
+        // Re-decode approvals also fan out proximity alerts (deduped).
+        if ($action === 'approve') {
+            app(\App\Services\AlertPublisherService::class)->publishFromReport($report->fresh() ?? $report);
+        }
 
         return ['report_id' => $report->id, 'action' => $action, 'analysis' => $analysis];
     }

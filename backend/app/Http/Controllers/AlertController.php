@@ -197,21 +197,7 @@ class AlertController extends Controller
             "Posted alert: {$alert->title}", $alert
         );
 
-        if ($alert->latitude && $alert->longitude) {
-            try {
-                dispatch(new \App\Jobs\SendNearbyPushNotification(
-                    title: $alert->title,
-                    message: $alert->description,
-                    latitude: (float) $alert->latitude,
-                    longitude: (float) $alert->longitude,
-                    radiusKm: 20,
-                    data: ['type' => 'alert', 'id' => $alert->id],
-                    settingsKey: 'notifications_enabled',
-                ));
-            } catch (\Throwable $e) {
-                Log::warning('Alert push dispatch failed: ' . $e->getMessage());
-            }
-        }
+        app(\App\Services\AlertPublisherService::class)->dispatchForAlert($alert);
 
         return response()->json([
             'success' => true,

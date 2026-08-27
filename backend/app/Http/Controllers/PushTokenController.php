@@ -47,4 +47,30 @@ class PushTokenController extends Controller
 
         return response()->json(['success' => true]);
     }
+
+    /**
+     * Keep the device's last known location fresh so "nearby" push
+     * targeting stays accurate while the user moves. The app calls this
+     * periodically (every few minutes) while it is in the foreground.
+     */
+    public function updateLocation(Request $request)
+    {
+        $validated = $request->validate([
+            'fcm_token' => 'nullable|string|max:255',
+            'latitude' => 'required|numeric|between:-90,90',
+            'longitude' => 'required|numeric|between:-180,180',
+        ]);
+
+        $query = PushToken::where('user_id', $request->user()->id)->where('subscribed', true);
+        if (!empty($validated['fcm_token'])) {
+            $query->where('fcm_token', $validated['fcm_token']);
+        }
+
+        $updated = $query->update([
+            'latitude' => $validated['latitude'],
+            'longitude' => $validated['longitude'],
+        ]);
+
+        return response()->json(['success' => true, 'updated' => $updated]);
+    }
 }
