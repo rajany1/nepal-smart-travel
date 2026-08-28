@@ -9,6 +9,17 @@ class ThemeProvider extends ChangeNotifier {
 
   ThemeMode get mode => _mode;
 
+  bool get isDarkMode {
+    switch (_mode) {
+      case ThemeMode.dark:
+        return true;
+      case ThemeMode.system:
+        return WidgetsBinding.instance.platformDispatcher.platformBrightness == Brightness.dark;
+      default:
+        return false;
+    }
+  }
+
   ThemeProvider() {
     _load();
   }

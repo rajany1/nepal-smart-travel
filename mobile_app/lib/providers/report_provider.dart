@@ -303,10 +303,13 @@ class ReportProvider extends ChangeNotifier {
   ///   after the photo was taken. These are sent to the backend as additional
   ///   verification that the photo was actually taken at the user's location.
   ///   This is necessary because image_picker strips EXIF GPS data.
+  /// Submit a report. Only `description` + live photo are strictly required;
+  /// title/category/priority are optional — when omitted the backend
+  /// auto-classifies them from the description.
   Future<bool> submitReport({
-    required String title,
+    String? title,
     required String description,
-    required int categoryId,
+    int? categoryId,
     required double latitude,
     required double longitude,
     String? district,

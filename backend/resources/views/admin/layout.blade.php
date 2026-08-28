@@ -1,3 +1,14 @@
+﻿@php
+    // TRUE when this request must return ONLY the main content + page scripts
+    // (used by the SPA-style sidebar navigation), skipping the full HTML shell.
+    $fragment = (request()->query('fragment') === '1');
+@endphp
+@if($fragment)
+    <div id="appPane" class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden min-h-[60vh]">
+        @yield('content')
+    </div>
+    @yield('scripts')
+@else
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -58,7 +69,7 @@
     @endphp
     <div class="flex min-h-screen">
         <!-- Sidebar -->
-        <aside class="hidden xl:flex flex-col w-72 bg-primary-900 text-teal-100 shadow-xl">
+        <aside class="hidden xl:flex flex-col w-72 bg-primary-900 text-teal-100 shadow-xl shrink-0 border-r border-primary-950 xl:sticky xl:top-0 xl:h-screen">
             <div class="px-6 py-5 border-b border-primary-800">
                 <div class="flex items-center gap-3">
                     <div class="w-12 h-12 rounded-2xl bg-accent-500 grid place-items-center text-white text-xl shadow-lg">
@@ -223,7 +234,9 @@
 
             <!-- Page content -->
             <main class="flex-1 overflow-y-auto p-6">
-                @yield('content')
+                <div id="appPane" class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden min-h-[60vh]">
+                    @yield('content')
+                </div>
             </main>
         </div>
     </div>
@@ -271,7 +284,7 @@
             chip.addEventListener('click', function () { location.reload(); });
             document.body.appendChild(chip);
         }
-        chip.innerHTML = '<i class="fas fa-sync-alt"></i> ' + count + ' update' + (count === 1 ? '' : 's') + ' — Apply';
+        chip.innerHTML = '<i class="fas fa-sync-alt"></i> ' + count + ' update' + (count === 1 ? '' : 's') + ' ΓÇö Apply';
     }
     function hideChip() { if (chip) chip.remove(); chip = null; }
 
@@ -313,7 +326,7 @@
             .catch(function () { location.href = location.href; });
     }
 
-    // Same-page links inside the live table (pagination, sort, status tabs) → AJAX, no page render.
+    // Same-page links inside the live table (pagination, sort, status tabs) ΓåÆ AJAX, no page render.
     document.addEventListener('click', function (e) {
         if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
         var a = e.target && e.target.closest ? e.target.closest('a[href]') : null;
@@ -329,7 +342,7 @@
         ajaxGet(a.href + (a.href.indexOf('?') >= 0 ? '&' : '?') + 'fragment=1');
     }, true);
 
-    // Forms on list pages (actions, search, bulk, categories) → AJAX, table-only replace.
+    // Forms on list pages (actions, search, bulk, categories) ΓåÆ AJAX, table-only replace.
     // (Bubble phase so inline onsubmit confirm() runs first.)
     document.addEventListener('submit', function (e) {
         if (e.defaultPrevented) return;
@@ -426,7 +439,7 @@
                 // Advance the fingerprint for the next poll.
                 try { document.body.setAttribute('data-since', JSON.stringify(res.fp)); } catch (e) {}
 
-                if (isTyping()) return; // wait for next poll — never disturb a typing admin
+                if (isTyping()) return; // wait for next poll ΓÇö never disturb a typing admin
 
                 var hasTable = !!document.getElementById('liveTable');
                 var hasMap = !!document.getElementById('liveMap');
@@ -449,5 +462,114 @@
     setTimeout(poll, 3000);
 })();
 </script>
+
+<script>
+(function () {
+    'use strict';
+    // SPA-style sidebar navigation: navbar switch updates ONLY #appPane.
+    // EXEMPT: /admin/live-map does a normal full-page load.
+    if (window.__spaNavStarted) return;
+    window.__spaNavStarted = true;
+
+    function ensurePane() {
+        return document.getElementById('appPane') || document.querySelector('main');
+    }
+    function isNavLink(a) {
+        var aside = document.querySelector('aside nav');
+        var mob = document.getElementById('mobileMenu');
+        if ((aside && aside.contains(a)) || (mob && mob.contains(a))) return true;
+        return a.hasAttribute('data-spa');
+    }
+    function isExempt(url) {
+        return /\/admin\/live-map/.test(url);
+    }
+    function runScripts(root) {
+        if (!root) return;
+        root.querySelectorAll('script').forEach(function (old) {
+            var n = document.createElement('script');
+            if (old.src) { n.src = old.src; } else { n.textContent = old.textContent; }
+            old.parentNode.replaceChild(n, old);
+        });
+    }
+    function paneAndScripts(doc, pane) {
+        var out = [];
+        if (pane) out.push(pane.innerHTML);
+        Array.prototype.forEach.call(doc.querySelectorAll('head link[rel="stylesheet"], head style'), function (s) {
+            out.push(s.outerHTML);
+        });
+        Array.prototype.forEach.call(doc.querySelectorAll('body > script'), function (s) {
+            if (s.src) { out.push('<script src="' + s.src + '"></' + 'script>'); }
+            else { out.push(s.outerHTML); }
+        });
+        return out.join('\n');
+    }
+    function setActive(href) {
+        var path = (href || '').split('?')[0];
+        document.querySelectorAll('aside nav a').forEach(function (a) {
+            var ap = (a.getAttribute('href') || '').split('?')[0];
+            var active = ap.length > 1 && path.indexOf(ap) === 0;
+            if (active) { a.classList.add('bg-accent-500', 'text-white', 'shadow-lg'); a.classList.remove('text-teal-200', 'hover:bg-primary-800'); }
+            else { a.classList.remove('bg-accent-500', 'text-white', 'shadow-lg'); a.classList.add('text-teal-200'); }
+        });
+    }
+    document.addEventListener('click', function (e) {
+        if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+        var a = e.target && e.target.closest ? e.target.closest('a[href]') : null;
+        if (!a || !isNavLink(a)) return;
+        var href = a.getAttribute('href') || '';
+        if (!href || href.charAt(0) === '#' || href === '/') return;
+        if (href.indexOf('logout') >= 0) return;
+        if (isExempt(a.href)) return;
+        var tgt = ensurePane();
+        if (!tgt) return;
+        e.preventDefault();
+        var url = a.href;
+        tgt.style.opacity = '.4';
+        history.pushState({ url: url }, '', url);
+        fetch(url + (url.indexOf('?') >= 0 ? '&' : '?') + 'fragment=1', {
+            headers: { 'X-Requested-With': 'XMLHttpRequest' },
+            credentials: 'same-origin'
+        }).then(function (r) { if (!r.ok) throw new Error('bad'); return r.text(); })
+          .then(function (html) {
+            var doc = new DOMParser().parseFromString(html, 'text/html');
+            var fresh = doc.getElementById('appPane') || doc.querySelector('#appPane') || doc.querySelector('main');
+            if (!fresh) { window.location.href = url; return; }
+            tgt.innerHTML = paneAndScripts(doc, fresh);
+            runScripts(tgt);
+            var title = doc.querySelector('title');
+            if (title) document.title = title.textContent;
+            var since = doc.body ? doc.body.getAttribute('data-since') : null;
+            if (since) document.body.setAttribute('data-since', since);
+            setActive(url);
+            tgt.style.opacity = '1';
+            tgt.scrollTop = 0;
+            window.scrollTo(0, 0);
+          })
+          .catch(function () { tgt.style.opacity = '1'; window.location.href = url; });
+    }, true);
+    window.addEventListener('popstate', function () {
+        var url = location.href;
+        if (isExempt(url)) { location.reload(); return; }
+        var tgt = ensurePane();
+        if (!tgt) return;
+        fetch(url + (url.indexOf('?') >= 0 ? '&' : '?') + 'fragment=1', {
+            headers: { 'X-Requested-With': 'XMLHttpRequest' },
+            credentials: 'same-origin'
+        }).then(function (r) { return r.text(); })
+          .then(function (html) {
+            var doc = new DOMParser().parseFromString(html, 'text/html');
+            var fresh = doc.getElementById('appPane') || doc.querySelector('main');
+            if (!fresh) return;
+            tgt.innerHTML = paneAndScripts(doc, fresh);
+            runScripts(tgt);
+            var title = doc.querySelector('title');
+            if (title) document.title = title.textContent;
+            setActive(url);
+          })
+          .catch(function () { location.reload(); });
+    });
+})();
+</script>
 </body>
 </html>
+@endif

@@ -55,55 +55,19 @@ class ReportController extends Controller
         $config = [
             'fields' => [
                 [
-                    'name' => 'title',
-                    'label' => 'Report Title',
-                    'type' => 'text',
-                    'required' => true,
-                    'validation' => 'required|string|max:255',
-                    'placeholder' => 'What do you want to report?',
-                    'icon' => 'title',
-                    'order' => 1,
-                ],
-                [
-                    'name' => 'category_id',
-                    'label' => 'Category',
-                    'type' => 'select',
-                    'required' => true,
-                    'validation' => 'required',
-                    'placeholder' => 'Select a category',
-                    'icon' => 'category',
-                    'order' => 2,
-                    'options_source' => 'categories',  // fetches from /reports/categories
-                ],
-                [
-                    'name' => 'priority',
-                    'label' => 'Priority',
-                    'type' => 'select',
-                    'required' => false,
-                    'validation' => 'nullable|string|in:low,medium,high,critical',
-                    'placeholder' => 'Select priority',
-                    'icon' => 'flag',
-                    'order' => 3,
-                    'options' => [
-                        ['value' => 'low', 'label' => 'Low', 'icon' => 'info_outline', 'color' => '#6B7280'],
-                        ['value' => 'medium', 'label' => 'Medium', 'icon' => 'info_outline', 'color' => '#F59E0B'],
-                        ['value' => 'high', 'label' => 'High', 'icon' => 'warning', 'color' => '#EF4444'],
-                        ['value' => 'critical', 'label' => 'Critical', 'icon' => 'warning', 'color' => '#DC2626'],
-                    ],
-                ],
-                [
                     'name' => 'description',
                     'label' => 'Description',
                     'type' => 'textarea',
                     'required' => true,
-                    'validation' => 'required|string',
-                    'placeholder' => 'Provide detailed information...',
+                    'validation' => 'required|string|max:10000|min:10',
+                    'placeholder' => 'Describe what happened — the more detail, the better. The system will auto-detect the category, priority and title for you.',
                     'icon' => 'description',
-                    'order' => 4,
+                    'order' => 1,
+                    'rows' => 5,
                 ],
             ],
             'submit_button_text' => 'Submit Report',
-            'notice' => 'Your report will be reviewed by moderators before being published.',
+            'notice' => 'Only description + a live photo are needed. Category, priority and title are decided automatically from your description.',
         ];
 
         return response()->json([
@@ -305,11 +269,27 @@ class ReportController extends Controller
         }
         $request->merge(['is_live_capture' => $coercedIsLive]);
 
+        // === Auto-classification ===
+        // Mobile submits only a description + live photo. The system infers
+        // the title, category and priority from the description when they are
+        // not provided (falling back to them if present).
+        $auto = app(ReportAutoClassifyService::class)->classify(
+            (string) $request->input('description', ''),
+        );
+        $request->merge([
+            'title' => trim((string) $request->input('title')) !== ''
+                ? $request->input('title')
+                : $auto['title'],
+            'category_id' => $request->filled('category_id')
+                ? $request->input('category_id')
+                : $auto['category_id'],
+            'priority' => $request->filled('priority')
+                ? $request->input('priority')
+                : $auto['priority'],
+        ]);
+
         $validated = $request->validate([
-            'title' => 'required|string|max:255',
-            'description' => 'required|string|max:10000',
-            'category_id' => 'required|exists:report_categories,id',
-            'priority' => 'nullable|string|in:low,medium,high,critical',
+            'description' => 'required|string|max:10000|min:10',
             'latitude' => 'required|numeric|between:-90,90',
             'longitude' => 'required|numeric|between:-180,180',
             'district' => 'nullable|string|max:100',
@@ -330,7 +310,10 @@ class ReportController extends Controller
 
         $validated['user_id'] = $request->user()->id;
         $validated['status'] = 'pending';
-        $validated['priority'] = $validated['priority'] ?? 'medium';
+        // Auto-inferred fields (merged into the request before validate()).
+        $validated['title'] = (string) $request->input('title');
+        $validated['category_id'] = (int) $request->input('category_id');
+        $validated['priority'] = (string) $request->input('priority');
         // Only include `is_live_capture` if the column exists in DB (some setups may not have run migrations)
         if (Schema::hasColumn('reports', 'is_live_capture')) {
             $validated['is_live_capture'] = true;
