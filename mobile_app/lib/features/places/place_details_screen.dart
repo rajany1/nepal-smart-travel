@@ -3,6 +3,7 @@ import 'package:dio/dio.dart';
 import "../../core/services/localization_service.dart";
 import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:share_plus/share_plus.dart';
 import 'package:intl/intl.dart';
 import '../../config/themes/app_theme.dart';
 import '../../core/models/place.dart';
@@ -309,7 +310,8 @@ class _PlaceDetailsScreenState extends State<PlaceDetailsScreen> {
               IconButton(
                 icon: const Icon(Icons.share),
                 onPressed: () {
-                  // Share functionality can be added
+                  final text = '${place.name}\n${place.category}${place.address != null ? '\n${place.address}' : ''}\nhttps://maps.google.com/?q=${place.latitude},${place.longitude}';
+                  Share.share(text);
                 },
               ),
             ],

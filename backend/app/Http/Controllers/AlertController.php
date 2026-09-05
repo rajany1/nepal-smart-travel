@@ -56,7 +56,14 @@ class AlertController extends Controller
 
         // Merge the authenticated user's personal (targeted) system alerts into
         // the feed — they are relevant to them regardless of location.
-        $user = $request->user() ?? \Illuminate\Support\Facades\Auth::guard('sanctum')->user();
+        $user = $request->user();
+        if (!$user) {
+            try {
+                $user = \Illuminate\Support\Facades\Auth::guard('sanctum')->user();
+            } catch (\Throwable $e) {
+                $user = null;
+            }
+        }
         if ($user) {
             $targeted = Alert::where('target_user_id', $user->id)
                 ->where(function ($q) {

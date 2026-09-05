@@ -44,6 +44,9 @@ class AuthController extends Controller
             'password' => $request->password, // hashed via model
             'avatar' => null,
             'bio' => null,
+            'badges' => [],
+            'expertise_regions' => [],
+            'settings' => [],
         ];
         if (Schema::hasColumn('users', 'profile_completed')) {
             $data['profile_completed'] = false;
@@ -511,6 +514,9 @@ class AuthController extends Controller
                     'password' => Str::random(32),
                     'avatar' => $avatar,
                     'bio' => null,
+                    'badges' => [],
+                    'expertise_regions' => [],
+                    'settings' => [],
                     'profile_completed' => $email !== null,
                 ]);
 

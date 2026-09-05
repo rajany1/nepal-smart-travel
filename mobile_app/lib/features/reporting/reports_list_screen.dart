@@ -10,6 +10,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:share_plus/share_plus.dart';
 import '../../config/themes/app_theme.dart';
 import '../../providers/report_provider.dart';
 import '../../core/models/report.dart';
@@ -858,11 +859,8 @@ class _ReportCard extends StatelessWidget {
   }
 
   Future<void> _shareReport(BuildContext context, ReportModel report) async {
-    final copiedMsg = context.tr('Report link copied to clipboard!');
     final text = '📍 ${report.title}\n\n${report.description}';
-    final uri = Uri.parse('https://api.whatsapp.com/send?text=${Uri.encodeComponent(text)}');
-    if (await canLaunchUrl(uri)) { await launchUrl(uri); }
-    else { await Clipboard.setData(ClipboardData(text: text)); if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(copiedMsg))); }
+    Share.share(text);
   }
 
   void _showOnMap(BuildContext context, ReportModel report) {
@@ -1192,11 +1190,8 @@ class _ReportDetailsSheet extends StatelessWidget {
   }
 
   Future<void> _shareReport(BuildContext context, ReportModel report) async {
-    final copiedMsg = context.tr('Report link copied to clipboard!');
     final text = '📍 ${report.title}\n\n${report.description}';
-    final uri = Uri.parse('https://api.whatsapp.com/send?text=${Uri.encodeComponent(text)}');
-    if (await canLaunchUrl(uri)) await launchUrl(uri);
-    else { await Clipboard.setData(ClipboardData(text: text)); if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(copiedMsg))); }
+    Share.share(text);
   }
 }
 

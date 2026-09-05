@@ -152,6 +152,16 @@ class User extends Authenticatable
                     $user->role_id = $defaultRole->id;
                 }
             }
+            // Ensure array columns have defaults to prevent DB errors
+            if (is_null($user->badges)) {
+                $user->badges = [];
+            }
+            if (is_null($user->expertise_regions)) {
+                $user->expertise_regions = [];
+            }
+            if (is_null($user->settings)) {
+                $user->settings = [];
+            }
         });
 
         static::created(function (User $user) {

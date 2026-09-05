@@ -84,7 +84,14 @@ class ReportController extends Controller
     public function index(Request $request)
     {
         // Try to detect authenticated user from bearer token even on public route
-        $user = $request->user() ?? Auth::guard('sanctum')->user();
+        $user = $request->user();
+        if (!$user) {
+            try {
+                $user = Auth::guard('sanctum')->user();
+            } catch (\Throwable $e) {
+                $user = null;
+            }
+        }
 
         $query = Report::with(['user', 'category', 'media', 'reactions']);
 
@@ -191,7 +198,12 @@ class ReportController extends Controller
         $user = $request->user();
         if (!$user) {
             // Try manual authentication from bearer token
-            $user = Auth::guard('sanctum')->user();
+            try {
+                $user = Auth::guard('sanctum')->user();
+            } catch (\Throwable $e) {
+                // Invalid/expired token - treat as unauthenticated
+                $user = null;
+            }
         }
         if (!$user) {
             return response()->json([
@@ -748,7 +760,14 @@ class ReportController extends Controller
     private function formatReport($report, bool $includeComments = false): array
     {
         // Try to detect user for user_reaction field
-        $user = request()->user() ?? Auth::guard('sanctum')->user();
+        $user = request()->user();
+        if (!$user) {
+            try {
+                $user = Auth::guard('sanctum')->user();
+            } catch (\Throwable $e) {
+                $user = null;
+            }
+        }
 
         $mediaUrls = [];
         if ($report->relationLoaded('media')) {
