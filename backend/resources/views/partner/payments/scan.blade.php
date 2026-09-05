@@ -1,15 +1,15 @@
 @extends('partner.layout')
 
-@section('title', 'Scan / Redeem Payment')
+@section('title', 'Scan / Redeem')
 
 @section('content')
-<div class="max-w-lg mx-auto mt-6">
-    <div class="bg-white rounded-2xl shadow-xl overflow-hidden">
-        <div class="bg-gradient-to-br from-accent-500 to-accent-600 p-8 text-center text-white">
-            <div class="w-20 h-20 mx-auto rounded-2xl bg-white/20 backdrop-blur grid place-items-center text-3xl mb-4">
+<div class="max-w-lg mx-auto mt-4 sm:mt-6">
+    <div class="bg-white rounded-2xl shadow-xl border border-slate-100 overflow-hidden">
+        <div class="bg-gradient-to-br from-accent-500 to-accent-600 p-6 sm:p-8 text-center text-white">
+            <div class="w-16 h-16 sm:w-20 sm:h-20 mx-auto rounded-2xl bg-white/20 backdrop-blur grid place-items-center text-2xl sm:text-3xl mb-4">
                 <i class="fas fa-qrcode"></i>
             </div>
-            <h2 class="text-2xl font-bold">Scan / Redeem Payment</h2>
+            <h2 class="text-xl sm:text-2xl font-bold">Scan / Redeem</h2>
             <p class="text-amber-100 text-sm mt-1">Scan QR code or enter the redeem code</p>
         </div>
 
@@ -29,10 +29,24 @@
 
             {{-- Camera Scan --}}
             <div id="camera-section" class="mb-6">
-                <div class="bg-gray-100 rounded-xl overflow-hidden" style="height: 300px;">
-                    <video id="camera-preview" autoplay playsinline class="w-full h-full object-cover"></video>
+                <div class="relative bg-black rounded-xl overflow-hidden" style="height: 300px;">
+                    <video id="camera-preview" autoplay playsinline muted class="w-full h-full object-cover"></video>
+                    <div id="scan-overlay" class="hidden absolute inset-0 flex items-center justify-center">
+                        <div class="w-56 h-56 border-2 border-emerald-400 rounded-2xl relative">
+                            <div class="absolute top-0 left-0 w-8 h-8 border-t-4 border-l-4 border-emerald-400 rounded-tl-lg"></div>
+                            <div class="absolute top-0 right-0 w-8 h-8 border-t-4 border-r-4 border-emerald-400 rounded-tr-lg"></div>
+                            <div class="absolute bottom-0 left-0 w-8 h-8 border-b-4 border-l-4 border-emerald-400 rounded-bl-lg"></div>
+                            <div class="absolute bottom-0 right-0 w-8 h-8 border-b-4 border-r-4 border-emerald-400 rounded-br-lg"></div>
+                            <div class="absolute top-0 left-0 w-full h-0.5 bg-emerald-400 animate-scan"></div>
+                        </div>
+                        <p class="absolute bottom-4 text-white text-sm font-medium bg-black/50 px-3 py-1 rounded-full">Point camera at QR code</p>
+                    </div>
+                    <div id="camera-placeholder" class="absolute inset-0 flex flex-col items-center justify-center text-slate-400">
+                        <i class="fas fa-camera text-4xl mb-3"></i>
+                        <p class="text-sm">Tap button to start camera</p>
+                    </div>
                 </div>
-                <button onclick="startCamera()" id="btn-camera" class="mt-3 w-full bg-gray-800 hover:bg-gray-900 text-white font-semibold rounded-xl py-3 transition">
+                <button onclick="toggleCamera()" id="btn-camera" class="mt-3 w-full bg-gray-800 hover:bg-gray-900 text-white font-semibold rounded-xl py-3 transition">
                     <i class="fas fa-camera mr-1"></i> Open Camera
                 </button>
             </div>
@@ -49,66 +63,127 @@
                     <label class="block text-sm font-medium text-gray-700 mb-1">Redeem Code</label>
                     <input type="text" name="redeem_code" id="redeem-code-input" required
                            class="w-full text-center text-xl tracking-widest font-mono font-bold border border-gray-300 rounded-xl px-4 py-3 focus:ring-2 focus:ring-primary-500 outline-none uppercase"
-                           placeholder="PAY-XXXXXX" maxlength="20">
+                           placeholder="OFFER-XXXXXX" maxlength="20">
                 </div>
                 <button type="submit" class="w-full mt-4 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold rounded-xl py-3 transition">
-                    <i class="fas fa-check-circle mr-1"></i> Redeem Payment
+                    <i class="fas fa-check-circle mr-1"></i> Redeem
                 </button>
             </form>
         </div>
     </div>
 </div>
 
-{{-- QR Code Scanner JS --}}
-<script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+<style>
+@keyframes scan {
+    0% { top: 0; }
+    50% { top: calc(100% - 2px); }
+    100% { top: 0; }
+}
+.animate-scan {
+    animation: scan 2s ease-in-out infinite;
+}
+</style>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jsQR/1.4.0/jsQR.min.js"></script>
 <script>
-let html5QrCode = null;
+let videoStream = null;
+let scanInterval = null;
+let isScanning = false;
+
+function toggleCamera() {
+    if (isScanning) {
+        stopCamera();
+    } else {
+        startCamera();
+    }
+}
 
 function startCamera() {
     const btn = document.getElementById('btn-camera');
     btn.innerHTML = '<i class="fas fa-spinner fa-spin mr-1"></i> Starting camera...';
 
-    html5QrCode = new Html5Qrcode('camera-preview');
-    html5QrCode.start(
-        { facingMode: 'environment' },
-        { fps: 10, qrbox: { width: 250, height: 250 } },
-        onScanSuccess,
-        () => {}
-    ).then(() => {
-        btn.innerHTML = '<i class="fas fa-stop mr-1"></i> Stop Camera';
-        btn.onclick = stopCamera;
-    }).catch(err => {
-        btn.innerHTML = '<i class="fas fa-camera mr-1"></i> Open Camera';
-        alert('Camera access denied or not available. Use manual entry.');
-    });
+    if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+        navigator.mediaDevices.getUserMedia({
+            video: { facingMode: 'environment' }
+        }).then(function(stream) {
+            videoStream = stream;
+            const video = document.getElementById('camera-preview');
+            video.srcObject = stream;
+            video.play();
+
+            document.getElementById('camera-placeholder').classList.add('hidden');
+            document.getElementById('scan-overlay').classList.remove('hidden');
+
+            btn.innerHTML = '<i class="fas fa-stop mr-1"></i> Stop Camera';
+            isScanning = true;
+
+            scanInterval = setInterval(function() {
+                if (video.readyState === video.HAVE_ENOUGH_DATA) {
+                    scanQRCode(video);
+                }
+            }, 300);
+        }).catch(function(err) {
+            console.error('Camera error:', err);
+            btn.innerHTML = '<i class="fas fa-camera mr-1"></i> Open Camera';
+            alert('Camera access denied. Please allow camera access and try again, or enter the code manually.');
+        });
+    } else {
+        alert('Camera not supported in this browser. Enter the code manually.');
+    }
 }
 
 function stopCamera() {
-    if (html5QrCode) {
-        html5QrCode.stop().then(() => {
-            html5QrCode.clear();
-            html5QrCode = null;
-            document.getElementById('btn-camera').innerHTML = '<i class="fas fa-camera mr-1"></i> Open Camera';
-            document.getElementById('btn-camera').onclick = startCamera;
-        });
+    if (scanInterval) {
+        clearInterval(scanInterval);
+        scanInterval = null;
     }
+    if (videoStream) {
+        videoStream.getTracks().forEach(track => track.stop());
+        videoStream = null;
+    }
+    const video = document.getElementById('camera-preview');
+    video.srcObject = null;
+
+    document.getElementById('camera-placeholder').classList.remove('hidden');
+    document.getElementById('scan-overlay').classList.add('hidden');
+
+    const btn = document.getElementById('btn-camera');
+    btn.innerHTML = '<i class="fas fa-camera mr-1"></i> Open Camera';
+    isScanning = false;
 }
 
-function onScanSuccess(decodedText) {
+function scanQRCode(video) {
+    const canvas = document.createElement('canvas');
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+    try {
+        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+
+        if (typeof jsQR !== 'undefined') {
+            const code = jsQR(imageData.data, imageData.width, imageData.height, {
+                inversionAttempts: 'dontInvert'
+            });
+
+            if (code && code.data) {
+                handleScanResult(code.data);
+            }
+        }
+    } catch(e) {}
+}
+
+function handleScanResult(decodedText) {
     stopCamera();
-    // Extract code from QR data
     try {
         const data = JSON.parse(decodedText);
-        if (data.code) {
-            document.getElementById('redeem-code-input').value = data.code;
-            // Auto-submit
-            document.getElementById('redeem-code-input').closest('form').submit();
-        }
+        const code = data.code || data.redeem_code || data;
+        document.getElementById('redeem-code-input').value = typeof code === 'string' ? code : decodedText;
     } catch(e) {
-        // Plain text code
         document.getElementById('redeem-code-input').value = decodedText;
-        document.getElementById('redeem-code-input').closest('form').submit();
     }
+    document.querySelector('form').submit();
 }
 </script>
 @endsection
