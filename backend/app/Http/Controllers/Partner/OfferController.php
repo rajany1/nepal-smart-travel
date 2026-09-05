@@ -5,8 +5,10 @@ namespace App\Http\Controllers\Partner;
 use App\Http\Controllers\Controller;
 use App\Models\GameSetting;
 use App\Models\OfferRedemption;
+use App\Models\PartnerWallet;
 use App\Models\RewardOffer;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 
 class OfferController extends Controller
 {
@@ -166,12 +168,26 @@ $data = $this->validated($request) + ['price_xp' => $this->priceXp($request->dis
         if ($redemption->consumed_at || $redemption->status === 'used') {
             return back()->withErrors(['redemption' => 'Code already marked as used.']);
         }
-        $redemption->update([
-            'consumed_at' => now(),
-            'used_at' => now(),
-            'status' => 'used',
-        ]);
-        return back()->with('success', 'Code marked as used.');
+
+        DB::beginTransaction();
+        try {
+            $redemption->update([
+                'consumed_at' => now(),
+                'used_at' => now(),
+                'status' => 'used',
+            ]);
+
+            if ((float) ($redemption->partner_earnings ?? 0) > 0) {
+                $wallet = PartnerWallet::getForPartner($this->partner()->id);
+                $wallet->credit((float) $redemption->partner_earnings);
+            }
+
+            DB::commit();
+            return back()->with('success', 'Code marked as used. Rs. ' . number_format($redemption->partner_earnings ?? 0, 2) . ' credited to wallet!');
+        } catch (\Throwable $e) {
+            DB::rollBack();
+            return back()->withErrors(['redemption' => 'Error processing. Try again.']);
+        }
     }
 
     private function authorizeOffer(RewardOffer $offer): void

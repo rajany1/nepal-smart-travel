@@ -157,4 +157,104 @@ class PartnerPaymentController extends Controller
             return back()->withErrors(['error' => 'Error cancelling.']);
         }
     }
+
+    public function topUpPage()
+    {
+        $user = Auth::user();
+        $partner = $user->business;
+        if (!$partner) abort(403);
+
+        $wallet = PartnerWallet::getForPartner($partner->id);
+        return view('partner.wallet_topup', compact('wallet'));
+    }
+
+    public function initiateTopUp(Request $request)
+    {
+        $user = Auth::user();
+        $partner = $user->business;
+        if (!$partner) abort(403);
+
+        $request->validate([
+            'amount' => 'required|numeric|min:100|max:100000',
+            'gateway' => 'required|in:esewa,khalti',
+        ]);
+
+        $amount = (float) $request->amount;
+        $reference = 'topup-' . $partner->id . '-' . strtoupper(\Illuminate\Support\Str::random(6));
+
+        $service = new \App\Services\PaymentGatewayService();
+
+        if ($request->gateway === 'esewa') {
+            $form = $service->eSewaForm($amount, $reference, route('partner.topup.callback', ['gateway' => 'esewa']), route('partner.topup.callback', ['gateway' => 'esewa']));
+            return view('partner.gateway_redirect', ['html' => $form]);
+        }
+
+        $result = $service->initiateKhalti($amount, $reference, route('partner.topup.callback', ['gateway' => 'khalti']));
+        if (!$result['success']) {
+            return back()->withErrors(['payment' => $result['message']]);
+        }
+
+        return redirect()->away($result['payment_url']);
+    }
+
+    public function topUpCallback(Request $request)
+    {
+        $user = Auth::user();
+        $partner = $user->business;
+        if (!$partner) abort(403);
+
+        $gateway = $request->route('gateway');
+
+        if ($gateway === 'esewa') {
+            try {
+                $data = json_decode(base64_decode($request->get('data', '')), true);
+            } catch (\Throwable $e) {
+                return redirect()->route('partner.wallet')->withErrors(['payment' => 'Invalid payment callback.']);
+            }
+
+            if (!is_array($data)) {
+                return redirect()->route('partner.wallet')->withErrors(['payment' => 'Invalid payment callback.']);
+            }
+
+            $service = app(\App\Services\PaymentGatewayService::class);
+            $verified = $service->verifyESewa(
+                $data['product_code'] ?? '',
+                (float) ($data['total_amount'] ?? 0),
+                $data['transaction_id'] ?? '',
+                $data['transaction_uuid'] ?? '',
+            );
+
+            if (!$verified['success']) {
+                return redirect()->route('partner.wallet')->withErrors(['payment' => $verified['message']]);
+            }
+
+            $this->creditTopUp($partner->id, (float) $data['total_amount'], 'esewa', $verified['transaction_id']);
+            return redirect()->route('partner.wallet')->with('success', 'Rs. ' . number_format((float) $data['total_amount'], 2) . ' added to your wallet!');
+        }
+
+        if ($gateway === 'khalti') {
+            $pidx = $request->get('pidx');
+            $service = app(\App\Services\PaymentGatewayService::class);
+            try {
+                $verified = $service->verifyKhalti($pidx);
+            } catch (\Throwable $e) {
+                return redirect()->route('partner.wallet')->withErrors(['payment' => 'Khalti verification failed.']);
+            }
+
+            if (!$verified['success']) {
+                return redirect()->route('partner.wallet')->withErrors(['payment' => $verified['message']]);
+            }
+
+            $this->creditTopUp($partner->id, (float) $verified['amount'], 'khalti', $verified['transaction_id']);
+            return redirect()->route('partner.wallet')->with('success', 'Rs. ' . number_format((float) $verified['amount'], 2) . ' added to your wallet!');
+        }
+
+        return redirect()->route('partner.wallet')->withErrors(['payment' => 'Invalid gateway.']);
+    }
+
+    private function creditTopUp(int $partnerId, float $amount, string $gateway, string $transactionId): void
+    {
+        $wallet = PartnerWallet::getForPartner($partnerId);
+        $wallet->credit($amount);
+    }
 }

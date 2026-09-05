@@ -4,7 +4,9 @@ namespace App\Http\Controllers\Partner;
 
 use App\Http\Controllers\Controller;
 use App\Models\AdCampaign;
+use App\Models\PartnerWallet;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 
@@ -187,10 +189,14 @@ class AdController extends Controller
             return back()->withErrors(['payment' => 'This campaign is already paid.']);
         }
 
-        $gateway = $request->validate(['gateway' => 'required|in:esewa,khalti'])['gateway'];
+        $gateway = $request->validate(['gateway' => 'required|in:esewa,khalti,wallet'])['gateway'];
         $amount = (float) $adCampaign->budget;
         if ($amount <= 0) {
             return back()->withErrors(['budget' => 'Set a budget before paying.']);
+        }
+
+        if ($gateway === 'wallet') {
+            return $this->payFromWallet($adCampaign, $amount);
         }
 
         $payment = $adCampaign->payments()->create([
@@ -216,6 +222,43 @@ class AdController extends Controller
 
         $payment->update(['transaction_id' => $result['pidx'], 'metadata' => ['pidx' => $result['pidx']]]);
         return redirect()->away($result['payment_url']);
+    }
+
+    private function payFromWallet(AdCampaign $adCampaign, float $amount)
+    {
+        $wallet = PartnerWallet::getForPartner($this->partner()->id);
+        if (!$wallet->canWithdraw($amount)) {
+            return back()->withErrors(['payment' => 'Insufficient wallet balance. Your balance: Rs. ' . number_format($wallet->balance, 2)]);
+        }
+
+        DB::beginTransaction();
+        try {
+            $wallet->debit($amount);
+
+            $adCampaign->payments()->create([
+                'business_id' => $this->partner()->id,
+                'gateway' => 'wallet',
+                'amount' => $amount,
+                'status' => 'success',
+                'paid_at' => now(),
+                'transaction_id' => 'WALLET-' . strtoupper(Str::random(10)),
+                'reference' => 'wallet-pay-' . $adCampaign->id . '-' . strtoupper(Str::random(6)),
+            ]);
+
+            $adCampaign->update([
+                'payment_status' => 'paid',
+                'paid_amount' => $amount,
+                'gateway' => 'wallet',
+                'status' => 'active',
+                'starts_at' => $adCampaign->starts_at ?? now(),
+            ]);
+
+            DB::commit();
+            return redirect()->route('partner.ads')->with('success', 'Rs. ' . number_format($amount, 2) . ' deducted from wallet. Campaign is now live!');
+        } catch (\Throwable $e) {
+            DB::rollBack();
+            return back()->withErrors(['payment' => 'Error processing wallet payment.']);
+        }
     }
 
     public function esewaCallback(Request $request)

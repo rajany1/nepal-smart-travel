@@ -95,6 +95,9 @@ Route::prefix('partner')->name('partner.')->middleware(['auth', 'status', 'busin
 
     // Partner Wallet & Payments
     Route::get('/wallet', [\App\Http\Controllers\Partner\PartnerPaymentController::class, 'wallet'])->name('wallet');
+    Route::get('/wallet/topup', [\App\Http\Controllers\Partner\PartnerPaymentController::class, 'topUpPage'])->name('wallet.topup');
+    Route::post('/wallet/topup', [\App\Http\Controllers\Partner\PartnerPaymentController::class, 'initiateTopUp'])->name('wallet.topup.initiate');
+    Route::get('/wallet/topup/callback/{gateway}', [\App\Http\Controllers\Partner\PartnerPaymentController::class, 'topUpCallback'])->name('topup.callback');
     Route::get('/payments/scan', [\App\Http\Controllers\Partner\PartnerPaymentController::class, 'scanPage'])->name('payments.scan');
     Route::post('/payments/verify', [\App\Http\Controllers\Partner\PartnerPaymentController::class, 'verifyCode'])->name('payments.verify');
     Route::get('/payments/history', [\App\Http\Controllers\Partner\PartnerPaymentController::class, 'paymentHistory'])->name('payments.history');
