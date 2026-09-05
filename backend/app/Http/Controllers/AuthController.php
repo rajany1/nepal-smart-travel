@@ -111,7 +111,7 @@ class AuthController extends Controller
                 'id' => $user->id,
                 'name' => $user->name,
                 'email' => $user->email,
-                'avatar' => $user->avatar,
+                'avatar' => avatar_url($user->avatar),
                 'role' => $user->roleName ?? 'user',
             ]
         ]);
@@ -566,7 +566,7 @@ class AuthController extends Controller
                     'id' => $user->id,
                     'name' => $user->name,
                     'email' => $user->email,
-                    'avatar' => $user->avatar,
+                    'avatar' => avatar_url($user->avatar),
                     'role' => $user->roleName ?? 'user',
                 ],
             ]);
@@ -769,7 +769,7 @@ class AuthController extends Controller
                 'id' => $user->id,
                 'name' => $user->name,
                 'email' => $user->email,
-                'avatar' => $user->avatar,
+                'avatar' => avatar_url($user->avatar),
                 'role' => $user->roleName ?? 'user',
             ],
         ]);

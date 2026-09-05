@@ -57,7 +57,7 @@ class UserProfileController extends Controller
             'data' => [
                 'user_id' => (string) $user->id,
                 'name' => $user->name,
-                'avatar_url' => $user->avatar,
+                'avatar_url' => avatar_url($user->avatar),
                 'bio' => $user->bio,
                 'role' => $user->roleName ?? 'user',
                 'verification_tick' => ($user->verification_tick && $user->verification_tick !== 'none') ? $user->verification_tick : 'gray',
