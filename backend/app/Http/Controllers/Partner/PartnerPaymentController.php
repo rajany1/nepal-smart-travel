@@ -85,24 +85,51 @@ class PartnerPaymentController extends Controller
             ->where('status', 'pending')
             ->first();
 
-        if (!$payment) {
-            return back()->withErrors(['redeem_code' => 'Invalid or already used code.']);
+        if ($payment) {
+            if ($payment->isExpired()) {
+                $payment->update(['status' => 'expired']);
+                return back()->withErrors(['redeem_code' => 'This code has expired.']);
+            }
+
+            DB::beginTransaction();
+            try {
+                $payment->markCompleted($user);
+                DB::commit();
+                return back()->with('success', "Rs. {$payment->partner_amount} credited to your wallet!");
+            } catch (\Throwable $e) {
+                DB::rollBack();
+                return back()->withErrors(['redeem_code' => 'Error processing payment. Try again.']);
+            }
         }
 
-        if ($payment->isExpired()) {
-            $payment->update(['status' => 'expired']);
-            return back()->withErrors(['redeem_code' => 'This code has expired.']);
+        $offerIds = $partner->offers()->pluck('id');
+        $redemption = OfferRedemption::whereIn('offer_id', $offerIds)
+            ->where('code', $code)
+            ->where('status', 'claimed')
+            ->first();
+
+        if (!$redemption) {
+            return back()->withErrors(['redeem_code' => 'Invalid or already used code.']);
         }
 
         DB::beginTransaction();
         try {
-            $payment->markCompleted($user);
-            DB::commit();
+            $redemption->update([
+                'consumed_at' => now(),
+                'used_at' => now(),
+                'status' => 'used',
+            ]);
 
-            return back()->with('success', "Rs. {$payment->partner_amount} credited to your wallet!");
+            if ((float) ($redemption->partner_earnings ?? 0) > 0) {
+                $wallet = PartnerWallet::getForPartner($partner->id);
+                $wallet->credit((float) $redemption->partner_earnings);
+            }
+
+            DB::commit();
+            return back()->with('success', 'Offer code redeemed! Rs. ' . number_format($redemption->partner_earnings ?? 0, 2) . ' credited to wallet!');
         } catch (\Throwable $e) {
             DB::rollBack();
-            return back()->withErrors(['redeem_code' => 'Error processing payment. Try again.']);
+            return back()->withErrors(['redeem_code' => 'Error processing. Try again.']);
         }
     }
 
