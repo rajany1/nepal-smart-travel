@@ -7,6 +7,7 @@ import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:provider/provider.dart';
 import 'config/themes/app_theme.dart';
 import 'config/constants/app_constants.dart';
+import 'core/services/deep_link_service.dart';
 
 import 'providers/auth_provider.dart';
 import 'providers/alert_provider.dart';
@@ -129,6 +130,7 @@ void main() async {
   //   * localizationService.init() — fetches the translation dictionary
   unawaited(pushService.initialize());
   unawaited(localizationService.init());
+  DeepLinkService().init(navigatorKey);
 }
 
 class NepalSmartTravelApp extends StatelessWidget {

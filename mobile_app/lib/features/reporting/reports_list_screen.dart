@@ -859,7 +859,7 @@ class _ReportCard extends StatelessWidget {
   }
 
   Future<void> _shareReport(BuildContext context, ReportModel report) async {
-    final text = '📍 ${report.title}\n\n${report.description}';
+    final text = '📍 ${report.title}\n\n${report.description}\n\n🔗 View in ORIPORI App: https://nepalsmarttravel.com/reports/${report.id}\n\n📱 Download ORIPORI: https://play.google.com/store/apps/details?id=com.example.nepal_smart_travel';
     Share.share(text);
   }
 
@@ -1190,7 +1190,7 @@ class _ReportDetailsSheet extends StatelessWidget {
   }
 
   Future<void> _shareReport(BuildContext context, ReportModel report) async {
-    final text = '📍 ${report.title}\n\n${report.description}';
+    final text = '📍 ${report.title}\n\n${report.description}\n\n🔗 View in ORIPORI App: https://nepalsmarttravel.com/reports/${report.id}\n\n📱 Download ORIPORI: https://play.google.com/store/apps/details?id=com.example.nepal_smart_travel';
     Share.share(text);
   }
 }
