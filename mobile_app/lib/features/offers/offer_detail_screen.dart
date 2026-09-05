@@ -115,6 +115,26 @@ class _OfferDetailScreenState extends State<OfferDetailScreen> {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
         return;
       }
+      if (e.response?.statusCode == 422) {
+        final message = data is Map && data['message'] != null
+            ? data['message'].toString()
+            : context.t('Not enough ORIPORI Coins.');
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Row(
+              children: [
+                const Icon(Icons.wallet_outlined, color: Colors.white, size: 18),
+                const SizedBox(width: 8),
+                Expanded(child: Text(message)),
+              ],
+            ),
+            backgroundColor: Colors.orange.shade800,
+            duration: const Duration(seconds: 4),
+          ));
+        }
+        setState(() => _claimCooldownUntil = DateTime.now().add(const Duration(seconds: 5)));
+        return;
+      }
       setState(() => _claimCooldownUntil = DateTime.now().add(const Duration(seconds: 5)));
       final message = data is Map && data['message'] != null
           ? data['message'].toString()
