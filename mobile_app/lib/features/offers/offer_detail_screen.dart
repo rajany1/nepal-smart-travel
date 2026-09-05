@@ -6,6 +6,7 @@ import 'package:provider/provider.dart';
 import 'package:dio/dio.dart';
 import 'package:flutter/services.dart';
 import 'package:share_plus/share_plus.dart';
+import '../../core/utils/share_helper.dart';
 import '../../config/themes/app_theme.dart';
 import '../../core/models/offer_model.dart';
 import '../../providers/auth_provider.dart';
@@ -204,10 +205,10 @@ class _OfferDetailScreenState extends State<OfferDetailScreen> {
                 const SizedBox(width: 12),
                 Expanded(
                   child: FilledButton.icon(
-                    onPressed: () => Share.share(
-                      '${context.t('My Nepal Smart Travel reward code:')} ${redemption.code}\n'
-                      '${context.t('Offer:')} ${widget.offer.title}\n'
-                      '${context.t('Valid at:')} ${widget.offer.business?.name ?? ''}',
+                    onPressed: () => ShareHelper.shareOfferCode(
+                      code: redemption.code,
+                      offerTitle: widget.offer.title,
+                      businessName: widget.offer.business?.name,
                     ),
                     icon: const Icon(Icons.share, size: 18),
                     label: Text(context.t('Share')),

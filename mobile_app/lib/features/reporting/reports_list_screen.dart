@@ -11,6 +11,7 @@ import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:share_plus/share_plus.dart';
+import '../../core/utils/share_helper.dart';
 import '../../config/themes/app_theme.dart';
 import '../../providers/report_provider.dart';
 import '../../core/models/report.dart';
@@ -859,8 +860,7 @@ class _ReportCard extends StatelessWidget {
   }
 
   Future<void> _shareReport(BuildContext context, ReportModel report) async {
-    final text = '📍 ${report.title}\n\n${report.description}\n\n🔗 View in ORIPORI App: https://nepalsmarttravel.com/reports/${report.id}\n\n📱 Download ORIPORI: https://play.google.com/store/apps/details?id=com.example.nepal_smart_travel';
-    Share.share(text);
+    ShareHelper.shareReport(reportId: report.id, title: report.title, description: report.description);
   }
 
   void _showOnMap(BuildContext context, ReportModel report) {
@@ -1190,8 +1190,7 @@ class _ReportDetailsSheet extends StatelessWidget {
   }
 
   Future<void> _shareReport(BuildContext context, ReportModel report) async {
-    final text = '📍 ${report.title}\n\n${report.description}\n\n🔗 View in ORIPORI App: https://nepalsmarttravel.com/reports/${report.id}\n\n📱 Download ORIPORI: https://play.google.com/store/apps/details?id=com.example.nepal_smart_travel';
-    Share.share(text);
+    ShareHelper.shareReport(reportId: report.id, title: report.title, description: report.description);
   }
 }
 

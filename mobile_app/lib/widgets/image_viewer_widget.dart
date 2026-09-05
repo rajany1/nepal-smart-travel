@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import "../../core/services/localization_service.dart";
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:share_plus/share_plus.dart';
+import '../../core/utils/share_helper.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 class ImageViewerWidget extends StatefulWidget {
@@ -41,7 +42,7 @@ class _ImageViewerWidgetState extends State<ImageViewerWidget> {
   void _shareImage() async {
     if (_currentIndex < widget.images.length) {
       final imageUrl = widget.images[_currentIndex];
-      await Share.share('Check out this image on ORIPORI:\n$imageUrl');
+      ShareHelper.shareImage(imageUrl: imageUrl);
     }
   }
 

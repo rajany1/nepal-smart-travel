@@ -4,6 +4,7 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:provider/provider.dart';
 import 'package:flutter/services.dart';
 import 'package:share_plus/share_plus.dart';
+import '../../core/utils/share_helper.dart';
 import '../../config/themes/app_theme.dart';
 import '../../core/models/offer_model.dart';
 import '../../providers/offer_provider.dart';
@@ -475,10 +476,10 @@ class CodeCard extends StatelessWidget {
                 Expanded(
                   child: FilledButton.icon(
                     onPressed: () async {
-                      await Share.share(
-                        '${context.t('My Nepal Smart Travel reward code:')} ${redemption.code}\n'
-                        '${context.t('Offer:')} ${redemption.offer?.title ?? ''}\n'
-                        '${context.t('Valid at:')} ${redemption.offer?.business?.name ?? ''}',
+                      ShareHelper.shareOfferCode(
+                        code: redemption.code,
+                        offerTitle: redemption.offer?.title ?? '',
+                        businessName: redemption.offer?.business?.name,
                       );
                     },
                     icon: const Icon(Icons.share, size: 18),

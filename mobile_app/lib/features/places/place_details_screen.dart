@@ -4,6 +4,7 @@ import "../../core/services/localization_service.dart";
 import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:share_plus/share_plus.dart';
+import '../../core/utils/share_helper.dart';
 import 'package:intl/intl.dart';
 import '../../config/themes/app_theme.dart';
 import '../../core/models/place.dart';
@@ -310,9 +311,7 @@ class _PlaceDetailsScreenState extends State<PlaceDetailsScreen> {
               IconButton(
                 icon: const Icon(Icons.share),
                 onPressed: () {
-                  final url = 'https://nepalsmarttravel.com/places/${place.id}';
-                  final text = '${place.name}\n${place.category}${place.address != null ? '\n${place.address}' : ''}\n\n$url';
-                  Share.share(text);
+                  ShareHelper.sharePlace(placeId: place.id, name: place.name, category: place.category, address: place.address);
                 },
               ),
             ],
