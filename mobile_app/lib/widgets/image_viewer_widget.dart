@@ -41,7 +41,7 @@ class _ImageViewerWidgetState extends State<ImageViewerWidget> {
   void _shareImage() async {
     if (_currentIndex < widget.images.length) {
       final imageUrl = widget.images[_currentIndex];
-      await Share.share('Check out this image: $imageUrl');
+      await Share.share('Check out this image on ORIPORI:\n$imageUrl');
     }
   }
 

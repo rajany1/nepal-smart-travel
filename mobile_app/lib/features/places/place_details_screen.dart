@@ -310,7 +310,8 @@ class _PlaceDetailsScreenState extends State<PlaceDetailsScreen> {
               IconButton(
                 icon: const Icon(Icons.share),
                 onPressed: () {
-                  final text = '${place.name}\n${place.category}${place.address != null ? '\n${place.address}' : ''}\nhttps://maps.google.com/?q=${place.latitude},${place.longitude}';
+                  final url = 'https://nepalsmarttravel.com/places/${place.id}';
+                  final text = '${place.name}\n${place.category}${place.address != null ? '\n${place.address}' : ''}\n\n$url';
                   Share.share(text);
                 },
               ),
