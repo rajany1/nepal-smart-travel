@@ -5,6 +5,7 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:provider/provider.dart';
 import 'package:dio/dio.dart';
 import 'package:flutter/services.dart';
+import 'package:qr_flutter/qr_flutter.dart';
 import 'package:share_plus/share_plus.dart';
 import '../../core/utils/share_helper.dart';
 import '../../config/themes/app_theme.dart';
@@ -183,6 +184,28 @@ class _OfferDetailScreenState extends State<OfferDetailScreen> {
                   fontFamily: 'monospace',
                 ),
               ),
+            ),
+            const SizedBox(height: 16),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(color: Colors.grey.shade200),
+              ),
+              child: QrImageView(
+                data: redemption.code,
+                version: QrVersions.auto,
+                size: 180,
+                backgroundColor: Colors.white,
+                foregroundColor: Colors.black87,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              context.t('Partner: Scan this QR to redeem'),
+              textAlign: TextAlign.center,
+              style: TextStyle(color: Colors.grey.shade500, fontSize: AppTheme.textXs),
             ),
             const SizedBox(height: 16),
             Row(
