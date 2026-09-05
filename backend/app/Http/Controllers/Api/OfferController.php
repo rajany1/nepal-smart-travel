@@ -36,8 +36,14 @@ use App\Models\OfferRedemption; use App\Models\RewardOffer; use App\Services\Ach
 
                 $commissionPct = (float) GameSetting::getValue('offer_commission_percent', 10);
                 $offerValue = (float) $offer->value_npr;
-                $adminCommission = round($offerValue * $commissionPct / 100, 2);
-                $partnerEarnings = round($offerValue - $adminCommission, 2);
+
+                if ($offer->price_xp > 0) {
+                    $adminCommission = round($offerValue * $commissionPct / 100, 2);
+                    $partnerEarnings = round($offerValue - $adminCommission, 2);
+                } else {
+                    $adminCommission = 0;
+                    $partnerEarnings = 0;
+                }
 
                 $payload = [
                     'code' => $code,

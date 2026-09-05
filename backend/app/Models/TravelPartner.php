@@ -64,6 +64,7 @@ class TravelPartner extends Model
     {
         return (float) OfferRedemption::whereIn('offer_id', $this->offers()->pluck('id'))
             ->where('status', 'used')
+            ->whereHas('offer', fn($q) => $q->where('price_xp', '>', 0))
             ->sum('partner_earnings');
     }
 

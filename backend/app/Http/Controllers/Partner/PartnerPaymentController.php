@@ -42,6 +42,7 @@ class PartnerPaymentController extends Controller
     {
         $totalUsedEarnings = (float) OfferRedemption::whereIn('offer_id', $partner->offers()->pluck('id'))
             ->where('status', 'used')
+            ->whereHas('offer', fn($q) => $q->where('price_xp', '>', 0))
             ->sum('partner_earnings');
 
         $totalFromQrPayments = (float) PartnerPayment::where('partner_id', $partner->id)
