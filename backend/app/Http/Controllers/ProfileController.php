@@ -188,7 +188,7 @@ class ProfileController extends Controller
                 'name' => $updatedUser->name,
                 'email' => $updatedUser->email,
                 'phone' => $updatedUser->phone,
-                'avatar_url' => avatar_url($updatedUser->avatar),
+                'avatar_url' => ($a = $updatedUser->avatar) ? (str_starts_with($a, 'http') ? $a : asset('storage/' . $a)) : null,
                 'bio' => $updatedUser->bio,
                 'gender' => $updatedUser->gender,
                 'interest' => $updatedUser->interest,

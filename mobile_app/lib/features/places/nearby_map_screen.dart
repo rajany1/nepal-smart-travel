@@ -143,6 +143,7 @@ class _NearbyMapScreenState extends State<NearbyMapScreen>
   // Weather overlay state
   List<_WeatherGridPoint> _weatherGrid = [];
   Timer? _weatherDebounceTimer;
+  Timer? _sosRefreshTimer;
 
   // Label positioning state
   final Map<String, double> _labelWidthCache = {};
@@ -244,6 +245,7 @@ class _NearbyMapScreenState extends State<NearbyMapScreen>
     _compassFollowSub?.cancel();
     _syncStreamController?.close();
     _weatherDebounceTimer?.cancel();
+    _sosRefreshTimer?.cancel();
     _rotationNotifier.dispose();
     _sheetController.dispose();
     _searchController.dispose();
@@ -303,6 +305,7 @@ class _NearbyMapScreenState extends State<NearbyMapScreen>
       await _fetchPlacesForViewport();
       provider.fetchFeaturedPlaces(lat: _lat, lng: _lng);
       _fetchWeatherForViewport();
+      context.read<SosProvider>().fetchNearbySos(_lat!, _lng!, radiusKm: 5);
     }
 
     if (widget.focusLat == null && widget.focusLng == null) {
@@ -344,6 +347,18 @@ class _NearbyMapScreenState extends State<NearbyMapScreen>
     if (_destinationLat != null && _destinationLng != null) {
       await _fetchDestinationRoute();
     }
+
+    // Periodically refresh nearby SOS markers so they move in real-time
+    // when the active SOS user is traveling.
+    _startSosRefreshTimer();
+  }
+
+  void _startSosRefreshTimer() {
+    _sosRefreshTimer?.cancel();
+    _sosRefreshTimer = Timer.periodic(const Duration(seconds: 15), (_) {
+      if (!mounted || _lat == null || _lng == null) return;
+      context.read<SosProvider>().fetchNearbySos(_lat!, _lng!, radiusKm: 5);
+    });
   }
 
   /// Smoothly glide the camera to [target] (ease-in-out ~700ms).

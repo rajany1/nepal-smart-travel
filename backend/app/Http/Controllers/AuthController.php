@@ -111,7 +111,7 @@ class AuthController extends Controller
                 'id' => $user->id,
                 'name' => $user->name,
                 'email' => $user->email,
-                'avatar' => avatar_url($user->avatar),
+                'avatar' => ($a = $user->avatar) ? (str_starts_with($a, 'http') ? $a : asset('storage/' . $a)) : null,
                 'role' => $user->roleName ?? 'user',
             ]
         ]);
@@ -566,7 +566,7 @@ class AuthController extends Controller
                     'id' => $user->id,
                     'name' => $user->name,
                     'email' => $user->email,
-                    'avatar' => avatar_url($user->avatar),
+                    'avatar' => ($a = $user->avatar) ? (str_starts_with($a, 'http') ? $a : asset('storage/' . $a)) : null,
                     'role' => $user->roleName ?? 'user',
                 ],
             ]);
@@ -769,7 +769,7 @@ class AuthController extends Controller
                 'id' => $user->id,
                 'name' => $user->name,
                 'email' => $user->email,
-                'avatar' => avatar_url($user->avatar),
+                'avatar' => ($a = $user->avatar) ? (str_starts_with($a, 'http') ? $a : asset('storage/' . $a)) : null,
                 'role' => $user->roleName ?? 'user',
             ],
         ]);

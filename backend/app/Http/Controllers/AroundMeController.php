@@ -141,7 +141,7 @@ class AroundMeController extends Controller
             'comments_count' => $report->comments_count,
             'image_url' => $report->media->first()->media_url ?? null,
             'reporter_name' => $report->user->name ?? 'Anonymous',
-            'reporter_avatar' => avatar_url($report->user->avatar ?? null),
+            'reporter_avatar' => ($a = ($report->user->avatar ?? null)) ? (str_starts_with($a, 'http') ? $a : asset('storage/' . $a)) : null,
             'created_at' => $report->created_at,
         ];
     }
