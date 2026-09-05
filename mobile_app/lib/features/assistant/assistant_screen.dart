@@ -239,18 +239,65 @@ class _AssistantScreenState extends State<AssistantScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      backgroundColor: const Color(0xFFF8F9FA),
       appBar: AppBar(
-        title: Text(context.t('AI Travel Assistant')),
+        backgroundColor: Colors.white,
+        elevation: 0,
+        leading: GestureDetector(
+          onTap: () => Navigator.pop(context),
+          child: Container(
+            margin: const EdgeInsets.all(8),
+            padding: const EdgeInsets.all(6),
+            decoration: BoxDecoration(
+              color: Colors.grey.shade50,
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: const Icon(Icons.arrow_back_ios_new, color: Color(0xFF2D3436), size: 18),
+          ),
+        ),
+        title: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(6),
+              decoration: BoxDecoration(
+                color: const Color(0xFF2980B9).withOpacity(0.1),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: const Icon(Icons.smart_toy_outlined, color: Color(0xFF2980B9), size: 20),
+            ),
+            const SizedBox(width: 10),
+            Text(
+              context.t('AI Assistant'),
+              style: const TextStyle(
+                color: Color(0xFF2D3436),
+                fontSize: 20,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ],
+        ),
         actions: [
-          IconButton(icon: const Icon(Icons.delete_outline), onPressed: () {
-            setState(() {
-              _messages.clear();
-              _messages.add(ChatMessage(
-                text: context.t('Namaste! 👋 I\'m your AI Travel Assistant for Nepal. Ask me about places to visit, road conditions, safety tips, or anything about traveling in Nepal!'),
-                isUser: false,
-              ));
-            });
-          }),
+          GestureDetector(
+            onTap: () {
+              setState(() {
+                _messages.clear();
+                _messages.add(ChatMessage(
+                  text: context.t('Namaste! 👋 I\'m your AI Travel Assistant for Nepal. Ask me about places to visit, road conditions, safety tips, or anything about traveling in Nepal!'),
+                  isUser: false,
+                ));
+              });
+            },
+            child: Container(
+              margin: const EdgeInsets.symmetric(vertical: 10, horizontal: 4),
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: Colors.grey.shade50,
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Icon(Icons.delete_outline, color: Colors.grey.shade600, size: 20),
+            ),
+          ),
+          const SizedBox(width: 8),
         ],
       ),
       body: Column(
@@ -296,10 +343,31 @@ class _AssistantScreenState extends State<AssistantScreen> {
                 itemBuilder: (context, index) {
                   return Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 4),
-                    child: ActionChip(
-                      label: Text(_suggestions[index], style: const TextStyle(fontSize: AppTheme.textSm)),
-                      onPressed: () => _sendMessage(_suggestions[index]),
-                      backgroundColor: AppTheme.primaryLight.withOpacity(0.1),
+                    child: GestureDetector(
+                      onTap: () => _sendMessage(_suggestions[index]),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          borderRadius: BorderRadius.circular(20),
+                          border: Border.all(color: Colors.grey.shade200),
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.black.withOpacity(0.04),
+                              blurRadius: 4,
+                              offset: const Offset(0, 2),
+                            ),
+                          ],
+                        ),
+                        child: Text(
+                          _suggestions[index],
+                          style: const TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w500,
+                            color: Color(0xFF2D3436),
+                          ),
+                        ),
+                      ),
                     ),
                   );
                 },

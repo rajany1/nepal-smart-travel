@@ -5,6 +5,7 @@ import '../../config/themes/app_theme.dart';
 import '../../providers/auth_provider.dart';
 import '../../providers/profile_completion_provider.dart';
 import '../../core/models/user.dart';
+import '../auth/phone_verification_screen.dart';
 
 class ProfileCompletionScreen extends StatefulWidget {
   const ProfileCompletionScreen({super.key});
@@ -96,6 +97,8 @@ class _ProfileCompletionScreenState extends State<ProfileCompletionScreen> {
         title: const Text('Complete Your Profile'),
         elevation: 0,
         centerTitle: true,
+        backgroundColor: Colors.white,
+        foregroundColor: AppTheme.textPrimary,
         automaticallyImplyLeading: false,
       ),
       body: SafeArea(
@@ -120,10 +123,16 @@ class _ProfileCompletionScreenState extends State<ProfileCompletionScreen> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Icon(
-                        Icons.person_outline,
-                        color: Colors.white,
-                        size: 32,
+                      SizedBox(
+                        width: 56,
+                        height: 56,
+                        child: ClipOval(
+                          child: Image.asset(
+                            'assets/images/oripori_logo_light.png',
+                            fit: BoxFit.contain,
+                            errorBuilder: (_, __, ___) => const Icon(Icons.person_outline, color: Colors.white, size: 32),
+                          ),
+                        ),
                       ),
                       const SizedBox(height: 12),
                       const Text(
@@ -136,7 +145,7 @@ class _ProfileCompletionScreenState extends State<ProfileCompletionScreen> {
                       ),
                       const SizedBox(height: 8),
                       const Text(
-                        'Complete your profile to unlock all features of Nepal Smart Travel',
+                        'Complete your profile to unlock all features of Oripori',
                         style: TextStyle(
                           color: Colors.white70,
                           fontSize: AppTheme.textBase,
@@ -176,9 +185,9 @@ class _ProfileCompletionScreenState extends State<ProfileCompletionScreen> {
                 ),
                 const SizedBox(height: 24),
 
-                // Bio Field
+                // Bio Field (Optional)
                 Text(
-                  'Bio *',
+                  'Bio',
                   style: Theme.of(context).textTheme.titleMedium?.copyWith(
                     fontWeight: FontWeight.w600,
                   ),
@@ -189,49 +198,121 @@ class _ProfileCompletionScreenState extends State<ProfileCompletionScreen> {
                   maxLines: 4,
                   maxLength: 500,
                   decoration: InputDecoration(
-                    labelText: 'Tell us about yourself',
-                    hintText: 'Share your interests, background, or role in the community...',
+                    labelText: 'Tell us about yourself (optional)',
+                    hintText: 'Are you a foodie? A hiking enthusiast? A local guide? Share what makes you tick!',
                     prefixIcon: const Icon(Icons.description_outlined),
-                    helperText: 'Minimum 10 characters',
+                    helperText: 'Helps us personalize your experience',
                     counterText: '',
                   ),
                   validator: (value) {
-                    if (value == null || value.trim().isEmpty) {
-                      return 'Bio is required';
-                    }
-                    if (value.trim().length < 10) {
-                      return 'Bio must be at least 10 characters';
+                    if (value != null && value.trim().isNotEmpty && value.trim().length < 10) {
+                      return 'Bio must be at least 10 characters if provided';
                     }
                     return null;
                   },
                 ),
                 const SizedBox(height: 24),
 
-                // Phone Field (Optional)
-                Text(
-                  'Phone (Optional)',
-                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-                const SizedBox(height: 8),
-                TextFormField(
-                  controller: _phoneController,
-                  keyboardType: TextInputType.phone,
-                  decoration: InputDecoration(
-                    labelText: 'Phone Number',
-                    hintText: '+977 98XX XXXXXX',
-                    prefixIcon: const Icon(Icons.phone_outlined),
-                    helperText: 'You can skip this for now',
-                  ),
-                  validator: (value) {
-                    if (value != null && value.isNotEmpty && value.length < 7) {
-                      return 'Please enter a valid phone number';
-                    }
-                    return null;
+                // Phone Verification Section
+                Builder(
+                  builder: (context) {
+                    final user = context.watch<AuthProvider>().user;
+                    final isPartner = user?.role == 'business';
+                    return Container(
+                      padding: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        color: isPartner
+                            ? AppTheme.warningColor.withValues(alpha: 0.05)
+                            : AppTheme.primaryColor.withValues(alpha: 0.05),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(
+                          color: isPartner
+                              ? AppTheme.warningColor.withValues(alpha: 0.3)
+                              : AppTheme.primaryColor.withValues(alpha: 0.2),
+                        ),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                              Icon(Icons.phone_android,
+                                color: isPartner ? AppTheme.warningColor : AppTheme.primaryColor,
+                                size: 20,
+                              ),
+                              const SizedBox(width: 8),
+                              Text(
+                                'Phone Verification',
+                                style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                                decoration: BoxDecoration(
+                                  color: isPartner
+                                      ? AppTheme.warningColor.withValues(alpha: 0.15)
+                                      : AppTheme.accentColor.withValues(alpha: 0.15),
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                                child: Text(
+                                  isPartner ? 'Required' : '+50 XP',
+                                  style: TextStyle(
+                                    color: isPartner ? AppTheme.warningColor : AppTheme.accentColor,
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 8),
+                          Text(
+                            isPartner
+                                ? 'As a business partner, phone verification is mandatory to build trust with customers.'
+                                : 'Verify your phone to earn 50 XP and get a trust badge. Other users will trust your reports more!',
+                            style: TextStyle(
+                              color: AppTheme.textSecondary,
+                              fontSize: AppTheme.textBase,
+                            ),
+                          ),
+                          const SizedBox(height: 12),
+                          SizedBox(
+                            width: double.infinity,
+                            child: OutlinedButton.icon(
+                              onPressed: () async {
+                                final result = await Navigator.push(
+                                  context,
+                                  MaterialPageRoute(builder: (_) => const PhoneVerificationScreen()),
+                                );
+                                if (result == true && mounted) {
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    SnackBar(
+                                      content: Text(isPartner
+                                          ? 'Phone verified successfully!'
+                                          : 'Phone verified! +50 XP earned!'),
+                                      backgroundColor: AppTheme.successColor,
+                                    ),
+                                  );
+                                }
+                              },
+                              icon: const Icon(Icons.verified_user, size: 18),
+                              label: const Text('Verify Phone Number'),
+                              style: OutlinedButton.styleFrom(
+                                foregroundColor: AppTheme.primaryColor,
+                                side: const BorderSide(color: AppTheme.primaryColor),
+                                padding: const EdgeInsets.symmetric(vertical: 12),
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    );
                   },
                 ),
-                const SizedBox(height: 32),
+                const SizedBox(height: 24),
 
                 // Submit Button
                 Consumer<ProfileCompletionProvider>(
@@ -261,6 +342,21 @@ class _ProfileCompletionScreenState extends State<ProfileCompletionScreen> {
                       ),
                     );
                   },
+                ),
+                const SizedBox(height: 12),
+
+                // Skip Button
+                SizedBox(
+                  width: double.infinity,
+                  child: TextButton(
+                    onPressed: () {
+                      Navigator.of(context).pushReplacementNamed('/home');
+                    },
+                    child: const Text(
+                      'Skip for now',
+                      style: TextStyle(color: AppTheme.textSecondary),
+                    ),
+                  ),
                 ),
                 const SizedBox(height: 16),
 

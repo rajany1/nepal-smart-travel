@@ -109,7 +109,7 @@
 let plans = @json($plans->items());
 function openEdit(id) {
     const p = plans.find(x => x.id === id); if (!p) return;
-    document.getElementById('editForm').action = '/admin/subscription/plans/' + id;
+    document.getElementById('editForm').action = '/' + window.adminPrefix + '/subscription/plans/' + id;
     document.getElementById('editName').value = p.name; document.getElementById('editPrice').value = p.price;
     document.getElementById('editDescription').value = p.description || '';
     document.getElementById('editBilling').value = p.billing_interval;

@@ -2,7 +2,6 @@ import 'dart:convert';
 import "../../core/services/localization_service.dart";
 import 'package:flutter/material.dart';
 import '../../core/api/api_client.dart';
-import '../../core/services/localization_service.dart';
 
 class SubscriptionPlansScreen extends StatefulWidget {
   const SubscriptionPlansScreen({super.key});
@@ -60,7 +59,22 @@ class _SubscriptionPlansScreenState extends State<SubscriptionPlansScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: Text(context.t('Subscription Plans'))),
+      appBar: AppBar(
+        title: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: const Color(0xFF7C3AED).withOpacity(0.1),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: const Icon(Icons.workspace_premium, color: Color(0xFF7C3AED), size: 22),
+            ),
+            const SizedBox(width: 12),
+            Text(context.t('Subscription Plans')),
+          ],
+        ),
+      ),
       body: _loading ? const Center(child: CircularProgressIndicator())
           : _error != null ? Center(child: Text('${context.t('Error:')} $_error'))
           : _plans.isEmpty ? Center(child: Text(context.t('No plans available')))

@@ -460,7 +460,7 @@ function escapeHtml(s) {
 }
 
 function openReviewsModal(placeId) {
-    fetch('/admin/places/' + placeId + '/reviews')
+    fetch('/' + window.adminPrefix + '/places/' + placeId + '/reviews')
         .then(r => r.json())
         .then(data => {
             if (!data.success) return;
@@ -509,14 +509,14 @@ function renderReviews() {
             '<div class="flex gap-2 mt-3">' +
                 '<button type="button" onclick="toggleReviewEdit(' + r.id + ')" class="px-3 py-1.5 text-xs font-medium bg-primary-50 text-primary-600 rounded-lg hover:bg-primary-100 transition">' +
                     '<i class="fas fa-edit mr-1"></i>Edit</button>' +
-                '<form method="POST" action="/admin/places/reviews/' + r.id + '/delete" onsubmit="return confirm(\'Delete this review?\')">' +
+                '<form method="POST" action="/' + window.adminPrefix + '/places/reviews/' + r.id + '/delete" onsubmit="return confirm(\'Delete this review?\')">' +
                     '<input type="hidden" name="_token" value="' + csrfToken + '">' +
                     '<button type="submit" class="px-3 py-1.5 text-xs font-medium bg-red-50 text-red-600 rounded-lg hover:bg-red-100 transition">' +
                         '<i class="fas fa-trash mr-1"></i>Delete</button>' +
                 '</form>' +
             '</div>' +
             '<div id="review-edit-' + r.id + '" class="hidden mt-4 border-t border-gray-100 pt-4">' +
-                '<form method="POST" action="/admin/places/reviews/' + r.id + '/update">' +
+                '<form method="POST" action="/' + window.adminPrefix + '/places/reviews/' + r.id + '/update">' +
                     '<input type="hidden" name="_token" value="' + csrfToken + '">' +
                     '<div class="grid grid-cols-2 gap-3">' +
                         '<div>' +

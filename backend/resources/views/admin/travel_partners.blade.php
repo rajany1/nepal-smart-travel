@@ -194,7 +194,7 @@
 let partners = @json($partners->items());
 function openEdit(id) {
     const p = partners.find(x => x.id === id); if (!p) return;
-    document.getElementById('editForm').action = '/admin/travel-partners/' + id;
+    document.getElementById('editForm').action = '/' + window.adminPrefix + '/travel-partners/' + id;
     document.getElementById('editName').value = p.name; document.getElementById('editType').value = p.type;
     document.getElementById('editDescription').value = p.description || ''; document.getElementById('editPhone').value = p.phone || '';
     document.getElementById('editEmail').value = p.email || ''; document.getElementById('editWebsite').value = p.website || '';
@@ -203,7 +203,7 @@ function openEdit(id) {
     document.getElementById('editValueNpr').value = p.value_npr; document.getElementById('editActive').checked = p.is_active; document.getElementById('editModal').classList.remove('hidden');
 }
 function showReject(id, name) {
-    document.getElementById('rejectForm').action = '/admin/travel-partners/' + id + '/reject';
+    document.getElementById('rejectForm').action = '/' + window.adminPrefix + '/travel-partners/' + id + '/reject';
     document.getElementById('rejectName').textContent = name;
     document.getElementById('rejectModal').classList.remove('hidden');
 }

@@ -32,6 +32,11 @@ class Place extends Model
         'osm_id',
         'osm_type',
         'imported_at',
+        'is_open',
+        'opening_hours',
+        'today_offer',
+        'live_event',
+        'last_status_update',
     ];
 
     protected function casts(): array
@@ -46,6 +51,9 @@ class Place extends Model
             'featured_expires_at' => 'datetime',
             'is_active' => 'boolean',
             'featured_until' => 'datetime',
+            'is_open' => 'boolean',
+            'opening_hours' => 'array',
+            'last_status_update' => 'datetime',
         ];
     }
 

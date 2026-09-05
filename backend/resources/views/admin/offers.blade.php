@@ -22,20 +22,30 @@
     <h2 class="text-2xl font-bold text-slate-800">Reward Offers</h2>
     <div class="flex rounded-xl border border-slate-200 bg-white overflow-hidden text-sm">
         <a href="{{ route('admin.offers') }}" class="px-4 py-2 {{ !$status && !$deleted ? 'bg-accent-500 text-white' : 'text-slate-600 hover:bg-slate-50' }}">All</a>
-        @foreach(['pending', 'approved', 'paused', 'rejected'] as $s)
-            <a href="{{ route('admin.offers', ['status' => $s]) }}" class="px-4 py-2 {{ $status === $s ? 'bg-accent-500 text-white' : 'text-slate-600 hover:bg-slate-50' }}">{{ ucfirst($s) }} {{ $s === 'pending' && $stats['pending'] ? "($stats[pending])" : '' }}</a>
+        @foreach(['approved', 'paused'] as $s)
+            <a href="{{ route('admin.offers', ['status' => $s]) }}" class="px-4 py-2 {{ $status === $s ? 'bg-accent-500 text-white' : 'text-slate-600 hover:bg-slate-50' }}">{{ ucfirst($s) }}</a>
         @endforeach
         <a href="{{ route('admin.offers', ['deleted' => 1]) }}" class="px-4 py-2 {{ $deleted ? 'bg-red-500 text-white' : 'text-slate-600 hover:bg-slate-50' }}">Deleted {{ $stats['deleted'] ? "($stats[deleted])" : '' }}</a>
     </div>
 </div>
 
-<div class="grid grid-cols-2 lg:grid-cols-7 gap-4 mb-6">
-    @foreach(['total' => 'Total', 'pending' => 'Pending', 'approved' => 'Approved', 'paused' => 'Paused', 'rejected' => 'Rejected', 'claims' => 'Codes Claimed', 'deleted' => 'Deleted'] as $key => $label)
-        <div class="bg-white rounded-2xl shadow p-4">
-            <div class="text-2xl font-bold text-slate-800">{{ $stats[$key] }}</div>
-            <div class="text-xs text-slate-500 mt-1">{{ $label }}</div>
-        </div>
-    @endforeach
+<div class="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+    <div class="bg-white rounded-2xl shadow p-4">
+        <div class="text-2xl font-bold text-slate-800">{{ $stats['total'] }}</div>
+        <div class="text-xs text-slate-500 mt-1">Total</div>
+    </div>
+    <div class="bg-white rounded-2xl shadow p-4">
+        <div class="text-2xl font-bold text-emerald-600">{{ $stats['approved'] }}</div>
+        <div class="text-xs text-slate-500 mt-1">Live</div>
+    </div>
+    <div class="bg-white rounded-2xl shadow p-4">
+        <div class="text-2xl font-bold text-accent-500">{{ $stats['claims'] }}</div>
+        <div class="text-xs text-slate-500 mt-1">Claims</div>
+    </div>
+    <div class="bg-white rounded-2xl shadow p-4">
+        <div class="text-2xl font-bold text-red-500">{{ $stats['deleted'] }}</div>
+        <div class="text-xs text-slate-500 mt-1">Deleted</div>
+    </div>
 </div>
 
 <div class="bg-white rounded-2xl shadow overflow-hidden">
@@ -59,12 +69,19 @@
                 @forelse($offers as $offer)
                     <tr class="hover:bg-slate-50/60">
                         <td class="px-6 py-4">
-                            <div class="font-medium text-slate-800">{{ $offer->title }}</div>
+                            <div class="flex items-center gap-3">
+                                @if($offer->image)
+                                    <img src="{{ asset('storage/' . $offer->image) }}" alt="" class="w-10 h-10 rounded-lg object-cover flex-shrink-0">
+                                @endif
+                                <div>
+                                    <div class="font-medium text-slate-800">{{ $offer->title }}</div>
                             @if($offer->trashed() && $offer->admin_removed_reason)
                                 <div class="text-xs text-red-500 mt-0.5"><i class="fas fa-exclamation-triangle"></i> Removed: {{ $offer->admin_removed_reason }}</div>
                             @elseif($offer->status === 'rejected' && $offer->rejection_reason)
                                 <div class="text-xs text-red-500 mt-0.5"><i class="fas fa-times-circle"></i> {{ $offer->rejection_reason }}</div>
                             @endif
+                                </div>
+                            </div>
                         </td>
                         <td class="px-4 py-4">
                             <div class="text-slate-700">{{ $offer->business?->name ?? 'â€”' }}</div>
@@ -128,19 +145,7 @@
                                         </button>
                                     </form>
                                 @else
-                                    @if($offer->status === 'pending')
-                                        <form method="POST" action="{{ route('admin.offers.approve', $offer) }}">
-                                            @csrf
-                                            <button type="submit"
-                                                    class="inline-flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold rounded-lg px-3 py-2">
-                                                <i class="fas fa-check"></i> Approve
-                                            </button>
-                                        </form>
-                                        <button type="button" onclick="showReject({{ $offer->id }}, '{{ addslashes($offer->title) }}')"
-                                                class="inline-flex items-center gap-1.5 bg-red-600 hover:bg-red-700 text-white text-xs font-semibold rounded-lg px-3 py-2">
-                                            <i class="fas fa-times"></i> Reject
-                                        </button>
-                                    @elseif($offer->status === 'approved')
+                                    @if($offer->status === 'approved')
                                         <form method="POST" action="{{ route('admin.offers.pause', $offer) }}">
                                             @csrf
                                             <button type="submit" class="inline-flex items-center gap-1.5 bg-amber-500 hover:bg-amber-600 text-white text-xs font-semibold rounded-lg px-3 py-2">
@@ -180,25 +185,6 @@
 </div>
 </div>
 
-<!-- Reject modal -->
-<div id="rejectModal" class="hidden fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
-    <div class="bg-white rounded-2xl shadow-xl max-w-md w-full p-6">
-        <h3 class="text-lg font-bold text-slate-800 mb-1">Reject Offer</h3>
-        <p class="text-sm text-slate-500 mb-4" id="rejectTitle"></p>
-        <form method="POST" action="" id="rejectForm">
-            @csrf
-            <label class="block text-sm font-medium text-slate-700 mb-1">Reason (visible to business)</label>
-            <textarea name="reason" rows="3" required
-                      class="w-full rounded-xl border border-slate-300 px-4 py-2.5 focus:ring-2 focus:ring-red-500 outline-none"
-                      placeholder="e.g. Discount value missing, terms unclear..."></textarea>
-            <div class="flex justify-end gap-3 mt-4">
-                <button type="button" onclick="closeReject()" class="px-4 py-2 text-sm text-slate-600 hover:text-slate-800">Cancel</button>
-                <button type="submit" class="bg-red-600 hover:bg-red-700 text-white text-sm font-semibold rounded-lg px-5 py-2">Reject Offer</button>
-            </div>
-        </form>
-    </div>
-</div>
-
 <!-- Delete modal -->
 <div id="deleteModal" class="hidden fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
     <div class="bg-white rounded-2xl shadow-xl max-w-md w-full p-6">
@@ -220,16 +206,8 @@
 </div>
 
 <script>
-    function showReject(id, title) {
-        document.getElementById('rejectForm').action = '/admin/offers/' + id + '/reject';
-        document.getElementById('rejectTitle').textContent = title;
-        document.getElementById('rejectModal').classList.remove('hidden');
-    }
-    function closeReject() {
-        document.getElementById('rejectModal').classList.add('hidden');
-    }
     function showDelete(id, title) {
-        document.getElementById('deleteForm').action = '/admin/offers/' + id + '/delete';
+        document.getElementById('deleteForm').action = '/' + window.adminPrefix + '/offers/' + id + '/delete';
         document.getElementById('deleteTitle').textContent = title;
         document.getElementById('deleteModal').classList.remove('hidden');
     }

@@ -249,7 +249,7 @@ function loadPlaces(district, label) {
     showPlaceLoading(true);
     currentDistrict = district;
 
-    fetch('/admin/live-map/places?district=' + encodeURIComponent(district), { signal: placeAbort.signal })
+    fetch('/' + window.adminPrefix + '/live-map/places?district=' + encodeURIComponent(district), { signal: placeAbort.signal })
         .then(r => r.json())
         .then(res => {
             if (!res.success) return;
@@ -297,7 +297,7 @@ function applyPlaceDelta(change) {
 
     if (ids.length === 0) return;
 
-    fetch('/admin/live-map/places?ids=' + ids.join(','))
+    fetch('/' + window.adminPrefix + '/live-map/places?ids=' + ids.join(','))
         .then(r => r.json())
         .then(res => {
             if (!res.success) return;
@@ -320,7 +320,7 @@ function applyPlaceDelta(change) {
 }
 
 function refreshLayers() {
-    fetch('/admin/live-feed/map-layers')
+    fetch('/' + window.adminPrefix + '/live-feed/map-layers')
         .then(r => r.json())
         .then(res => {
             if (!res.success) return;

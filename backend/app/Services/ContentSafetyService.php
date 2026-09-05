@@ -264,6 +264,23 @@ class ContentSafetyService
 
         $ladder = $this->applyStrikePolicy($user, $entityType);
 
+        // System-generated account notice on escalation (warning / suspend / ban):
+        // a targeted alert + push + Gmail email with full guidance.
+        if (($ladder['level'] ?? 0) >= 1 && in_array($ladder['account'] ?? null, ['active', 'suspended', 'banned'])) {
+            $level = $ladder['level'] === 3 ? 'block' : ($ladder['level'] === 2 ? 'suspend' : 'warning');
+            $reason = $this->strikeReasonText($result['hits']);
+            $title = match ($level) {
+                'block' => 'Account Banned - Nepal Smart Travel',
+                'suspend' => 'Account Suspended - Nepal Smart Travel',
+                default => 'Content Warning - Nepal Smart Travel',
+            };
+            $link = null;
+            if ($entityType && $entityId) {
+                $link = ['type' => 'screen', 'value' => (string) $entityId];
+            }
+            app(AccountNoticeService::class)->deliver($user, $level, $reason, $title, $link ?? []);
+        }
+
         return [
             'action' => 'censored',
             'censored' => $result['text'],
@@ -385,6 +402,24 @@ class ContentSafetyService
             ->count();
     }
 
+    /**
+     * Human-readable "reason" text from detected hit words, for the notice.
+     *
+     * @param  array  $hits  result of scan()/censor()
+     */
+    private function strikeReasonText(array $hits): string
+    {
+        $words = [];
+        foreach ($hits as $h) {
+            $words[] = (string) ($h['word'] ?? '');
+        }
+        $words = array_values(array_filter(array_unique($words)));
+        if (empty($words)) {
+            return 'Your content was flagged for violating community guidelines.';
+        }
+        return 'Flagged language in your recent content: ' . implode(', ', $words) . '.';
+    }
+
 /**
      * Condense guard() results into the payload to attach to API responses.
      */
@@ -415,14 +450,27 @@ class ContentSafetyService
     /**
      * Manual strike (admin penalty, or scheduler reprimand).
      */
-    public function manualStrike(User $user, string $note, ?string $entityType = null): array
+    public function manualStrike(User $user, string $level, string $reason, ?User $issuer = null): array
     {
         $user->refresh();
-        $strike = ModerationStrike::create([
+        ModerationStrike::create([
             'user_id' => $user->id,
-            'reason' => 'manual:' . ($note ?? 'manual'),
+            'level' => $level,
+            'reason' => (string) $reason,
+            'issued_by' => $issuer?->id,
+            'source_type' => 'manual',
         ]);
-        return $this->applyStrikePolicy($user, $entityType);
+        $result = $this->applyStrikePolicy($user);
+
+        // System-generated account notice to the punished user.
+        $title = match ($level) {
+            'block' => 'Account Banned - Nepal Smart Travel',
+            'suspend' => 'Account Suspended - Nepal Smart Travel',
+            default => 'Content Warning - Nepal Smart Travel',
+        };
+        app(AccountNoticeService::class)->deliver($user, $level, (string) $reason, $title);
+
+        return $result;
     }
 
     /**

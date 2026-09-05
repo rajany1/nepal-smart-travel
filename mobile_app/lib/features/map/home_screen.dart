@@ -7,6 +7,7 @@ import '../../providers/auth_provider.dart';
 import '../../providers/alert_provider.dart';
 import '../../providers/place_provider.dart';
 import '../../providers/report_provider.dart';
+import '../../providers/sos_provider.dart';
 
 import '../places/nearby_map_screen.dart';
 import '../reporting/reports_list_screen.dart';
@@ -158,6 +159,9 @@ class _ExploreTabState extends State<_ExploreTab> {
             lat: loc?.latitude,
             lng: loc?.longitude,
           );
+      if (loc != null) {
+        context.read<SosProvider>().fetchNearbySos(loc.latitude, loc.longitude, radiusKm: 10);
+      }
     });
   }
 
@@ -381,6 +385,157 @@ class _ExploreTabState extends State<_ExploreTab> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            // Nearby SOS Alert
+            Consumer<SosProvider>(
+              builder: (context, sosProv, _) {
+                if (sosProv.nearbySos.isEmpty) return const SizedBox.shrink();
+                return Column(
+                  children: [
+                    for (final sos in sosProv.nearbySos.take(3))
+                      Container(
+                        margin: const EdgeInsets.only(bottom: 12),
+                        decoration: BoxDecoration(
+                          gradient: const LinearGradient(
+                            colors: [Color(0xFFDC2626), Color(0xFFB91C1C)],
+                            begin: Alignment.topLeft,
+                            end: Alignment.bottomRight,
+                          ),
+                          borderRadius: BorderRadius.circular(14),
+                          boxShadow: [
+                            BoxShadow(
+                              color: const Color(0xFFDC2626).withOpacity(0.3),
+                              blurRadius: 12,
+                              offset: const Offset(0, 4),
+                            ),
+                          ],
+                        ),
+                        child: Stack(
+                          children: [
+                            Material(
+                              color: Colors.transparent,
+                              child: InkWell(
+                                borderRadius: BorderRadius.circular(14),
+                                onTap: () => Navigator.push(
+                                  context,
+                                  MaterialPageRoute(builder: (_) => const EmergencyScreen()),
+                                ),
+                                child: Padding(
+                                  padding: const EdgeInsets.all(14),
+                                  child: Row(
+                                    children: [
+                                      Container(
+                                        padding: const EdgeInsets.all(8),
+                                        decoration: BoxDecoration(
+                                          color: Colors.white.withOpacity(0.2),
+                                          borderRadius: BorderRadius.circular(10),
+                                        ),
+                                        child: const Icon(Icons.warning_rounded, color: Colors.white, size: 22),
+                                      ),
+                                      const SizedBox(width: 12),
+                                      Expanded(
+                                        child: Column(
+                                          crossAxisAlignment: CrossAxisAlignment.start,
+                                          children: [
+                                            Text(
+                                              context.t('Emergency SOS Nearby'),
+                                              style: const TextStyle(
+                                                color: Colors.white,
+                                                fontSize: 15,
+                                                fontWeight: FontWeight.w700,
+                                              ),
+                                            ),
+                                            const SizedBox(height: 2),
+                                            Text(
+                                              sos.emergencyType.toUpperCase(),
+                                              style: const TextStyle(
+                                                color: Colors.white70,
+                                                fontSize: 11,
+                                                fontWeight: FontWeight.w600,
+                                                letterSpacing: 0.5,
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                      if (sos.distanceKm != null)
+                                        Container(
+                                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                          decoration: BoxDecoration(
+                                            color: Colors.white.withOpacity(0.2),
+                                            borderRadius: BorderRadius.circular(8),
+                                          ),
+                                          child: Text(
+                                            '${sos.distanceKm!.toStringAsFixed(1)} km',
+                                            style: const TextStyle(
+                                              color: Colors.white,
+                                              fontSize: 11,
+                                              fontWeight: FontWeight.w700,
+                                            ),
+                                          ),
+                                        ),
+                                      const SizedBox(width: 8),
+                                      const Icon(Icons.chevron_right, color: Colors.white70, size: 20),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            ),
+                            Positioned(
+                              top: 6,
+                              right: 6,
+                              child: GestureDetector(
+                                onTap: () async {
+                                  final reason = await showDialog<String>(
+                                    context: context,
+                                    builder: (ctx) => AlertDialog(
+                                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                                      title: const Row(
+                                        children: [
+                                          Icon(Icons.flag_outlined, color: Color(0xFFE67E22), size: 24),
+                                          SizedBox(width: 8),
+                                          Text('Report False SOS?', style: TextStyle(fontSize: 18)),
+                                        ],
+                                      ),
+                                      content: const Text('Only report if you are sure this is a false alarm.'),
+                                      actions: [
+                                        TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+                                        TextButton(
+                                          onPressed: () => Navigator.pop(ctx, 'false_alarm'),
+                                          child: const Text('False Alarm', style: TextStyle(color: Color(0xFFE67E22))),
+                                        ),
+                                      ],
+                                    ),
+                                  );
+                                  if (reason != null && mounted) {
+                                    final msg = await context.read<SosProvider>().reportFalseSos(sos.id, reason: reason);
+                                    if (mounted && msg != null) {
+                                      ScaffoldMessenger.of(context).showSnackBar(
+                                        SnackBar(
+                                          content: Text(msg),
+                                          behavior: SnackBarBehavior.floating,
+                                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                                        ),
+                                      );
+                                    }
+                                  }
+                                },
+                                child: Container(
+                                  padding: const EdgeInsets.all(4),
+                                  decoration: BoxDecoration(
+                                    color: Colors.white.withOpacity(0.2),
+                                    borderRadius: BorderRadius.circular(6),
+                                  ),
+                                  child: const Icon(Icons.flag_outlined, color: Colors.white70, size: 14),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                  ],
+                );
+              },
+            ),
             _buildSearchHero(context),
             const SizedBox(height: 16),
             const AdBannerCarousel(),

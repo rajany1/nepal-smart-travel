@@ -49,14 +49,18 @@ public function store(Request $request)
     {
         $data = $this->validated($request);
 
+        if ($request->hasFile('image')) {
+            $data['image'] = $request->file('image')->store('offer-images/' . $this->partner()->id, 'public');
+        }
+
         $offer = $this->partner()->offers()->create($data + [
             'price_xp' => $this->priceXp($data['discount_value'] ?? null),
-            'status' => 'pending',
+            'status' => 'approved',
             'used_count' => 0,
             'created_by' => auth()->id(),
         ]);
 
-        return $this->safetyRespond($request, $offer, $data, 'Offer submitted. It will go live after admin approval.', 'reward_offer', ['title', 'description', 'terms'], 'partner.offers');
+        return $this->safetyRespond($request, $offer, $data, 'Offer created and is now live!', 'reward_offer', ['title', 'description', 'terms'], 'partner.offers');
     }
 
     public function edit(RewardOffer $offer)
@@ -71,12 +75,18 @@ public function store(Request $request)
         if ($offer->isSystemLocked()) {
             return back()->withErrors(['status' => 'This offer has ended and is locked by the system. It cannot be changed.']);
         }
-        if (in_array($offer->status, ['approved', 'rejected'])) {
-            return back()->withErrors(['status' => 'Approved or rejected offers cannot be edited. Pause or delete it first.']);
+        if (in_array($offer->status, ['approved'])) {
+            return back()->withErrors(['status' => 'Approved offers cannot be edited. Pause or delete it first.']);
         }
 $data = $this->validated($request) + ['price_xp' => $this->priceXp($request->discount_value ?? null)];
         if ($offer->value_npr_locked) {
             $data['value_npr'] = $offer->value_npr;
+        }
+        if ($request->hasFile('image')) {
+            if ($offer->image && \Storage::disk('public')->exists($offer->image)) {
+                \Storage::disk('public')->delete($offer->image);
+            }
+            $data['image'] = $request->file('image')->store('offer-images/' . $this->partner()->id, 'public');
         }
         $offer->update($data);
         return $this->safetyRespond($request, $offer, $data, 'Offer updated.', 'reward_offer', ['title', 'description', 'terms'], 'partner.offers');
@@ -181,6 +191,7 @@ $data = $this->validated($request) + ['price_xp' => $this->priceXp($request->dis
             'starts_at' => 'nullable|date',
             'ends_at' => 'nullable|date|after:starts_at',
             'usage_limit' => 'required|integer|min:0',
+            'image' => 'nullable|image|mimes:jpeg,jpg,png,webp|max:2048',
         ]);
     }
 }

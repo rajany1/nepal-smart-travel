@@ -155,9 +155,8 @@ class PushNotificationService {
         latitude: pos?.latitude,
         longitude: pos?.longitude,
       );
-      debugPrint('FCM token registered: $_fcmToken');
     } catch (e) {
-      debugPrint('Failed to register push token: $e');
+      // Push token registration failed silently
     }
   }
 

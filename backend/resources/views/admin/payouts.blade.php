@@ -158,14 +158,14 @@
 
 <script>
     function showPaid(id) {
-        document.getElementById('paidForm').action = '/admin/payouts/' + id + '/paid';
+        document.getElementById('paidForm').action = '/' + window.adminPrefix + '/payouts/' + id + '/paid';
         document.getElementById('paidModal').classList.remove('hidden');
     }
     function closePaid() {
         document.getElementById('paidModal').classList.add('hidden');
     }
     function showReject(id, name) {
-        document.getElementById('rejectForm').action = '/admin/payouts/' + id + '/reject';
+        document.getElementById('rejectForm').action = '/' + window.adminPrefix + '/payouts/' + id + '/reject';
         document.getElementById('rejectTitle').textContent = name ? (name + ' - payout #' + id) : ('Payout #' + id);
         document.getElementById('rejectModal').classList.remove('hidden');
     }

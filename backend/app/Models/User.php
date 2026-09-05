@@ -38,6 +38,11 @@ class User extends Authenticatable
         return $this->hasMany(ContentViolation::class, 'user_id');
     }
 
+    public function fraudProfile(): \Illuminate\Database\Eloquent\Relations\HasOne
+    {
+        return $this->hasOne(UserFraudProfile::class);
+    }
+
     public function socialAccounts(): \Illuminate\Database\Eloquent\Relations\HasMany
     {
         return $this->hasMany(SocialAccount::class);
@@ -58,6 +63,21 @@ class User extends Authenticatable
         return $this->hasMany(AuditLog::class);
     }
 
+    public function wallet(): \Illuminate\Database\Eloquent\Relations\HasOne
+    {
+        return $this->hasOne(OriporiCoinWallet::class);
+    }
+
+    public function coinTransactions(): \Illuminate\Database\Eloquent\Relations\HasMany
+    {
+        return $this->hasMany(CoinTransaction::class);
+    }
+
+    public function withdrawals(): \Illuminate\Database\Eloquent\Relations\HasMany
+    {
+        return $this->hasMany(Withdrawal::class);
+    }
+
     public function role(): \Illuminate\Database\Eloquent\Relations\BelongsTo
     {
         return $this->belongsTo(Role::class);
@@ -71,6 +91,21 @@ class User extends Authenticatable
     public function bookings(): \Illuminate\Database\Eloquent\Relations\HasMany
     {
         return $this->hasMany(Booking::class);
+    }
+
+    public function sosAlerts(): \Illuminate\Database\Eloquent\Relations\HasMany
+    {
+        return $this->hasMany(SosAlert::class);
+    }
+
+    public function activeSosAlert(): \Illuminate\Database\Eloquent\Relations\HasOne
+    {
+        return $this->hasOne(SosAlert::class)->where('status', 'active');
+    }
+
+    public function emergencyContacts(): \Illuminate\Database\Eloquent\Relations\HasMany
+    {
+        return $this->hasMany(EmergencyContact::class);
     }
 
     public function subscription(): \Illuminate\Database\Eloquent\Relations\HasOne
@@ -134,31 +169,28 @@ class User extends Authenticatable
     }
 
     protected $fillable = [
-        'role_id',
         'name',
         'email',
         'phone',
+        'email_verified_at',
+        'phone_verified_at',
+        'phone_changed_at',
+        'email_changed_at',
         'password',
         'uuid',
         'avatar',
         'bio',
         'gender',
         'interest',
-        'total_xp',
-        'current_level',
         'verification_tick',
-        'approved_reports',
-        'rejected_reports',
         'is_verified',
-        'status',
         'suspended_until',
         'profile_completed',
+        'sos_false_count',
+        'sos_restricted_until',
         'badges',
         'expertise_regions',
         'settings',
-        'total_reports',
-        'approval_rate',
-        'rank',
         'last_contribution_at',
     ];
 
@@ -173,12 +205,16 @@ class User extends Authenticatable
     {
         return [
             'email_verified_at' => 'datetime',
+            'phone_verified_at' => 'datetime',
+            'phone_changed_at' => 'datetime',
+            'email_changed_at' => 'datetime',
             'password' => 'hashed',
             'badges' => 'array',
             'expertise_regions' => 'array',
             'settings' => 'array',
             'is_verified' => 'boolean',
             'profile_completed' => 'boolean',
+            'sos_restricted_until' => 'datetime',
             'total_xp' => 'integer',
             'current_level' => 'integer',
             'total_reports' => 'integer',
@@ -193,7 +229,12 @@ class User extends Authenticatable
 
     public function isAdmin(): bool
     {
-        return $this->role?->name === 'admin';
+        return in_array($this->role?->name, ['admin', 'super_admin']);
+    }
+
+    public function isSuperAdmin(): bool
+    {
+        return $this->role?->name === 'super_admin';
     }
 
     public function isRegularUser(): bool
@@ -209,6 +250,39 @@ class User extends Authenticatable
     public function isBusiness(): bool
     {
         return $this->role?->name === 'business';
+    }
+
+    public function getRoleLevel(): int
+    {
+        return match($this->role?->name) {
+            'super_admin' => 4,
+            'admin' => 3,
+            'moderator' => 2,
+            'business' => 1,
+            default => 0,
+        };
+    }
+
+    public function canManageUser(User $target): bool
+    {
+        if ($this->id === $target->id) return false;
+
+        $myLevel = $this->getRoleLevel();
+        $targetLevel = $target->getRoleLevel();
+
+        if ($this->isSuperAdmin()) {
+            return $targetLevel < 4;
+        }
+
+        if ($this->isAdmin()) {
+            return $targetLevel < 3;
+        }
+
+        if ($this->isModerator()) {
+            return $targetLevel < 2;
+        }
+
+        return false;
     }
 
     public function business(): \Illuminate\Database\Eloquent\Relations\HasOne

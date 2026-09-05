@@ -285,10 +285,25 @@ class _PlaceDetailsScreenState extends State<PlaceDetailsScreen> {
             elevation: 0,
             backgroundColor: Colors.white,
             foregroundColor: AppTheme.textPrimary,
-            title: Text(
-              place.name,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(fontSize: AppTheme.textXl, fontWeight: FontWeight.bold),
+            title: Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF059669).withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: const Icon(Icons.place, color: Color(0xFF059669), size: 22),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    place.name,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(fontSize: AppTheme.textXl, fontWeight: FontWeight.w600),
+                  ),
+                ),
+              ],
             ),
             actions: [
               IconButton(
@@ -423,7 +438,7 @@ class _PlaceDetailsScreenState extends State<PlaceDetailsScreen> {
                                         Text(
                                           '${place.averageRating.toStringAsFixed(1)}/5.0',
                                           style: const TextStyle(
-                                            fontWeight: FontWeight.bold,
+                                          fontWeight: FontWeight.w600,
                                             fontSize: AppTheme.textLg,
                                             color: AppTheme.textPrimary,
                                           ),
@@ -642,6 +657,7 @@ class _PlaceDetailsScreenState extends State<PlaceDetailsScreen> {
                         adContext: 'place_detail',
                         category: place.category.toLowerCase(),
                         district: place.district,
+                        persistent: true,
                       ),
 
                       // Write a Review

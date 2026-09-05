@@ -13,13 +13,13 @@
 
     <div class="grid grid-cols-1 lg:grid-cols-5 gap-6">
         <div class="lg:col-span-3"><div class="bg-white rounded-2xl shadow border border-slate-100 p-6">
-            <form method="POST" action="{{ $adCampaign->exists ? route('partner.ads.update', $adCampaign) : route('partner.ads.store') }}" class="space-y-5">
+            <form method="POST" action="{{ $adCampaign->exists ? route('partner.ads.update', $adCampaign) : route('partner.ads.store') }}" class="space-y-5" enctype="multipart/form-data">
             @csrf
             @if($adCampaign->exists) @method('PUT') @endif
 
-            @if(!empty($adCampaign) && $adCampaign->status === 'rejected' && $adCampaign->rejection_reason)
-                <div class="bg-red-50 border border-red-200 text-red-800 px-4 py-3 rounded-xl text-sm flex items-center gap-2">
-                    <i class="fas fa-times-circle"></i> Rejected: {{ $adCampaign->rejection_reason }}
+            @if($adCampaign->exists && $adCampaign->payment_status === 'paid')
+                <div class="bg-emerald-50 border border-emerald-200 text-emerald-800 px-4 py-3 rounded-xl text-sm flex items-center gap-2">
+                    <i class="fas fa-check-circle"></i> This campaign is live and active.
                 </div>
             @endif
 
@@ -50,8 +50,28 @@
             </div>
 
             <div>
-                <label class="block text-xs font-semibold text-slate-600 mb-1">Image URL (optional)</label>
-                <input type="text" name="image" value="{{ old('image', $adCampaign->image ?? '') }}" placeholder="https://..." class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm">
+                <label class="block text-xs font-semibold text-slate-600 mb-1">Banner Image (optional)</label>
+                @if($adCampaign->exists && $adCampaign->image)
+                    <div class="mb-2 relative group">
+                        <img id="existing-preview" src="{{ asset('storage/' . $adCampaign->image) }}" alt="Current banner" class="w-full h-40 object-cover rounded-xl border border-slate-200">
+                        <div class="absolute inset-0 bg-black/40 rounded-xl opacity-0 group-hover:opacity-100 transition flex items-center justify-center">
+                            <span class="text-white text-xs font-semibold"><i class="fas fa-image"></i> Current Banner</span>
+                        </div>
+                    </div>
+                @endif
+                <div id="upload-area" class="border-2 border-dashed border-slate-200 rounded-xl p-6 text-center hover:border-primary-400 transition cursor-pointer" onclick="document.getElementById('file-input').click()">
+                    <input type="file" name="image_file" id="file-input" accept="image/jpeg,image/png,image/webp" class="hidden" onchange="previewImage(this)">
+                    <div id="upload-placeholder">
+                        <i class="fas fa-cloud-upload-alt text-3xl text-slate-300 mb-2 block"></i>
+                        <p class="text-sm text-slate-500 font-medium">Click to upload banner image</p>
+                        <p class="text-xs text-slate-400 mt-1">JPEG, PNG, or WebP. Max 5MB.</p>
+                    </div>
+                    <div id="upload-preview" class="hidden">
+                        <img id="preview-img" class="w-full h-40 object-cover rounded-lg" src="" alt="Preview">
+                        <button type="button" onclick="event.stopPropagation(); removeImage()" class="mt-2 text-xs text-red-500 hover:text-red-700 font-semibold"><i class="fas fa-times"></i> Remove</button>
+                    </div>
+                </div>
+                @error('image_file')<p class="text-xs text-red-500 mt-1">{{ $message }}</p>@enderror
             </div>
 
             <div>
@@ -194,6 +214,39 @@
     </div>
 </div>
 <script>
+function previewImage(input) {
+    if (input.files && input.files[0]) {
+        var reader = new FileReader();
+        reader.onload = function(e) {
+            document.getElementById('preview-img').src = e.target.result;
+            document.getElementById('upload-placeholder').classList.add('hidden');
+            document.getElementById('upload-preview').classList.remove('hidden');
+            applyImageFromSrc(e.target.result);
+        };
+        reader.readAsDataURL(input.files[0]);
+    }
+}
+function removeImage() {
+    document.getElementById('file-input').value = '';
+    document.getElementById('upload-placeholder').classList.remove('hidden');
+    document.getElementById('upload-preview').classList.add('hidden');
+    document.getElementById('preview-img').src = '';
+    applyImageFromSrc('');
+}
+function applyImageFromSrc(src) {
+    var placeImg = document.getElementById('pv-place-img');
+    var placePh = document.getElementById('pv-place-imgph');
+    var cardImg = document.getElementById('pv-card-img');
+    var cardPh = document.getElementById('pv-card-imgph');
+    if (src) {
+        placeImg.src = src; placeImg.classList.remove('hidden'); placePh.classList.add('hidden');
+        cardImg.src = src; cardImg.classList.remove('hidden'); cardPh.classList.add('hidden');
+    } else {
+        placeImg.classList.add('hidden'); placePh.classList.remove('hidden');
+        cardImg.classList.add('hidden'); cardPh.classList.remove('hidden');
+    }
+}
+
 document.addEventListener('DOMContentLoaded', function () {
     var demoCompany = @json($partner->name ?? 'Your Business');
     var demoName = "Monsoon Trekking Gear Sale";
@@ -213,7 +266,6 @@ document.addEventListener('DOMContentLoaded', function () {
 
     var fName = document.querySelector('[name="name"]');
     var fContent = document.querySelector('[name="content"]');
-    var fImage = document.querySelector('[name="image"]');
     var fType = document.querySelector('[name="ad_type"]');
     var fContexts = Array.prototype.slice.call(document.querySelectorAll('[name="contexts[]"]'));
 
@@ -224,24 +276,6 @@ document.addEventListener('DOMContentLoaded', function () {
     function setText(id, text) {
         var el = document.getElementById(id);
         if (el) el.textContent = text;
-    }
-
-    function applyImage(variant) {
-        var img = document.getElementById(variant === 'promoted_place' ? 'pv-place-img' : 'pv-card-img');
-        var ph = document.getElementById(variant === 'promoted_place' ? 'pv-place-imgph' : 'pv-card-imgph');
-        var url = fImage ? fImage.value.trim() : '';
-        if (url) {
-            img.src = url;
-            img.classList.remove('hidden');
-            ph.classList.add('hidden');
-            img.onerror = function () {
-                img.classList.add('hidden');
-                ph.classList.remove('hidden');
-            };
-        } else {
-            img.classList.add('hidden');
-            ph.classList.remove('hidden');
-        }
     }
 
     function updateContexts() {
@@ -274,9 +308,6 @@ document.addEventListener('DOMContentLoaded', function () {
         setText('pv-card-name', name);
         setText('pv-card-content', content);
 
-        applyImage('promoted_place');
-        applyImage('card');
-
         ['banner', 'promoted_place', 'sponsored_card'].forEach(function (v) {
             var el = document.getElementById('pv-' + v);
             if (!el) return;
@@ -290,7 +321,7 @@ document.addEventListener('DOMContentLoaded', function () {
         updateContexts();
     }
 
-    [fName, fContent, fImage, fType].forEach(function (el) {
+    [fName, fContent, fType].forEach(function (el) {
         if (!el) return;
         el.addEventListener('input', render);
         if (el.tagName === 'SELECT') el.addEventListener('change', render);

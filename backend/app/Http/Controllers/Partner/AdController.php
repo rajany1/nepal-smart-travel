@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Partner;
 use App\Http\Controllers\Controller;
 use App\Models\AdCampaign;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 
 class AdController extends Controller
@@ -50,6 +51,11 @@ class AdController extends Controller
         $data['cost_per_view'] = $data['cost_per_view'] ?? 0;
         $data['cost_per_click'] = $data['cost_per_click'] ?? 0;
 
+        if ($request->hasFile('image_file')) {
+            $data['image'] = $request->file('image_file')->store('ad-images/' . $this->partner()->id, 'public');
+        }
+        unset($data['image_file']);
+
         $campaign = $this->partner()->adCampaigns()->create($data + [
             'paid_amount' => 0,
             'spent_amount' => 0,
@@ -72,12 +78,21 @@ class AdController extends Controller
     {
         $this->authorizeAd($adCampaign);
         if ($adCampaign->payment_status === 'paid') {
-            return back()->withErrors(['status' => 'Paid campaigns cannot be edited. Contact admin for changes.']);
+            return back()->withErrors(['status' => 'Paid campaigns cannot be edited. Pause or delete it first.']);
         }
-        if (in_array($adCampaign->status, ['active', 'rejected'])) {
-            return back()->withErrors(['status' => 'Active or rejected campaigns cannot be edited. Pause or delete it first.']);
+        if ($adCampaign->status === 'active') {
+            return back()->withErrors(['status' => 'Active campaigns cannot be edited. Pause or delete it first.']);
         }
         $data = $this->validated($request);
+
+        if ($request->hasFile('image_file')) {
+            if ($adCampaign->image && Storage::disk('public')->exists($adCampaign->image)) {
+                Storage::disk('public')->delete($adCampaign->image);
+            }
+            $data['image'] = $request->file('image_file')->store('ad-images/' . $this->partner()->id, 'public');
+        }
+        unset($data['image_file']);
+
         $adCampaign->update($data);
         return $this->safetyRespond($request, $adCampaign, $data, 'Ad campaign updated.');
     }
@@ -145,6 +160,9 @@ class AdController extends Controller
         $this->authorizeAd($adCampaign);
         if ((float) $adCampaign->paid_amount > (float) $adCampaign->spent_amount) {
             return back()->withErrors(['status' => 'This campaign has paid money remaining (Rs. ' . number_format(max((float) $adCampaign->paid_amount - (float) $adCampaign->spent_amount, 0), 2) . '). Contact admin to delete it.']);
+        }
+        if ($adCampaign->image && Storage::disk('public')->exists($adCampaign->image)) {
+            Storage::disk('public')->delete($adCampaign->image);
         }
         $adCampaign->delete();
         return redirect()->route('partner.ads')->with('success', 'Campaign deleted.');
@@ -231,7 +249,7 @@ class AdController extends Controller
         }
 
         $this->markPaid($payment, $verified['transaction_id']);
-        return redirect()->route('partner.ads')->with('success', 'Payment received. Campaign is awaiting admin approval.');
+        return redirect()->route('partner.ads')->with('success', 'Payment received! Your campaign is now live.');
     }
 
     public function khaltiCallback(Request $request)
@@ -256,7 +274,7 @@ class AdController extends Controller
         }
 
         $this->markPaid($payment, $verified['transaction_id']);
-        return redirect()->route('partner.ads')->with('success', 'Payment received. Campaign is awaiting admin approval.');
+        return redirect()->route('partner.ads')->with('success', 'Payment received! Your campaign is now live.');
     }
 
     public function markPaid(\App\Models\AdPayment $payment, string $transactionId): void
@@ -271,6 +289,8 @@ class AdController extends Controller
             'paid_amount' => $payment->amount,
             'gateway' => $payment->gateway,
             'gateway_ref' => $transactionId,
+            'status' => 'active',
+            'starts_at' => $payment->campaign->starts_at ?? now(),
         ]);
     }
 
@@ -284,7 +304,7 @@ class AdController extends Controller
         $data = $request->validate([
             'name' => 'required|string|max:255',
             'content' => 'nullable|string|max:2000',
-            'image' => 'nullable|string|max:500',
+            'image_file' => 'nullable|image|mimes:jpeg,jpg,png,webp|max:5120',
             'target_url' => 'nullable|string|max:255',
             'target_district' => 'nullable|string|max:100',
             'target_category' => 'nullable|string|max:100',

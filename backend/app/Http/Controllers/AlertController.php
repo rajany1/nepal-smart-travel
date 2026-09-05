@@ -36,8 +36,14 @@ class AlertController extends Controller
             $radiusKm = (float) ($request->input('radius_km', 20));
             $latDelta = $radiusKm / 111.0;
             $lngDelta = $radiusKm / (111.0 * cos(deg2rad($lat)));
-            $query->whereBetween('latitude', [$lat - $latDelta, $lat + $latDelta])
-                  ->whereBetween('longitude', [$lng - $lngDelta, $lng + $lngDelta]);
+            // Broadcast alerts are location-independent and always visible.
+            $query->where(function ($q) use ($lat, $lng, $latDelta, $lngDelta) {
+                $q->where('is_broadcast', true)
+                  ->orWhere(function ($geo) use ($lat, $lng, $latDelta, $lngDelta) {
+                      $geo->whereBetween('latitude', [$lat - $latDelta, $lat + $latDelta])
+                          ->whereBetween('longitude', [$lng - $lngDelta, $lng + $lngDelta]);
+                  });
+            });
         }
 
         $alerts = $query->where(function ($q) {
@@ -48,6 +54,25 @@ class AlertController extends Controller
         ->limit(100)
         ->get();
 
+        // Merge the authenticated user's personal (targeted) system alerts into
+        // the feed — they are relevant to them regardless of location.
+        $user = $request->user() ?? \Illuminate\Support\Facades\Auth::guard('sanctum')->user();
+        if ($user) {
+            $targeted = Alert::where('target_user_id', $user->id)
+                ->where(function ($q) {
+                    $q->whereNull('expires_at')->orWhere('expires_at', '>', now());
+                })
+                ->latest()
+                ->get();
+            $byId = $alerts->keyBy('id');
+            foreach ($targeted as $t) {
+                if (!$byId->has($t->id)) {
+                    $alerts->push($t);
+                }
+            }
+            $alerts = $alerts->sortByDesc('created_at')->take(100)->values();
+        }
+
         $data = $alerts->map(fn($alert) => [
             'id' => $alert->id,
             'uuid' => $alert->uuid,
@@ -55,9 +80,12 @@ class AlertController extends Controller
             'description' => $alert->description,
             'alert_type' => $alert->alert_type,
             'severity' => $alert->severity,
+            'sender_type' => $alert->sender_type ?? 'user',
             'latitude' => $alert->latitude,
             'longitude' => $alert->longitude,
             'affected_district' => $alert->affected_district,
+            'link_type' => $alert->link_type,
+            'link_value' => $alert->link_value,
             'created_at' => $alert->created_at,
         ])->toArray();
 
@@ -86,8 +114,13 @@ class AlertController extends Controller
         $alerts = Alert::where(function ($q) {
             $q->whereNull('expires_at')->orWhere('expires_at', '>', now());
         })
-        ->whereBetween('latitude', [$lat - $latDelta, $lat + $latDelta])
-        ->whereBetween('longitude', [$lng - $lngDelta, $lng + $lngDelta])
+        ->where(function ($geo) use ($lat, $lng, $latDelta, $lngDelta) {
+            $geo->where('is_broadcast', true)
+                ->orWhere(function ($near) use ($lat, $lng, $latDelta, $lngDelta) {
+                    $near->whereBetween('latitude', [$lat - $latDelta, $lat + $latDelta])
+                         ->whereBetween('longitude', [$lng - $lngDelta, $lng + $lngDelta]);
+                });
+        })
         ->latest()
         ->limit(30)
         ->get()
@@ -99,9 +132,12 @@ class AlertController extends Controller
             'source' => 'alert',
             'alert_type' => $a->alert_type,
             'severity' => $a->severity,
+            'sender_type' => $a->sender_type ?? 'user',
             'latitude' => $a->latitude,
             'longitude' => $a->longitude,
             'affected_district' => $a->affected_district,
+            'link_type' => $a->link_type,
+            'link_value' => $a->link_value,
             'created_at' => $a->created_at,
         ]);
 

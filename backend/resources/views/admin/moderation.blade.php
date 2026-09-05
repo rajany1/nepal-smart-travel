@@ -238,7 +238,7 @@
 
 <script>
     function openStrike(userId, name, level) {
-        document.getElementById('strikeForm').action = '/admin/moderation/strike/' + userId;
+        document.getElementById('strikeForm').action = '/' + window.adminPrefix + '/moderation/strike/' + userId;
         document.getElementById('strikeLevel').value = level;
         document.getElementById('strikeTitle').textContent = name;
         document.getElementById('strikeDesc').textContent = level === 'suspend'

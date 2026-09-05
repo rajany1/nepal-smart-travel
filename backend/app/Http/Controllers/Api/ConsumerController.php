@@ -40,7 +40,7 @@ class ConsumerController extends Controller
             'customer_name' => 'required|string|max:255',
             'customer_phone' => 'nullable|string|max:50',
             'customer_email' => 'nullable|email|max:255',
-            'amount' => 'required|numeric|min:0.01',
+            'amount' => 'required|numeric|min:100|max:1000000',
             'notes' => 'nullable|string',
             'booked_at' => 'nullable|date',
             'offer_code' => 'nullable|string|max:32',
@@ -48,6 +48,12 @@ class ConsumerController extends Controller
 
         $partner = TravelPartner::findOrFail($data['travel_partner_id']);
         abort_if(!$partner->is_active, 400, 'Partner is not active');
+
+        // Server-side amount validation: ensure amount is within reasonable range
+        $amount = (float) $data['amount'];
+        if ($amount < 100) {
+            return response()->json(['success' => false, 'message' => 'Minimum booking amount is NPR 100.'], 422);
+        }
 
         try {
             return DB::transaction(function () use ($user, $partner, $data) {

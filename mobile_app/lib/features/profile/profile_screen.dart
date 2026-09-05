@@ -13,6 +13,7 @@ import '../../widgets/badge_chip.dart';
 import '../../widgets/verification_badge.dart';
 import '../../widgets/report_card.dart';
 import '../store/store_screen.dart';
+import '../wallet/wallet_screen.dart';
 import '../reporting/reports_list_screen.dart';
 
 class ProfileScreen extends StatefulWidget {
@@ -74,170 +75,336 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   void _showMoreMenu() {
     final profileProv = context.read<ProfileProvider>();
+    final auth = context.read<AuthProvider>();
     final profile = profileProv.profile;
 
     showModalBottomSheet(
       context: context,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
-      ),
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
       builder: (ctx) {
-        return SafeArea(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              // Drag handle
-              Container(
-                margin: const EdgeInsets.only(top: 8),
-                width: 40,
-                height: 4,
-                decoration: BoxDecoration(
-                  color: AppTheme.textSecondary.withOpacity(0.3),
-                  borderRadius: BorderRadius.circular(2),
+        return Container(
+          decoration: const BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+          ),
+          child: SafeArea(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                // Drag handle
+                Container(
+                  margin: const EdgeInsets.only(top: 12),
+                  width: 40,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: Colors.grey.withOpacity(0.3),
+                    borderRadius: BorderRadius.circular(2),
+                  ),
                 ),
-              ),
-              const SizedBox(height: 8),
-              
-              // Recent Activity
-              if (profile != null && profile.recentActivity.isNotEmpty)
-                ListTile(
-                  leading: const Icon(Icons.history, color: AppTheme.infoColor),
-                  title: Text(context.t('Recent Activity')),
-                  subtitle: Text('${profile.recentActivity.length} ${context.t('items')}',
-                      style: const TextStyle(fontSize: AppTheme.textSm)),
-                  trailing: const Icon(Icons.chevron_right),
-                  onTap: () {
-                    Navigator.pop(ctx);
-                    _showFullActivity(context, profileProv);
-                  },
+                
+                // Header
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 20, 20, 12),
+                  child: Row(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(10),
+                        decoration: BoxDecoration(
+                          gradient: const LinearGradient(
+                            colors: [AppTheme.primaryColor, Color(0xFF667EEA)],
+                          ),
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: const Icon(Icons.menu_rounded, color: Colors.white, size: 22),
+                      ),
+                      const SizedBox(width: 14),
+                      Text(
+                        context.t('Menu'),
+                        style: const TextStyle(
+                          fontSize: 20,
+                          fontWeight: FontWeight.bold,
+                          color: AppTheme.textPrimary,
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
 
-              // Reward Store
-              ListTile(
-                leading: const Icon(Icons.store, color: AppTheme.secondaryColor),
-                title: Text(context.t('Reward Store')),
-                trailing: const Icon(Icons.chevron_right),
-                onTap: () {
-                  Navigator.pop(ctx);
-                  Navigator.of(context).pushNamed('/store');
-                },
-              ),
+                // Menu Items
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  child: Column(
+                    children: [
+                      // Recent Activity
+                      if (profile != null && profile.recentActivity.isNotEmpty)
+                        _buildMenuTile(
+                          icon: Icons.history_rounded,
+                          iconColor: const Color(0xFF667EEA),
+                          title: context.t('Recent Activity'),
+                          subtitle: '${profile.recentActivity.length} ${context.t('items')}',
+                          onTap: () {
+                            Navigator.pop(ctx);
+                            _showFullActivity(context, profileProv);
+                          },
+                        ),
 
-              // Subscriptions
-              ListTile(
-                leading: const Icon(Icons.subscriptions, color: Colors.red),
-                title: Text(context.t('Subscriptions')),
-                trailing: const Icon(Icons.chevron_right),
-                onTap: () {
-                  Navigator.pop(ctx);
-                  Navigator.of(context).pushNamed('/subscriptions');
-                },
-              ),
+                      // Reward Store
+                      _buildMenuTile(
+                        icon: Icons.store_rounded,
+                        iconColor: const Color(0xFFF5576C),
+                        title: context.t('Reward Store'),
+                        subtitle: 'Earn XP and rewards',
+                        onTap: () {
+                          Navigator.pop(ctx);
+                          Navigator.of(context).pushNamed('/store');
+                        },
+                      ),
 
-              // Settings
-              ListTile(
-                leading: const Icon(Icons.settings, color: AppTheme.textSecondary),
-                title: Text(context.t('Settings')),
-                trailing: const Icon(Icons.chevron_right),
-                onTap: () {
-                  Navigator.pop(ctx);
-                  Navigator.of(context).pushNamed('/settings');
-                },
-              ),
+                      // Oripori Coins Wallet
+                      _buildMenuTile(
+                        icon: Icons.account_balance_wallet_rounded,
+                        iconColor: const Color(0xFF43E97B),
+                        title: 'Oripori Coins',
+                        subtitle: 'Earn from ad views',
+                        onTap: () {
+                          Navigator.pop(ctx);
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(builder: (_) => const WalletScreen()),
+                          );
+                        },
+                      ),
 
-              // Policies
-              ListTile(
-                leading: const Icon(Icons.description, color: AppTheme.textSecondary),
-                title: Text(context.t('Policies & Info')),
-                trailing: const Icon(Icons.chevron_right),
-                onTap: () {
-                  Navigator.pop(ctx);
-                  Navigator.of(context).pushNamed('/policies');
-                },
-              ),
+                      // Subscriptions
+                      _buildMenuTile(
+                        icon: Icons.diamond_rounded,
+                        iconColor: const Color(0xFFFF6B6B),
+                        title: context.t('Subscriptions'),
+                        subtitle: 'Premium features',
+                        onTap: () {
+                          Navigator.pop(ctx);
+                          Navigator.of(context).pushNamed('/subscriptions');
+                        },
+                      ),
 
-              // Offline Maps
-              ListTile(
-                leading: const Icon(Icons.map, color: AppTheme.textSecondary),
-                title: Text(context.t('Offline Maps')),
-                trailing: const Icon(Icons.chevron_right),
-                onTap: () {
-                  Navigator.pop(ctx);
-                },
-              ),
+                      // Settings
+                      _buildMenuTile(
+                        icon: Icons.settings_rounded,
+                        iconColor: const Color(0xFF78909C),
+                        title: context.t('Settings'),
+                        subtitle: 'App preferences',
+                        onTap: () {
+                          Navigator.pop(ctx);
+                          Navigator.of(context).pushNamed('/settings');
+                        },
+                      ),
 
-              // About
-              ListTile(
-                leading: const Icon(Icons.info, color: AppTheme.textSecondary),
-                title: Text(context.t('About')),
-                trailing: const Icon(Icons.chevron_right),
-                onTap: () {
-                  Navigator.pop(ctx);
-                  showAboutDialog(
-                    context: context,
-                    applicationName: 'Nepal Smart Travel',
-                    applicationVersion: '1.0.0',
-                    applicationLegalese: '(c) 2026 Nepal Smart Travel',
-                  );
-                },
-              ),
+                      // Divider
+                      Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 8),
+                        child: Row(
+                          children: [
+                            Expanded(child: Divider(color: Colors.grey.withOpacity(0.2))),
+                            Padding(
+                              padding: const EdgeInsets.symmetric(horizontal: 12),
+                              child: Text(
+                                context.t('Legal'),
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w500,
+                                  color: Colors.grey.withOpacity(0.6),
+                                ),
+                              ),
+                            ),
+                            Expanded(child: Divider(color: Colors.grey.withOpacity(0.2))),
+                          ],
+                        ),
+                      ),
 
-              const SizedBox(height: 8),
-            ],
+                      // Privacy Policy
+                      _buildMenuTile(
+                        icon: Icons.privacy_tip_rounded,
+                        iconColor: const Color(0xFF4FACFE),
+                        title: context.t('Privacy Policy'),
+                        subtitle: 'How we protect your data',
+                        onTap: () {
+                          Navigator.pop(ctx);
+                          Navigator.of(context).pushNamed('/legal', arguments: 'privacy_policy');
+                        },
+                      ),
+
+                      // Terms & Conditions
+                      _buildMenuTile(
+                        icon: Icons.gavel_rounded,
+                        iconColor: const Color(0xFFFFB74D),
+                        title: context.t('Terms & Conditions'),
+                        subtitle: 'Service agreement',
+                        onTap: () {
+                          Navigator.pop(ctx);
+                          Navigator.of(context).pushNamed('/legal', arguments: 'terms_conditions');
+                        },
+                      ),
+
+                      // About
+                      _buildMenuTile(
+                        icon: Icons.info_outline_rounded,
+                        iconColor: const Color(0xFF90A4AE),
+                        title: context.t('About'),
+                        subtitle: 'Nepal Smart Travel v1.0.0',
+                        onTap: () {
+                          Navigator.pop(ctx);
+                          showAboutDialog(
+                            context: context,
+                            applicationName: 'Nepal Smart Travel',
+                            applicationVersion: '1.0.0',
+                            applicationLegalese: '(c) 2026 Nepal Smart Travel',
+                          );
+                        },
+                      ),
+
+                      // Logout
+                      Container(
+                        margin: const EdgeInsets.only(top: 8, bottom: 16),
+                        decoration: BoxDecoration(
+                          color: AppTheme.errorColor.withOpacity(0.08),
+                          borderRadius: BorderRadius.circular(14),
+                        ),
+                        child: ListTile(
+                          leading: Container(
+                            padding: const EdgeInsets.all(8),
+                            decoration: BoxDecoration(
+                              color: AppTheme.errorColor.withOpacity(0.15),
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                            child: const Icon(Icons.logout_rounded, color: AppTheme.errorColor, size: 22),
+                          ),
+                          title: Text(
+                            context.t('Logout'),
+                            style: const TextStyle(
+                              color: AppTheme.errorColor,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                          subtitle: Text(
+                            'Sign out of your account',
+                            style: TextStyle(
+                              color: AppTheme.errorColor.withOpacity(0.7),
+                              fontSize: 12,
+                            ),
+                          ),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                          onTap: () async {
+                            Navigator.pop(ctx);
+                            await auth.logout();
+                            if (context.mounted) {
+                              Navigator.of(context).pushReplacementNamed('/login');
+                            }
+                          },
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
           ),
         );
       },
     );
   }
 
+  Widget _buildMenuTile({
+    required IconData icon,
+    required Color iconColor,
+    required String title,
+    required String subtitle,
+    required VoidCallback onTap,
+  }) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 4),
+      child: ListTile(
+        contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+        leading: Container(
+          padding: const EdgeInsets.all(8),
+          decoration: BoxDecoration(
+            color: iconColor.withOpacity(0.1),
+            borderRadius: BorderRadius.circular(10),
+          ),
+          child: Icon(icon, size: 22, color: iconColor),
+        ),
+        title: Text(
+          title,
+          style: const TextStyle(
+            fontSize: 15,
+            fontWeight: FontWeight.w500,
+            color: AppTheme.textPrimary,
+          ),
+        ),
+        subtitle: Text(
+          subtitle,
+          style: TextStyle(
+            fontSize: 12,
+            color: AppTheme.textSecondary.withOpacity(0.7),
+          ),
+        ),
+        trailing: Container(
+          padding: const EdgeInsets.all(4),
+          decoration: BoxDecoration(
+            color: Colors.grey.withOpacity(0.08),
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Icon(Icons.chevron_right_rounded, color: Colors.grey.withOpacity(0.5), size: 18),
+        ),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        onTap: onTap,
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      backgroundColor: const Color(0xFFF8F9FA),
       appBar: AppBar(
-        title: const Text('Profile'),
-        backgroundColor: AppTheme.primaryColor,
-        foregroundColor: Colors.white,
+        backgroundColor: Colors.white,
+        elevation: 0,
+        title: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(6),
+              decoration: BoxDecoration(
+                color: const Color(0xFF00695C).withOpacity(0.1),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: const Icon(Icons.person, color: Color(0xFF00695C), size: 20),
+            ),
+            const SizedBox(width: 10),
+            const Text(
+              'Profile',
+              style: TextStyle(
+                color: Color(0xFF2D3436),
+                fontSize: 20,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ],
+        ),
         actions: [
           Consumer<AuthProvider>(
             builder: (context, auth, _) {
               if (!auth.isAuthenticated) return const SizedBox.shrink();
-              
-              return Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Consumer<ProfileProvider>(
-                    builder: (context, profileProv, _) {
-                      if (profileProv.isRefreshing) {
-                        return const Padding(
-                          padding: EdgeInsets.all(16),
-                          child: SizedBox(
-                            width: 20, height: 20,
-                            child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
-                          ),
-                        );
-                      }
-                      return IconButton(
-                        icon: const Icon(Icons.refresh),
-                        onPressed: () async {
-                          await profileProv.refreshAll();
-                        },
-                      );
-                    },
+              return GestureDetector(
+                onTap: _showMoreMenu,
+                child: Container(
+                  margin: const EdgeInsets.symmetric(vertical: 10, horizontal: 8),
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: Colors.grey.shade50,
+                    borderRadius: BorderRadius.circular(10),
                   ),
-                  IconButton(
-                    icon: const Icon(Icons.more_vert),
-                    onPressed: _showMoreMenu,
-                  ),
-                  IconButton(
-                    icon: const Icon(Icons.logout),
-                    onPressed: () async {
-                      await auth.logout();
-                      if (context.mounted) {
-                        Navigator.of(context).pushReplacementNamed('/login');
-                      }
-                    },
-                  ),
-                ],
+                  child: Icon(Icons.more_vert, color: Colors.grey.shade600, size: 22),
+                ),
               );
             },
           ),
@@ -330,53 +497,79 @@ class _ProfileScreenState extends State<ProfileScreen> {
       padding: const EdgeInsets.all(24),
       decoration: BoxDecoration(
         gradient: const LinearGradient(
-          colors: [AppTheme.primaryColor, AppTheme.primaryLight],
+          colors: [Color(0xFF004D40), Color(0xFF00695C), Color(0xFF00897B)],
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
         ),
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(20),
+        boxShadow: [
+          BoxShadow(
+            color: const Color(0xFF00695C).withOpacity(0.3),
+            blurRadius: 16,
+            offset: const Offset(0, 6),
+          ),
+        ],
       ),
       child: Column(
         children: [
-          // Avatar with Edit button at bottom-right
+          // Avatar with Edit button
           Stack(
             children: [
-              CircleAvatar(
-                radius: 44,
-                backgroundColor: Colors.white.withValues(alpha: 0.2),
-                backgroundImage: profile.avatarUrl != null && profile.avatarUrl!.isNotEmpty
-                    ? NetworkImage(profile.avatarUrl!)
-                    : null,
-                child: profile.avatarUrl == null || profile.avatarUrl!.isEmpty
-                    ? Text(
-                        profile.name.isNotEmpty ? profile.name[0].toUpperCase() : '?',
-                        style: const TextStyle(fontSize: 36, color: Colors.white, fontWeight: FontWeight.bold),
-                      )
-                    : null,
+              Container(
+                padding: const EdgeInsets.all(4),
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  border: Border.all(color: Colors.white.withOpacity(0.3), width: 2),
+                ),
+                child: CircleAvatar(
+                  radius: 44,
+                  backgroundColor: Colors.white.withOpacity(0.2),
+                  backgroundImage: profile.avatarUrl != null && profile.avatarUrl!.isNotEmpty
+                      ? NetworkImage(profile.avatarUrl!)
+                      : null,
+                  child: profile.avatarUrl == null || profile.avatarUrl!.isEmpty
+                      ? Container(
+                          width: 88,
+                          height: 88,
+                          decoration: const BoxDecoration(
+                            shape: BoxShape.circle,
+                            gradient: LinearGradient(
+                              colors: [Color(0xFF00695C), Color(0xFF00897B), Color(0xFF26A69A)],
+                              begin: Alignment.topLeft,
+                              end: Alignment.bottomRight,
+                            ),
+                          ),
+                          child: Center(
+                            child: Text(
+                              profile.name.isNotEmpty ? profile.name[0].toUpperCase() : '?',
+                              style: const TextStyle(fontSize: 36, color: Colors.white, fontWeight: FontWeight.w800),
+                            ),
+                          ),
+                        )
+                      : null,
+                ),
               ),
-              // Faded Edit button centered on the avatar
+              // Edit overlay
               Positioned.fill(
                 child: GestureDetector(
-                  onTap: () {
-                    Navigator.of(context).pushNamed('/profile-edit');
-                  },
+                  onTap: () => Navigator.of(context).pushNamed('/profile-edit'),
                   child: Container(
                     decoration: BoxDecoration(
-                      color: Colors.black.withValues(alpha: 0.25),
+                      color: Colors.black.withOpacity(0.25),
                       shape: BoxShape.circle,
                     ),
                     child: Icon(
                       Icons.edit,
-                      size: 26,
-                      color: Colors.white.withValues(alpha: 0.8),
+                      size: 24,
+                      color: Colors.white.withOpacity(0.85),
                     ),
                   ),
                 ),
               ),
               if (profile.verificationTick != 'none')
                 Positioned(
-                  bottom: 0,
-                  right: 0,
+                  bottom: 4,
+                  right: 4,
                   child: Container(
                     padding: const EdgeInsets.all(2),
                     decoration: const BoxDecoration(
@@ -392,17 +585,27 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 ),
             ],
           ),
-          const SizedBox(height: 12),
+          const SizedBox(height: 16),
           // Name
           Text(
             profile.name,
-            style: const TextStyle(fontSize: AppTheme.text2xl, color: Colors.white, fontWeight: FontWeight.bold),
+            style: const TextStyle(
+              fontSize: 22,
+              color: Colors.white,
+              fontWeight: FontWeight.w800,
+            ),
           ),
           const SizedBox(height: 4),
           // Email
-          Text(profile.email, style: const TextStyle(color: Colors.white70, fontSize: AppTheme.textBase)),
-          const SizedBox(height: 8),
-          // Level & Rank
+          Text(
+            profile.email,
+            style: TextStyle(
+              color: Colors.white.withOpacity(0.75),
+              fontSize: 13,
+            ),
+          ),
+          const SizedBox(height: 12),
+          // Level & Rank chips
           Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
@@ -412,10 +615,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
             ],
           ),
           if (profile.memberSinceDays > 0) ...[
-            const SizedBox(height: 6),
+            const SizedBox(height: 8),
             Text(
               '${context.t('Member for')} ${profile.memberSinceDays} ${context.t('days')}',
-              style: const TextStyle(color: Colors.white60, fontSize: AppTheme.textSm),
+              style: TextStyle(color: Colors.white.withOpacity(0.6), fontSize: 12),
             ),
           ],
         ],
@@ -435,7 +638,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
         children: [
           Icon(icon, size: 14, color: Colors.white),
           const SizedBox(width: 4),
-          Text(text, style: const TextStyle(color: Colors.white, fontSize: AppTheme.textSm)),
+          Text(text, style: const TextStyle(color: Colors.white, fontSize: AppTheme.textSm, fontWeight: FontWeight.normal)),
         ],
       ),
     );
@@ -470,7 +673,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
               const SizedBox(width: 8),
               Text(context.t('Level Progress'), style: TextStyle(fontWeight: FontWeight.w600, fontSize: AppTheme.textBase, color: levelColor)),
               const Spacer(),
-              Text('${profile.totalXp}/${profile.nextLevelXp} XP', style: const TextStyle(color: AppTheme.textSecondary, fontSize: AppTheme.textSm)),
+              Text('${profile.totalXp}/${profile.nextLevelXp} XP', style: const TextStyle(color: AppTheme.textSecondary, fontSize: AppTheme.textSm, fontWeight: FontWeight.normal)),
             ],
           ),
           const SizedBox(height: 8),
@@ -498,23 +701,48 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   // ============ Store Button ============
   Widget _buildStoreButton(BuildContext context) {
-    return SizedBox(
-      width: double.infinity,
-      child: ElevatedButton.icon(
-        onPressed: () {
-          Navigator.push(
-            context,
-            MaterialPageRoute(builder: (_) => const StoreScreen()),
-          );
-        },
-        icon: const Icon(Icons.store, size: 18),
-        label: Text(context.t('XP Reward Store'), style: const TextStyle(fontWeight: FontWeight.w700)),
-        style: ElevatedButton.styleFrom(
-          backgroundColor: AppTheme.secondaryColor,
-          foregroundColor: Colors.white,
-          elevation: 0,
-          padding: const EdgeInsets.symmetric(vertical: 14),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+    return Container(
+      decoration: BoxDecoration(
+        gradient: const LinearGradient(
+          colors: [Color(0xFFF39C12), Color(0xFFE67E22)],
+        ),
+        borderRadius: BorderRadius.circular(14),
+        boxShadow: [
+          BoxShadow(
+            color: const Color(0xFFF39C12).withOpacity(0.3),
+            blurRadius: 10,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: () {
+            Navigator.push(
+              context,
+              MaterialPageRoute(builder: (_) => const StoreScreen()),
+            );
+          },
+          borderRadius: BorderRadius.circular(14),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 14),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                const Icon(Icons.store, size: 18, color: Colors.white),
+                const SizedBox(width: 8),
+                Text(
+                  context.t('XP Reward Store'),
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 15,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ],
+            ),
+          ),
         ),
       ),
     );
@@ -565,7 +793,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text('${profile.verificationTick.toUpperCase()} TICK', style: TextStyle(fontWeight: FontWeight.bold, fontSize: AppTheme.textBase, color: VerificationBadge.tickColorFromString(profile.verificationTick))),
-                Text('${profile.approvedReports} approved reports • ${profile.totalReports} total contributions', style: const TextStyle(color: AppTheme.textSecondary, fontSize: AppTheme.textSm)),
+                Text('${profile.approvedReports} approved reports • ${profile.totalReports} total contributions', style: const TextStyle(color: AppTheme.textSecondary, fontSize: AppTheme.textSm, fontWeight: FontWeight.normal)),
               ],
             ),
           ),
@@ -865,25 +1093,57 @@ class _ProfileScreenState extends State<ProfileScreen> {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            const Icon(Icons.person_off, size: 64, color: AppTheme.textSecondary),
+            Container(
+              padding: const EdgeInsets.all(24),
+              decoration: BoxDecoration(
+                color: Colors.grey.shade100,
+                shape: BoxShape.circle,
+              ),
+              child: Icon(Icons.person_outline, size: 56, color: Colors.grey.shade400),
+            ),
             const SizedBox(height: 24),
             const Text(
-              'You are not logged in',
-              style: TextStyle(fontSize: AppTheme.text2xl, fontWeight: FontWeight.bold, color: AppTheme.textPrimary),
+              'Welcome!',
+              style: TextStyle(fontSize: 24, fontWeight: FontWeight.w800, color: Color(0xFF2D3436)),
             ),
             const SizedBox(height: 8),
-            const Text(
-              'Please log in to view your profile',
-              style: TextStyle(fontSize: AppTheme.textBase, color: AppTheme.textSecondary),
+            Text(
+              'Sign in to view your profile, earn XP, and unlock rewards',
+              style: TextStyle(fontSize: 14, color: Colors.grey.shade500),
               textAlign: TextAlign.center,
             ),
             const SizedBox(height: 32),
-            ElevatedButton.icon(
-              onPressed: () => Navigator.of(context).pushReplacementNamed('/login'),
-              icon: const Icon(Icons.login),
-              label: const Text('Go to Login'),
-              style: ElevatedButton.styleFrom(
-                padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 14),
+            Container(
+              decoration: BoxDecoration(
+                gradient: const LinearGradient(
+                  colors: [Color(0xFF00695C), Color(0xFF00897B)],
+                ),
+                borderRadius: BorderRadius.circular(14),
+                boxShadow: [
+                  BoxShadow(
+                    color: const Color(0xFF00695C).withOpacity(0.3),
+                    blurRadius: 10,
+                    offset: const Offset(0, 4),
+                  ),
+                ],
+              ),
+              child: Material(
+                color: Colors.transparent,
+                child: InkWell(
+                  onTap: () => Navigator.of(context).pushReplacementNamed('/login'),
+                  borderRadius: BorderRadius.circular(14),
+                  child: const Padding(
+                    padding: EdgeInsets.symmetric(horizontal: 32, vertical: 14),
+                    child: Text(
+                      'Go to Login',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 16,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
+                ),
               ),
             ),
           ],

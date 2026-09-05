@@ -1,12 +1,11 @@
 import 'package:flutter/foundation.dart';
-import "../../core/services/localization_service.dart";
 
 class AppConstants {
   AppConstants._();
 
   // App Info
-  static const String appName = 'Nepal Smart Travel';
-  static const String appTagline = 'Your Trusted Travel Intelligence Platform';
+  static const String appName = 'ORIPORI';
+  static const String appTagline = 'Smart Travel Intelligence';
   static const String appVersion = '1.0.0';
 
   // API
@@ -40,10 +39,11 @@ class AppConstants {
   static const String userDataKey = 'user_data';
 
   // Google OAuth — set via --dart-define=GOOGLE_CLIENT_ID=... or env
-  static String get googleServerClientId => const String.fromEnvironment(
-    'GOOGLE_CLIENT_ID',
-    defaultValue: '672688394813-sk0p5l42e05845gsvjghe8f9cuj8ke69.apps.googleusercontent.com',
-  );
+  static String get googleServerClientId {
+    const defined = String.fromEnvironment('GOOGLE_CLIENT_ID');
+    if (defined.isNotEmpty) return defined;
+    return '672688394813-sk0p5l42e05845gsvjghe8f9cuj8ke69.apps.googleusercontent.com';
+  }
 
   // OneSignal Push Notifications — set via --dart-define=ONESIGNAL_APP_ID=... or env
   static String get oneSignalAppId => const String.fromEnvironment(

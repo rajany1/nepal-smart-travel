@@ -156,11 +156,18 @@ class BookingPaymentController extends Controller
             $data = null;
         }
         if (!is_array($data)) {
+            \Illuminate\Support\Facades\Log::warning('eSewa callback: Invalid data format', [
+                'ip' => $request->ip(),
+            ]);
             return $this->callbackPage(false, 'Invalid eSewa callback.');
         }
 
         $payment = BookingPayment::where('reference', $data['transaction_uuid'] ?? '')->first();
         if (!$payment) {
+            \Illuminate\Support\Facades\Log::warning('eSewa callback: Unknown reference', [
+                'reference' => $data['transaction_uuid'] ?? 'none',
+                'ip' => $request->ip(),
+            ]);
             return $this->callbackPage(false, 'Payment reference not found.');
         }
         if ($payment->status === 'success') {
@@ -176,6 +183,11 @@ class BookingPaymentController extends Controller
         );
 
         if (!$verified['success']) {
+            \Illuminate\Support\Facades\Log::warning('eSewa callback: Verification failed', [
+                'payment_id' => $payment->id,
+                'error' => $verified['message'],
+                'ip' => $request->ip(),
+            ]);
             $payment->update(['status' => 'failed', 'metadata' => array_merge($payment->metadata ?? [], ['verify_error' => $verified['message']])]);
             return $this->callbackPage(false, $verified['message']);
         }
@@ -189,6 +201,10 @@ class BookingPaymentController extends Controller
         $pidx = $request->get('pidx');
         $payment = BookingPayment::where('transaction_id', $pidx)->first();
         if (!$payment) {
+            \Illuminate\Support\Facades\Log::warning('Khalti callback: Unknown pidx', [
+                'pidx' => $pidx,
+                'ip' => $request->ip(),
+            ]);
             return $this->callbackPage(false, 'Payment reference not found.');
         }
         if ($payment->status === 'success') {
@@ -203,6 +219,11 @@ class BookingPaymentController extends Controller
         }
 
         if (!$verified['success']) {
+            \Illuminate\Support\Facades\Log::warning('Khalti callback: Verification failed', [
+                'payment_id' => $payment->id,
+                'error' => $verified['message'] ?? 'Unknown',
+                'ip' => $request->ip(),
+            ]);
             $payment->update(['status' => 'failed', 'metadata' => array_merge($payment->metadata ?? [], ['error' => $verified['message'] ?? 'Verification failed'])]);
             return $this->callbackPage(false, $verified['message'] ?? 'Khalti verification failed.');
         }

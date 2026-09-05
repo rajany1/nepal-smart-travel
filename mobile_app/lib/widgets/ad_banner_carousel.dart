@@ -5,7 +5,9 @@ import '../core/api/api_client.dart';
 
 class AdBannerCarousel extends StatefulWidget {
   final String adContext;
-  const AdBannerCarousel({super.key, this.adContext = 'home'});
+  final dynamic reportId;
+  final bool persistent;
+  const AdBannerCarousel({super.key, this.adContext = 'home', this.reportId, this.persistent = false});
 
   @override
   State<AdBannerCarousel> createState() => _AdBannerCarouselState();
@@ -32,7 +34,7 @@ class _AdBannerCarouselState extends State<AdBannerCarousel> {
 
   Future<void> _load() async {
     try {
-      final res = await _api.getActiveAds(adContext: widget.adContext, limit: 5);
+      final res = await _api.getActiveAds(adContext: widget.adContext, limit: 5, persistent: widget.persistent);
       _ads = (res.data['data'] as List<dynamic>?) ?? [];
     } catch (_) {}
     if (mounted) {
@@ -44,7 +46,7 @@ class _AdBannerCarouselState extends State<AdBannerCarousel> {
   void _trackVisible() {
     final ad = _ads.isEmpty ? null : _ads[_currentPage];
     if (ad is Map<String, dynamic> && ad['id'] is int) {
-      _api.trackAdImpression(ad['id'] as int).then((_) {}).catchError((_) {});
+      _api.trackAdImpression(ad['id'] as int, reportId: widget.reportId, context: widget.adContext).then((_) {}).catchError((_) {});
     }
   }
 
@@ -52,7 +54,7 @@ class _AdBannerCarouselState extends State<AdBannerCarousel> {
     if (ad is! Map<String, dynamic>) return;
     final id = ad['id'];
     if (id is int) {
-      _api.trackAdClick(id).then((_) {}).catchError((_) {});
+      _api.trackAdClick(id, reportId: widget.reportId, context: widget.adContext).then((_) {}).catchError((_) {});
     }
     final target = ad['target_url'] as String?;
     if (target != null && target.isNotEmpty) {

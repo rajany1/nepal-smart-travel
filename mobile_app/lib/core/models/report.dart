@@ -13,6 +13,12 @@ class ReportModel {
   final double? latitude;
   final double? longitude;
   final String? district;
+  final String? locationName;
+  final String? reportSubcategory;
+  final bool isActive;
+  final DateTime? expiresAt;
+  final int confirmedByCount;
+  final DateTime? lastConfirmedAt;
   final int helpfulCount;
   final int unhelpfulCount;
   final int commentsCount;
@@ -38,6 +44,12 @@ class ReportModel {
     this.latitude,
     this.longitude,
     this.district,
+    this.locationName,
+    this.reportSubcategory,
+    this.isActive = true,
+    this.expiresAt,
+    this.confirmedByCount = 0,
+    this.lastConfirmedAt,
     this.helpfulCount = 0,
     this.unhelpfulCount = 0,
     this.commentsCount = 0,
@@ -76,6 +88,12 @@ class ReportModel {
         return (parsed != null && parsed != 0.0) ? parsed : null;
       })(),
       district: json['district'],
+      locationName: json['location_name'],
+      reportSubcategory: json['report_subcategory'],
+      isActive: json['is_active'] ?? true,
+      expiresAt: json['expires_at'] != null ? DateTime.tryParse(json['expires_at']) : null,
+      confirmedByCount: json['confirmed_by_count'] ?? 0,
+      lastConfirmedAt: json['last_confirmed_at'] != null ? DateTime.tryParse(json['last_confirmed_at']) : null,
       helpfulCount: json['helpful_count'] ?? 0,
       unhelpfulCount: json['unhelpful_count'] ?? 0,
       commentsCount: json['comments_count'] ?? 0,
@@ -84,7 +102,6 @@ class ReportModel {
       reporterId: (json['reporter_id'] ?? '').toString(),
       userReaction: json['user_reaction'],
       imageUrls: (() {
-        // Try image_urls list first
         final rawList = json['image_urls'];
         if (rawList is List && rawList.isNotEmpty) {
           final urls = <String>[];
@@ -95,7 +112,6 @@ class ReportModel {
           }
           if (urls.isNotEmpty) return urls;
         }
-        // Fallback to singular image_url
         if (json['image_url'] != null && json['image_url'].toString().isNotEmpty) {
           return [json['image_url'].toString()];
         }
@@ -137,6 +153,33 @@ class ReportModel {
   bool get isEmergency => priority == 'high' || priority == 'critical';
 
   String? get imageUrl => imageUrls.isNotEmpty ? imageUrls[0] : null;
+
+  int get confidenceScore {
+    int confirmBonus = (confirmedByCount * 15).clamp(0, 100);
+    return (confirmBonus).clamp(0, 100);
+  }
+
+  String get timeState {
+    final now = DateTime.now();
+    final diff = now.difference(createdAt);
+    if (diff.inMinutes < 60) return 'live';
+    if (createdAt.year == now.year && createdAt.month == now.month && createdAt.day == now.day) return 'today';
+    if (diff.inDays <= 7) return 'recent';
+    return 'expired';
+  }
+
+  String get timeStateLabel {
+    switch (timeState) {
+      case 'live':
+        return 'LIVE';
+      case 'today':
+        return 'TODAY';
+      case 'recent':
+        return 'RECENT';
+      default:
+        return 'OLD';
+    }
+  }
 
   /// Map priority to a numeric severity for sorting
   int get priorityLevel {

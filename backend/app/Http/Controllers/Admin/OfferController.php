@@ -57,24 +57,6 @@ class OfferController extends Controller
         return view('admin.offers', compact('offers', 'status', 'deleted', 'stats'));
     }
 
-    public function approve(RewardOffer $offer)
-    {
-        $this->requireAdmin(request());
-        if (($reason = $this->cannotRunReason($offer)) !== null) {
-            return back()->withErrors(['status' => 'Cannot approve: ' . $reason]);
-        }
-        $offer->update([
-            'status' => 'approved',
-            'paused_by' => null,
-            'value_npr_locked' => true,
-            'reviewed_by' => Auth::id(),
-            'reviewed_at' => now(),
-            'rejection_reason' => null,
-        ]);
-        $this->moderatorService->log(Auth::user(), 'offer.approved', 'reward_offer', $offer->id, 'Approved offer: ' . $offer->title);
-        return back()->with('success', 'Offer approved and now live.');
-    }
-
     public function updateValue(Request $request, RewardOffer $offer)
     {
         $this->requireAdmin($request);
@@ -87,19 +69,6 @@ class OfferController extends Controller
         ]);
         $this->moderatorService->log(Auth::user(), 'offer.value-updated', 'reward_offer', $offer->id, 'Updated value of offer: ' . $offer->title . ' to Rs. ' . number_format($data['value_npr'], 2));
         return back()->with('success', 'Offer value updated.');
-    }
-
-    public function reject(Request $request, RewardOffer $offer)
-    {
-        $this->requireAdmin($request);
-        $offer->update([
-            'status' => 'rejected',
-            'reviewed_by' => Auth::id(),
-            'reviewed_at' => now(),
-            'rejection_reason' => $request->input('reason'),
-        ]);
-        $this->moderatorService->log(Auth::user(), 'offer.rejected', 'reward_offer', $offer->id, 'Rejected offer: ' . $offer->title . ' — ' . $request->input('reason'));
-        return back()->with('success', 'Offer rejected.');
     }
 
     public function pause(RewardOffer $offer)

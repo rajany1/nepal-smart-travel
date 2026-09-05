@@ -46,6 +46,7 @@
                     <th class="text-left px-6 py-3 text-xs font-medium text-gray-500 uppercase">Phone</th>
                     <th class="text-left px-6 py-3 text-xs font-medium text-gray-500 uppercase">Role</th>
                     <th class="text-left px-6 py-3 text-xs font-medium text-gray-500 uppercase">XP</th>
+                    <th class="text-center px-6 py-3 text-xs font-medium text-gray-500 uppercase"><i class="fas fa-shield-alt" title="Fraud Score"></i></th>
                     <th class="text-left px-6 py-3 text-xs font-medium text-gray-500 uppercase">Status</th>
                     <th class="text-left px-6 py-3 text-xs font-medium text-gray-500 uppercase">Joined</th>
                     <th class="text-right px-6 py-3 text-xs font-medium text-gray-500 uppercase">Actions</th>
@@ -69,12 +70,17 @@
                         @php
                             $roleName = $user->role?->name ?? 'user';
                             $roleClasses = [
+                                'super_admin' => 'bg-red-100 text-red-800',
                                 'admin' => 'bg-purple-100 text-purple-800',
                                 'moderator' => 'bg-yellow-100 text-yellow-800',
                                 'user' => 'bg-gray-100 text-gray-700',
                             ];
                         @endphp
-                        @if($canAssignModerator && $user->id !== $currentUser->id)
+                        @if($roleName === 'super_admin')
+                            <span class="text-xs font-semibold px-2 py-1 rounded {{ $roleClasses['super_admin'] }}">
+                                <i class="fas fa-crown"></i> Super Admin
+                            </span>
+                        @elseif($canAssignModerator && $currentUser->canManageUser($user))
                             <form method="POST" action="{{ route('admin.users.assign-role', $user->id) }}" class="inline-flex items-center gap-1" onsubmit="return confirm('Change role for {{ $user->name }}?');">
                                 @csrf
                                 <select name="role_id" onchange="this.form.submit()" class="text-xs font-medium px-2 py-1.5 rounded border border-gray-200 {{ $roleClasses[$roleName] ?? 'bg-gray-100 text-gray-700' }}">
@@ -101,6 +107,19 @@
                         @endif
                     </td>
                     <td class="px-6 py-4 text-sm text-gray-600">{{ number_format($user->total_xp ?? 0) }}</td>
+                    <td class="px-6 py-4 text-center">
+                        @php $fraudProfile = $user->fraudProfile; @endphp
+                        @if($fraudProfile && $fraudProfile->fraud_score > 0)
+                            <div class="flex flex-col items-center">
+                                <span class="text-xs font-bold px-2 py-0.5 rounded-full {{ $fraudProfile->fraud_score >= 80 ? 'bg-red-100 text-red-700' : ($fraudProfile->fraud_score >= 50 ? 'bg-amber-100 text-amber-700' : 'bg-slate-100 text-slate-600') }}">{{ $fraudProfile->fraud_score }}</span>
+                                @if($fraudProfile->is_suspicious)
+                                    <div class="text-[9px] text-red-500 mt-0.5"><i class="fas fa-flag"></i> Suspicious</div>
+                                @endif
+                            </div>
+                        @else
+                            <span class="text-xs text-slate-300">—</span>
+                        @endif
+                    </td>
                     <td class="px-6 py-4">
                         @php
                             $statusClasses = [
@@ -125,7 +144,7 @@
                             <a href="{{ route('admin.users.progress', $user) }}" class="px-2 py-1 text-xs rounded bg-blue-50 text-blue-600 hover:bg-blue-100" title="View progress">
                                 <i class="fas fa-trophy"></i>
                             </a>
-                            @if($canManageUsers && $user->id !== $currentUser->id)
+                            @if($canManageUsers && $currentUser->canManageUser($user))
                             <form method="POST" action="{{ route('admin.users.toggle-status', $user->id) }}" class="inline" onsubmit="return confirm('Change status for {{ $user->name }}? Current: {{ $user->status }}. Next: {{ $user->status === 'active' ? 'suspended' : ($user->status === 'suspended' ? 'banned' : 'active') }}.');">
                                 @csrf
                                 <button type="submit" class="px-2 py-1 text-xs rounded {{ $user->status === 'active' ? 'bg-red-50 text-red-600 hover:bg-red-100' : ($user->status === 'banned' ? 'bg-green-50 text-green-600 hover:bg-green-100' : 'bg-orange-50 text-orange-600 hover:bg-orange-100') }}" title="Toggle status">
@@ -135,8 +154,10 @@
                             @endif
 
                             @php $roleName = $user->role?->name ?? 'user'; @endphp
-                            @if($roleName === 'admin')
-                                @if($canAssignModerator && $user->id !== $currentUser->id)
+                            @if($roleName === 'super_admin')
+                                <span class="px-2 py-1 text-xs rounded bg-red-100 text-red-700 font-semibold"><i class="fas fa-crown"></i> Super Admin</span>
+                            @elseif($roleName === 'admin')
+                                @if($canAssignModerator && $currentUser->canManageUser($user))
                                 <form method="POST" action="{{ route('admin.users.remove-admin', $user->id) }}" class="inline" onsubmit="return confirm('Remove admin privileges from {{ $user->name }}?');">
                                     @csrf
                                     <button type="submit" class="px-2 py-1 text-xs rounded bg-orange-50 text-orange-600 hover:bg-orange-100" title="Remove admin">
@@ -145,7 +166,7 @@
                                 </form>
                                 @endif
                             @elseif($roleName === 'moderator')
-                                @if($canAssignModerator)
+                                @if($canAssignModerator && $currentUser->canManageUser($user))
                                 <form method="POST" action="{{ route('admin.users.make-admin', $user->id) }}" class="inline" onsubmit="return confirm('Promote {{ $user->name }} to admin?');">
                                     @csrf
                                     <button type="submit" class="px-2 py-1 text-xs rounded bg-purple-50 text-purple-600 hover:bg-purple-100" title="Promote to admin">
@@ -153,7 +174,7 @@
                                     </button>
                                 </form>
                                 @endif
-                                @if($canAssignModerator)
+                                @if($canAssignModerator && $currentUser->canManageUser($user))
                                 <form method="POST" action="{{ route('admin.users.remove-moderator', $user->id) }}" class="inline" onsubmit="return confirm('Remove moderator privileges from {{ $user->name }}?');">
                                     @csrf
                                     <button type="submit" class="px-2 py-1 text-xs rounded bg-yellow-50 text-yellow-800 hover:bg-yellow-100" title="Remove moderator">
@@ -162,7 +183,7 @@
                                 </form>
                                 @endif
                             @else
-                                @if($canAssignModerator)
+                                @if($canAssignModerator && $currentUser->canManageUser($user))
                                 <form method="POST" action="{{ route('admin.users.make-admin', $user->id) }}" class="inline" onsubmit="return confirm('Promote {{ $user->name }} to admin?');">
                                     @csrf
                                     <button type="submit" class="px-2 py-1 text-xs rounded bg-purple-50 text-purple-600 hover:bg-purple-100" title="Promote to admin">
@@ -170,7 +191,7 @@
                                     </button>
                                 </form>
                                 @endif
-                                @if($canAssignModerator)
+                                @if($canAssignModerator && $currentUser->canManageUser($user))
                                 <form method="POST" action="{{ route('admin.users.make-moderator', $user->id) }}" class="inline" onsubmit="return confirm('Promote {{ $user->name }} to moderator?');">
                                     @csrf
                                     <button type="submit" class="px-2 py-1 text-xs rounded bg-yellow-50 text-yellow-800 hover:bg-yellow-100" title="Promote to moderator">

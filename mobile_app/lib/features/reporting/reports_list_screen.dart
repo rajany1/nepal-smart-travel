@@ -18,9 +18,12 @@ import '../../core/models/ad_campaign.dart';
 import '../../core/services/location_service.dart';
 import '../../core/services/offline_tile_provider.dart';
 import '../../core/services/camera_service.dart';
+import '../../core/services/auth_guard.dart';
 import '../../core/services/exif_embedder_service.dart';
 import '../../core/widgets/dynamic_form_field.dart';
 import '../../widgets/image_carousel_widget.dart';
+import '../../widgets/ad_inline_banner.dart';
+import '../../widgets/report_ad_banner.dart';
 import '../../core/widgets/shimmer_loading.dart';
 import '../../config/constants/app_constants.dart';
 import '../../core/api/api_client.dart';
@@ -29,9 +32,6 @@ import '../../providers/ad_provider.dart';
 import '../places/utils/route_polyline_utils.dart';
 import '../../widgets/ad_cards.dart';
 import '../profile/user_public_profile_screen.dart';
-
-// Cooldown set to prevent rapid reaction taps (1s debounce)
-final Set<String> _reactingReports = {};
 
 class ReportsListScreen extends StatefulWidget {
   const ReportsListScreen({super.key});
@@ -91,8 +91,14 @@ class _ReportsListScreenState extends State<ReportsListScreen>
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      body: SafeArea(
+    return AnnotatedRegion<SystemUiOverlayStyle>(
+      value: const SystemUiOverlayStyle(
+        statusBarColor: AppTheme.backgroundColor,
+        statusBarIconBrightness: Brightness.dark,
+        statusBarBrightness: Brightness.light,
+      ),
+      child: Scaffold(
+        body: SafeArea(
         child: Column(
           children: [
             Container(
@@ -103,6 +109,15 @@ class _ReportsListScreenState extends State<ReportsListScreen>
                 children: [
                   Row(
                     children: [
+                      Container(
+                        padding: const EdgeInsets.all(8),
+                        decoration: BoxDecoration(
+                          color: AppTheme.errorColor.withOpacity(0.1),
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        child: Icon(Icons.warning, color: AppTheme.errorColor, size: 22),
+                      ),
+                      const SizedBox(width: 12),
                       Text(context.t('Reports'),
                           style: const TextStyle(
                               fontSize: AppTheme.text2xl,
@@ -153,6 +168,7 @@ class _ReportsListScreenState extends State<ReportsListScreen>
             ),
           ],
         ),
+      ),
       ),
     );
   }
@@ -258,7 +274,13 @@ class _ReportsListScreenState extends State<ReportsListScreen>
     });
   }
 
-  void _showSubmitReportSheet(BuildContext context) async {
+  Future<void> _showSubmitReportSheet(BuildContext context) async {
+    // Guest mode: creating a report is an action → requires login.
+    if (!await requireLogin(context)) return;
+    if (!context.mounted) return;
+    // After returning from a successful login the auth state is updated, so
+    // re-check before opening the sheet.
+    if (!context.read<AuthProvider>().isAuthenticated) return;
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
@@ -460,17 +482,26 @@ class _RecentReportsTab extends StatefulWidget {
 }
 
 class _RecentReportsTabState extends State<_RecentReportsTab> {
-  // Random ad slot interval per screen load (3-6 reports between ads)
-  late final int _adInterval = 3 + math.Random().nextInt(4);
-
-  /// Build merged feed: up to [_adInterval] reports then one ad, repeating
+  /// Facebook-style feed: ads randomly inserted after reports (~25% chance each)
   List<dynamic> _buildFeed(List<ReportModel> reports, List<AdCampaignModel> ads) {
     final feed = <dynamic>[];
-    int r = 0, a = 0;
-    while (r < reports.length) {
-      for (int i = 0; i < _adInterval && r < reports.length; i++) feed.add(reports[r++]);
-      if (a < ads.length && r < reports.length) feed.add(ads[a++]);
+    int adIndex = 0;
+    final random = math.Random();
+
+    for (int i = 0; i < reports.length; i++) {
+      feed.add(reports[i]);
+      // After each report (except last), randomly insert an ad
+      if (i < reports.length - 1 && adIndex < ads.length && random.nextDouble() < 0.25) {
+        feed.add(ads[adIndex++]);
+      }
     }
+
+    // Guarantee at least 1 ad if we have ads and 2+ reports
+    if (adIndex == 0 && ads.isNotEmpty && reports.length >= 2) {
+      final pos = 1 + random.nextInt(reports.length - 1);
+      feed.insert(pos, ads[adIndex++]);
+    }
+
     return feed;
   }
 
@@ -507,7 +538,14 @@ class _RecentReportsTabState extends State<_RecentReportsTab> {
                 if (index == 1) return Padding(padding: const EdgeInsets.only(bottom: 8, left: 4, top: 8), child: Text('${filtered.length} ${filtered.length == 1 ? context.t('report') : context.t('reports')} ${context.t('near you')}', style: const TextStyle(color: AppTheme.textSecondary)));
                 if (index > feed.length + 1) return const Padding(padding: EdgeInsets.all(16), child: Center(child: CircularProgressIndicator(strokeWidth: 2)));
                 final item = feed[index - 2];
-                if (item is AdCampaignModel) return AdReportCard(key: ValueKey('ad-report-${item.id}'), ad: item);
+                if (item is AdCampaignModel) {
+                  // Find nearest report above this ad for coin crediting
+                  dynamic nearestReportId;
+                  for (int j = index - 3; j >= 0; j--) {
+                    if (feed[j] is ReportModel) { nearestReportId = feed[j].id; break; }
+                  }
+                  return AdReportCard(key: ValueKey('ad-report-${item.id}'), ad: item, reportId: nearestReportId, adContext: 'report');
+                }
                 return _ReportCard(report: item as ReportModel, showStatusBadge: true);
               },
             ),
@@ -548,8 +586,6 @@ class _EmergencyReportsTab extends StatefulWidget {
 
 class _EmergencyReportsTabState extends State<_EmergencyReportsTab> {
   final ScrollController _scrollController = ScrollController();
-  // Random ad slot interval per screen load (3-6 reports between ads)
-  late final int _adInterval = 3 + math.Random().nextInt(4);
 
   @override
   void initState() {
@@ -570,13 +606,24 @@ class _EmergencyReportsTabState extends State<_EmergencyReportsTab> {
     }
   }
 
+  /// Facebook-style feed: ads randomly inserted after reports (~25% chance each)
   List<dynamic> _buildFeed(List<ReportModel> reports, List<AdCampaignModel> ads) {
     final feed = <dynamic>[];
-    int r = 0, a = 0;
-    while (r < reports.length) {
-      for (int i = 0; i < _adInterval && r < reports.length; i++) feed.add(reports[r++]);
-      if (a < ads.length && r < reports.length) feed.add(ads[a++]);
+    int adIndex = 0;
+    final random = math.Random();
+
+    for (int i = 0; i < reports.length; i++) {
+      feed.add(reports[i]);
+      if (i < reports.length - 1 && adIndex < ads.length && random.nextDouble() < 0.25) {
+        feed.add(ads[adIndex++]);
+      }
     }
+
+    if (adIndex == 0 && ads.isNotEmpty && reports.length >= 2) {
+      final pos = 1 + random.nextInt(reports.length - 1);
+      feed.insert(pos, ads[adIndex++]);
+    }
+
     return feed;
   }
 
@@ -599,8 +646,14 @@ class _EmergencyReportsTabState extends State<_EmergencyReportsTab> {
               if (index == 0) return _StatusCard(onTap: widget.onStatusTap);
               if (index == 1) return Padding(padding: const EdgeInsets.only(bottom: 12, left: 4, top: 8), child: Row(children: [const Icon(Icons.warning_amber, color: AppTheme.errorColor, size: 20), const SizedBox(width: 8), Text('${emergencyReports.length} ${emergencyReports.length == 1 ? context.t('emergency report') : context.t('emergency reports')}', style: const TextStyle(color: AppTheme.errorColor, fontWeight: FontWeight.w600))]));
               final item = feed[index - 2];
-              if (item is AdCampaignModel) return AdReportCard(key: ValueKey('ad-emergency-${item.id}'), ad: item);
-              return _ReportCard(report: item as ReportModel, highlightEmergency: true);
+                if (item is AdCampaignModel) {
+                  dynamic nearestReportId;
+                  for (int j = index - 3; j >= 0; j--) {
+                    if (feed[j] is ReportModel) { nearestReportId = feed[j].id; break; }
+                  }
+                  return AdReportCard(key: ValueKey('ad-emergency-${item.id}'), ad: item, reportId: nearestReportId, adContext: 'report');
+                }
+                return _ReportCard(report: item as ReportModel, highlightEmergency: true);
             },
           ),
         );
@@ -716,48 +769,69 @@ class _ReportCard extends StatelessWidget {
                     Container(padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2), decoration: BoxDecoration(color: catColor.withOpacity(0.12), borderRadius: BorderRadius.circular(5)), child: Text(report.categoryName, style: TextStyle(fontSize: AppTheme.textXs, color: catColor, fontWeight: FontWeight.w600))),
                   ]),
                 ])),
-                if (showStatusBadge) Container(padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4), decoration: BoxDecoration(color: statusColor.withOpacity(0.12), borderRadius: BorderRadius.circular(12)), child: Text(report.status.toUpperCase(), style: TextStyle(fontSize: AppTheme.textXs, color: statusColor, fontWeight: FontWeight.w700))),
+                if (showStatusBadge) Container(padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4), decoration: BoxDecoration(color: statusColor.withOpacity(0.12), borderRadius: BorderRadius.circular(12)), child: Text(report.status.toUpperCase(), style: TextStyle(fontSize: AppTheme.textXs, color: statusColor, fontWeight: FontWeight.w600))),
               ]),
             ),
             const SizedBox(height: 12),
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Expanded(child: Text(report.title, style: const TextStyle(fontSize: AppTheme.textLg, fontWeight: FontWeight.w700))),
-                if (report.isEmergency) ...[
-                  const SizedBox(width: 8),
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                    decoration: BoxDecoration(color: AppTheme.errorColor, borderRadius: BorderRadius.circular(8)),
-                    child: const Row(mainAxisSize: MainAxisSize.min, children: [
-                      Icon(Icons.bolt, size: 12, color: Colors.white),
-                      SizedBox(width: 3),
-                      Text('EMERGENCY', style: TextStyle(fontSize: 9, color: Colors.white, fontWeight: FontWeight.w800)),
-                    ]),
-                  ),
-                ],
-              ],
-            ),
-            const SizedBox(height: 8),
-            Text(report.description, style: const TextStyle(fontSize: AppTheme.textBase, height: 1.6)),
+            if (report.isEmergency)
+              Container(
+                margin: const EdgeInsets.only(bottom: 8),
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                decoration: BoxDecoration(color: AppTheme.errorColor, borderRadius: BorderRadius.circular(8)),
+                child: const Row(mainAxisSize: MainAxisSize.min, children: [
+                  Icon(Icons.bolt, size: 12, color: Colors.white),
+                  SizedBox(width: 3),
+                  Text('EMERGENCY', style: TextStyle(fontSize: 9, color: Colors.white, fontWeight: FontWeight.w700)),
+                ]),
+              ),
+            Text(report.description, style: const TextStyle(fontSize: AppTheme.textLg, height: 1.6, fontWeight: FontWeight.normal)),
             if (report.imageUrls.isNotEmpty) ...[
               const SizedBox(height: 12),
               ClipRRect(borderRadius: BorderRadius.circular(16), child: ImageCarouselWidget(images: report.imageUrls, height: 230)),
             ],
             const SizedBox(height: 14),
             Row(children: [
-              if (report.priority.isNotEmpty) Container(padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6), decoration: BoxDecoration(color: AppTheme.primaryLight.withOpacity(0.12), borderRadius: BorderRadius.circular(20)), child: Text(report.priority.toUpperCase(), style: TextStyle(color: report.isEmergency ? AppTheme.errorColor : AppTheme.primaryColor, fontSize: AppTheme.textXs + 1, fontWeight: FontWeight.w700))),
+              if (report.priority.isNotEmpty) Container(padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6), decoration: BoxDecoration(color: AppTheme.primaryLight.withOpacity(0.12), borderRadius: BorderRadius.circular(20)), child: Text(report.priority.toUpperCase(), style: TextStyle(color: report.isEmergency ? AppTheme.errorColor : AppTheme.primaryColor, fontSize: AppTheme.textXs + 1, fontWeight: FontWeight.w600))),
               if (report.district != null) ...[const SizedBox(width: 8), Expanded(child: Text(report.district!, style: const TextStyle(color: AppTheme.textSecondary, fontSize: AppTheme.textSm), overflow: TextOverflow.ellipsis))],
             ]),
             const SizedBox(height: 12), const Divider(), const SizedBox(height: 8),
             Row(children: [
               _ReactionButton(helpfulCount: report.helpfulCount, unhelpfulCount: report.unhelpfulCount, userReaction: report.userReaction, onTapHelpful: () => _toggleReaction(context, report, 'helpful'), onTapUnhelpful: () => _toggleReaction(context, report, 'unhelpful')),
-              const SizedBox(width: 16),
-              GestureDetector(onTap: () => _showCommentsSheet(context, report), child: Row(mainAxisSize: MainAxisSize.min, children: [Icon(Icons.comment, size: 16, color: AppTheme.textSecondary), const SizedBox(width: 3), Text('${report.commentsCount}', style: const TextStyle(fontSize: AppTheme.textSm + 1, color: AppTheme.textSecondary))])),
-              const SizedBox(width: 16),
-              GestureDetector(onTap: () => _shareReport(context, report), child: Container(padding: const EdgeInsets.all(6), decoration: BoxDecoration(color: AppTheme.primaryLight.withOpacity(0.1), borderRadius: BorderRadius.circular(8)), child: const Icon(Icons.share, size: 16, color: AppTheme.primaryColor))),
+              const SizedBox(width: 8),
+              GestureDetector(
+                onTap: () => _showCommentsSheet(context, report),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  decoration: BoxDecoration(color: AppTheme.textSecondary.withOpacity(0.06), borderRadius: BorderRadius.circular(20)),
+                  child: Row(mainAxisSize: MainAxisSize.min, children: [
+                    Icon(Icons.chat_bubble_outline, size: 18, color: AppTheme.textSecondary),
+                    const SizedBox(width: 6),
+                    Text('${report.commentsCount}', style: TextStyle(fontSize: AppTheme.textSm + 1, color: AppTheme.textSecondary)),
+                  ]),
+                ),
+              ),
+              const SizedBox(width: 8),
+              GestureDetector(
+                onTap: () => _shareReport(context, report),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  decoration: BoxDecoration(color: AppTheme.textSecondary.withOpacity(0.06), borderRadius: BorderRadius.circular(20)),
+                  child: const Icon(Icons.share, size: 18, color: AppTheme.textSecondary),
+                ),
+              ),
               const Spacer(),
-              GestureDetector(onTap: () => _showOnMap(context, report), child: Container(padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4), decoration: BoxDecoration(color: AppTheme.infoColor.withOpacity(0.1), borderRadius: BorderRadius.circular(8)), child: Row(mainAxisSize: MainAxisSize.min, children: [Icon(Icons.map_outlined, size: 14, color: AppTheme.infoColor), const SizedBox(width: 4), Text(context.t('View map'), style: const TextStyle(fontSize: AppTheme.textXs, color: AppTheme.infoColor, fontWeight: FontWeight.w600))]))),
+              GestureDetector(
+                onTap: () => _showOnMap(context, report),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  decoration: BoxDecoration(color: AppTheme.infoColor.withOpacity(0.08), borderRadius: BorderRadius.circular(20)),
+                  child: Row(mainAxisSize: MainAxisSize.min, children: [
+                    Icon(Icons.map_outlined, size: 18, color: AppTheme.infoColor),
+                    const SizedBox(width: 6),
+                    Text(context.t('Map'), style: TextStyle(fontSize: AppTheme.textSm, color: AppTheme.infoColor, fontWeight: FontWeight.w600)),
+                  ]),
+                ),
+              ),
             ]),
           ]),
         ),
@@ -766,9 +840,6 @@ class _ReportCard extends StatelessWidget {
   }
 
   void _toggleReaction(BuildContext context, ReportModel report, String type) {
-    if (_reactingReports.contains(report.id)) return;
-    _reactingReports.add(report.id);
-    Future.delayed(const Duration(seconds: 1), () => _reactingReports.remove(report.id));
     final api = ApiClient.instance; final provider = context.read<ReportProvider>();
     final newUserReaction = report.userReaction == type ? null : type;
     int deltaHelpful = report.helpfulCount; int deltaUnhelpful = report.unhelpfulCount;
@@ -803,84 +874,51 @@ class _ReportCard extends StatelessWidget {
   }
 }
 
-// ============ REACTION BUTTON (Facebook-style) ============
-class _ReactionButton extends StatefulWidget {
+// ============ REACTION BUTTONS (Agree / Disagree) ============
+class _ReactionButton extends StatelessWidget {
   final int helpfulCount; final int unhelpfulCount; final String? userReaction;
   final VoidCallback onTapHelpful; final VoidCallback onTapUnhelpful;
   const _ReactionButton({required this.helpfulCount, required this.unhelpfulCount, this.userReaction, required this.onTapHelpful, required this.onTapUnhelpful});
-  @override State<_ReactionButton> createState() => _ReactionButtonState();
-}
-
-class _ReactionButtonState extends State<_ReactionButton> {
-  OverlayEntry? _overlayEntry; final LayerLink _layerLink = LayerLink();
-
-  @override void dispose() { _removeOverlay(); super.dispose(); }
-  void _removeOverlay() { _overlayEntry?.remove(); _overlayEntry = null; }
-
-  void _showReactionPopup(BuildContext context) {
-    _removeOverlay();
-    final isLiked = widget.userReaction == 'helpful'; final isDisliked = widget.userReaction == 'unhelpful';
-    final overlayBox = Overlay.of(context).context.findRenderObject() as RenderBox?;
-    final buttonBox = context.findRenderObject() as RenderBox?;
-    var left = 16.0;
-    var top = 0.0;
-    if (buttonBox != null && overlayBox != null) {
-      final pos = buttonBox.localToGlobal(Offset.zero, ancestor: overlayBox);
-      left = pos.dx + buttonBox.size.width / 2 - 84;
-      if (left < 8) left = 8;
-      if (left + 168 > overlayBox.size.width) left = overlayBox.size.width - 168;
-      top = pos.dy - 64;
-      if (top < 8) top = pos.dy + buttonBox.size.height + 8;
-    }
-    _overlayEntry = OverlayEntry(
-      builder: (context) => GestureDetector(
-        onTap: _removeOverlay,
-        child: Stack(children: [
-          Positioned(
-            left: left,
-            top: top,
-            child: Material(
-              elevation: 8,
-              borderRadius: BorderRadius.circular(24),
-              color: Colors.white,
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(24),
-                  boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.15), blurRadius: 12, offset: const Offset(0, 4))],
-                ),
-                child: Row(mainAxisSize: MainAxisSize.min, children: [
-                  GestureDetector(onTap: () { _removeOverlay(); widget.onTapHelpful(); }, child: Container(padding: const EdgeInsets.all(10), child: Column(mainAxisSize: MainAxisSize.min, children: [Icon(Icons.thumb_up, size: 28, color: isLiked ? AppTheme.infoColor : AppTheme.textSecondary), Text(context.t('Like'), style: TextStyle(fontSize: AppTheme.textXs + 1, color: isLiked ? AppTheme.infoColor : AppTheme.textSecondary, fontWeight: isLiked ? FontWeight.bold : FontWeight.normal))]))),
-                  Container(width: 1, height: 40, color: AppTheme.dividerColor),
-                  GestureDetector(onTap: () { _removeOverlay(); widget.onTapUnhelpful(); }, child: Container(padding: const EdgeInsets.all(10), child: Column(mainAxisSize: MainAxisSize.min, children: [Icon(Icons.thumb_down, size: 28, color: isDisliked ? AppTheme.errorColor : AppTheme.textSecondary), Text(context.t('Dislike'), style: TextStyle(fontSize: AppTheme.textXs + 1, color: isDisliked ? AppTheme.errorColor : AppTheme.textSecondary, fontWeight: isDisliked ? FontWeight.bold : FontWeight.normal))]))),
-                ]),
-              ),
-            ),
-          ),
-        ]),
-      ),
-    );
-    Overlay.of(context).insert(_overlayEntry!);
-  }
 
   @override
   Widget build(BuildContext context) {
-    final isLiked = widget.userReaction == 'helpful';
-    return CompositedTransformTarget(
-      link: _layerLink,
-      child: GestureDetector(
-        onTap: () => widget.onTapHelpful(),
-        onLongPressStart: (_) => _showReactionPopup(context),
-        child: Container(padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4), decoration: BoxDecoration(color: isLiked ? AppTheme.infoColor.withOpacity(0.08) : AppTheme.textSecondary.withOpacity(0.08), borderRadius: BorderRadius.circular(6)),
+    final isAgreed = userReaction == 'helpful';
+    final isDisagreed = userReaction == 'unhelpful';
+    return Row(mainAxisSize: MainAxisSize.min, children: [
+      GestureDetector(
+        onTap: onTapHelpful,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          decoration: BoxDecoration(
+            color: isAgreed ? AppTheme.infoColor.withOpacity(0.12) : AppTheme.textSecondary.withOpacity(0.06),
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(color: isAgreed ? AppTheme.infoColor.withOpacity(0.3) : Colors.transparent),
+          ),
           child: Row(mainAxisSize: MainAxisSize.min, children: [
-            Icon(isLiked ? Icons.thumb_up : Icons.thumb_up_outlined, size: 18, color: isLiked ? AppTheme.infoColor : AppTheme.textSecondary),
-            const SizedBox(width: 4),
-            Text('${widget.helpfulCount}', style: TextStyle(fontSize: AppTheme.textSm + 1, fontWeight: isLiked ? FontWeight.w700 : FontWeight.w500, color: isLiked ? AppTheme.infoColor : AppTheme.textSecondary)),
+            Icon(isAgreed ? Icons.thumb_up : Icons.thumb_up_outlined, size: 20, color: isAgreed ? AppTheme.infoColor : AppTheme.textSecondary),
+            const SizedBox(width: 6),
+            Text('${helpfulCount}', style: TextStyle(fontSize: AppTheme.textSm + 1, fontWeight: isAgreed ? FontWeight.w700 : FontWeight.w500, color: isAgreed ? AppTheme.infoColor : AppTheme.textSecondary)),
           ]),
         ),
       ),
-    );
+      const SizedBox(width: 10),
+      GestureDetector(
+        onTap: onTapUnhelpful,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          decoration: BoxDecoration(
+            color: isDisagreed ? AppTheme.errorColor.withOpacity(0.12) : AppTheme.textSecondary.withOpacity(0.06),
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(color: isDisagreed ? AppTheme.errorColor.withOpacity(0.3) : Colors.transparent),
+          ),
+          child: Row(mainAxisSize: MainAxisSize.min, children: [
+            Icon(isDisagreed ? Icons.thumb_down : Icons.thumb_down_outlined, size: 20, color: isDisagreed ? AppTheme.errorColor : AppTheme.textSecondary),
+            const SizedBox(width: 6),
+            Text('${unhelpfulCount}', style: TextStyle(fontSize: AppTheme.textSm + 1, fontWeight: isDisagreed ? FontWeight.w700 : FontWeight.w500, color: isDisagreed ? AppTheme.errorColor : AppTheme.textSecondary)),
+          ]),
+        ),
+      ),
+    ]);
   }
 }
 
@@ -992,7 +1030,14 @@ class _ReportMapScreenState extends State<_ReportMapScreen> {
         ),
         if (hasCoords)
           Expanded(child: FlutterMap(mapController: _mapController, options: MapOptions(initialCenter: LatLng(report.latitude!, report.longitude!), initialZoom: 15.0, interactionOptions: const InteractionOptions(flags: InteractiveFlag.all)), children: [
-            TileLayer(urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png', userAgentPackageName: 'np.com.nepalsmarttravel', tileProvider: _offlineTiles),
+            TileLayer(
+              urlTemplate:
+                  'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+              userAgentPackageName: 'np.com.nepalsmarttravel',
+              minZoom: 6.0,
+              maxZoom: 19,
+              // tileProvider: _offlineTiles,
+            ),
             if (_routePoints.length > 1)
               PolylineLayer(
                 polylines: buildRoutePolylines(
@@ -1056,36 +1101,90 @@ class _ReportDetailsSheet extends StatelessWidget {
             if (report.imageUrls.isNotEmpty) ...[ClipRRect(borderRadius: BorderRadius.circular(16), child: ImageCarouselWidget(images: report.imageUrls, height: 240)), const SizedBox(height: 16)],
             GestureDetector(onTap: () { Navigator.pop(context); Navigator.push(context, MaterialPageRoute(builder: (context) => _ReportMapScreen(report: report))); }, child: Container(padding: const EdgeInsets.all(12), decoration: BoxDecoration(color: AppTheme.infoColor.withOpacity(0.06), borderRadius: BorderRadius.circular(12), border: Border.all(color: AppTheme.infoColor.withOpacity(0.2))), child: Row(children: [const Icon(Icons.location_on, size: 18, color: AppTheme.infoColor), const SizedBox(width: 8), Expanded(child: Text(report.district ?? context.t('Unknown location'), style: const TextStyle(fontWeight: FontWeight.w600, fontSize: AppTheme.textBase), maxLines: 1, overflow: TextOverflow.ellipsis)), const SizedBox(width: 8), Text(context.t('View on map'), style: TextStyle(fontSize: AppTheme.textSm, color: AppTheme.infoColor, fontWeight: FontWeight.w600)), const Icon(Icons.chevron_right, size: 18, color: AppTheme.infoColor)]))),
             const SizedBox(height: 12),
-            Text(report.description, style: const TextStyle(fontSize: AppTheme.textBase + 1, height: 1.5)),
+            Text(report.description, style: const TextStyle(fontSize: AppTheme.textBase + 1, height: 1.5, fontWeight: FontWeight.normal)),
+            const SizedBox(height: 16),
+            ReportAdBanner(reportId: report.id, district: report.district),
             const SizedBox(height: 20),
-            Row(children: [Icon(Icons.thumb_up, size: 16, color: AppTheme.textSecondary), const SizedBox(width: 4), Text('${report.helpfulCount} ${context.t('helpful')}', style: const TextStyle(fontSize: AppTheme.textSm + 1, color: AppTheme.textSecondary)), const SizedBox(width: 24), GestureDetector(onTap: () { Navigator.pop(context); _showCommentsSheet(context, report); }, child: Row(mainAxisSize: MainAxisSize.min, children: [Icon(Icons.chat_bubble_outline, size: 16, color: AppTheme.textSecondary), const SizedBox(width: 4), Text('${report.commentsCount} ${context.t('comments')}', style: const TextStyle(fontSize: AppTheme.textSm + 1, color: AppTheme.textSecondary))])), const Spacer(), GestureDetector(onTap: () => _shareReport(context, report), child: Container(padding: const EdgeInsets.all(6), decoration: BoxDecoration(color: AppTheme.primaryLight.withOpacity(0.1), borderRadius: BorderRadius.circular(8)), child: const Icon(Icons.share, size: 16, color: AppTheme.primaryColor)))]),
-const SizedBox(height: 20),
+            Row(children: [
+              Icon(Icons.thumb_up, size: 16, color: AppTheme.textSecondary),
+              const SizedBox(width: 4),
+              Text('${report.helpfulCount}', style: const TextStyle(fontSize: AppTheme.textSm + 1, color: AppTheme.textSecondary)),
+              const SizedBox(width: 16),
+              Icon(Icons.thumb_down, size: 16, color: AppTheme.textSecondary),
+              const SizedBox(width: 4),
+              Text('${report.unhelpfulCount}', style: const TextStyle(fontSize: AppTheme.textSm + 1, color: AppTheme.textSecondary)),
+              const SizedBox(width: 24),
+              GestureDetector(onTap: () { Navigator.pop(context); _showCommentsSheet(context, report); }, child: Row(mainAxisSize: MainAxisSize.min, children: [Icon(Icons.chat_bubble_outline, size: 16, color: AppTheme.textSecondary), const SizedBox(width: 4), Text('${report.commentsCount}', style: const TextStyle(fontSize: AppTheme.textSm + 1, color: AppTheme.textSecondary))])),
+              const Spacer(),
+              GestureDetector(onTap: () => _shareReport(context, report), child: Container(padding: const EdgeInsets.all(6), decoration: BoxDecoration(color: AppTheme.primaryLight.withOpacity(0.1), borderRadius: BorderRadius.circular(8)), child: const Icon(Icons.share, size: 16, color: AppTheme.primaryColor))),
+            ]),
+            const SizedBox(height: 16),
             Row(children: [
               Expanded(
-                child: OutlinedButton.icon(
-                  onPressed: () => _toggleHelpful(context, report),
-                  icon: const Icon(Icons.thumb_up, size: 18),
-                  label: Text(context.t('Helpful')),
+                child: GestureDetector(
+                  onTap: () => _toggleHelpful(context, report),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: AppTheme.infoColor.withOpacity(0.3)),
+                      color: AppTheme.infoColor.withOpacity(0.06),
+                    ),
+                    child: const Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+                      Icon(Icons.thumb_up, size: 22, color: AppTheme.infoColor),
+                    ]),
+                  ),
                 ),
               ),
               const SizedBox(width: 12),
               Expanded(
-                child: OutlinedButton.icon(
-                  onPressed: () => _shareReport(context, report),
-                  icon: const Icon(Icons.share, size: 18),
-                  label: Text(context.t('Share')),
+                child: GestureDetector(
+                  onTap: () => _toggleUnhelpful(context, report),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: AppTheme.errorColor.withOpacity(0.3)),
+                      color: AppTheme.errorColor.withOpacity(0.06),
+                    ),
+                    child: const Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+                      Icon(Icons.thumb_down, size: 22, color: AppTheme.errorColor),
+                    ]),
+                  ),
                 ),
-),
-          ]), 
-        ]),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: GestureDetector(
+                  onTap: () => _shareReport(context, report),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: AppTheme.primaryColor.withOpacity(0.3)),
+                      color: AppTheme.primaryColor.withOpacity(0.06),
+                    ),
+                    child: const Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+                      Icon(Icons.share, size: 22, color: AppTheme.primaryColor),
+                    ]),
+                  ),
+                ),
+              ),
+            ]),
+          ]),
         );
       },
     );
   }
 
   void _toggleHelpful(BuildContext context, ReportModel report) {
-    final helpfulMsg = context.tr('Marked as helpful');
+    final helpfulMsg = context.tr('Marked as agree');
     ApiClient.instance.dio.post('/reports/${report.id}/reactions', data: {'reaction_type': 'helpful'}).then((_) { if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(helpfulMsg), duration: const Duration(seconds: 1))); }).catchError((_) {});
+  }
+
+  void _toggleUnhelpful(BuildContext context, ReportModel report) {
+    final msg = context.tr('Marked as disagree');
+    ApiClient.instance.dio.post('/reports/${report.id}/reactions', data: {'reaction_type': 'unhelpful'}).then((_) { if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg), duration: const Duration(seconds: 1))); }).catchError((_) {});
   }
 
   void _showCommentsSheet(BuildContext context, ReportModel report) {
@@ -1166,6 +1265,9 @@ class _CommentsSheetState extends State<_CommentsSheet> {
   Future<void> _submitComment() async {
     final content = _commentController.text.trim();
     if (content.isEmpty) return;
+    // Guest mode: posting a comment is an action → requires login.
+    if (!await requireLogin(context)) return;
+    if (!mounted) return;
     final failMsg = context.tr('Failed to post comment. Please try again.');
     setState(() => _isSubmitting = true);
     try {
@@ -1218,7 +1320,7 @@ class _CommentsSheetState extends State<_CommentsSheet> {
               const SizedBox(height: 2),
               if (comment.replyToName != null)
                 Text('@${comment.replyToName}', style: TextStyle(fontSize: AppTheme.textXs + 1, color: AppTheme.primaryColor.withOpacity(0.7), fontWeight: FontWeight.w500)),
-              Text(comment.content, style: const TextStyle(fontSize: AppTheme.textSm + 1)),
+              Text(comment.content, style: const TextStyle(fontSize: AppTheme.textSm + 1, fontWeight: FontWeight.normal)),
               const SizedBox(height: 2),
               GestureDetector(
                 onTap: () => _startReply(comment.id, comment.userName),
@@ -1248,30 +1350,17 @@ class _CommentsSheetState extends State<_CommentsSheet> {
               Center(child: Container(width: 40, height: 4, decoration: BoxDecoration(color: AppTheme.textSecondary.withOpacity(0.3), borderRadius: BorderRadius.circular(2)))),
               const SizedBox(height: 12),
               Row(children: [
-                const Icon(Icons.comment, size: 20, color: AppTheme.infoColor),
-                const SizedBox(width: 8),
-                Text('${context.t('Comments')} (${_comments.length})', style: const TextStyle(fontSize: AppTheme.textXl, fontWeight: FontWeight.bold)),
+                Text('${context.t('Comments')} (${_comments.length})', style: const TextStyle(fontSize: AppTheme.textBase, fontWeight: FontWeight.w600, color: AppTheme.textSecondary)),
                 const Spacer(),
-                Text('${widget.report.title}', style: const TextStyle(fontSize: AppTheme.textSm, color: AppTheme.textSecondary), maxLines: 1, overflow: TextOverflow.ellipsis),
+                GestureDetector(onTap: () => Navigator.pop(context), child: const Icon(Icons.close, size: 20, color: AppTheme.textSecondary)),
               ]),
-              const Divider(height: 16),
-              Expanded(
-                child: _isLoading
-                    ? const Center(child: CircularProgressIndicator())
-                    : _comments.isEmpty
-                        ? Center(child: Column(mainAxisSize: MainAxisSize.min, children: [Icon(Icons.chat_bubble_outline, size: 48, color: AppTheme.textSecondary.withOpacity(0.3)), const SizedBox(height: 8), Text(context.t('No comments yet'), style: const TextStyle(color: AppTheme.textSecondary)), const SizedBox(height: 4), Text(context.t('Be the first to comment!'), style: const TextStyle(color: AppTheme.textSecondary, fontSize: AppTheme.textSm))]))
-                        : ListView.builder(
-                            controller: _scrollController,
-                            itemCount: _comments.length,
-                            itemBuilder: (ctx, i) => _buildCommentItem(_comments[i]),
-                          ),
-              ),
-              const Divider(height: 1),
+              const SizedBox(height: 10),
               // Reply indicator
               if (_replyingToCommentId != null)
                 Container(
+                  margin: const EdgeInsets.only(bottom: 8),
                   padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-                  color: AppTheme.primaryColor.withOpacity(0.05),
+                  decoration: BoxDecoration(color: AppTheme.primaryColor.withOpacity(0.05), borderRadius: BorderRadius.circular(8)),
                   child: Row(children: [
                     Icon(Icons.reply, size: 14, color: AppTheme.primaryColor),
                     const SizedBox(width: 4),
@@ -1280,7 +1369,7 @@ class _CommentsSheetState extends State<_CommentsSheet> {
                     GestureDetector(onTap: _cancelReply, child: const Icon(Icons.close, size: 16, color: AppTheme.textSecondary)),
                   ]),
                 ),
-              const SizedBox(height: 6),
+              // Input field at top
               Row(children: [
                 Expanded(
                   child: TextField(
@@ -1308,11 +1397,25 @@ class _CommentsSheetState extends State<_CommentsSheet> {
                         ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
                         : const Icon(Icons.send, color: Colors.white, size: 20),
                   ),
-),
-]),
-],
-      ),
-    );
+                ),
+              ]),
+              const SizedBox(height: 8),
+              const Divider(height: 1),
+              const SizedBox(height: 4),
+              // Comments list
+              Expanded(
+                child: _isLoading
+                    ? const Center(child: CircularProgressIndicator())
+                    : _comments.isEmpty
+                        ? Center(child: Column(mainAxisSize: MainAxisSize.min, children: [Icon(Icons.chat_bubble_outline, size: 48, color: AppTheme.textSecondary.withOpacity(0.3)), const SizedBox(height: 8), Text(context.t('No comments yet'), style: const TextStyle(color: AppTheme.textSecondary)), const SizedBox(height: 4), Text(context.t('Be the first to comment!'), style: const TextStyle(color: AppTheme.textSecondary, fontSize: AppTheme.textSm))]))
+                        : ListView.builder(
+                            controller: _scrollController,
+                            itemCount: _comments.length,
+                            itemBuilder: (ctx, i) => _buildCommentItem(_comments[i]),
+                          ),
+              ),
+            ]),
+          );
         },
       ),
     );
@@ -1406,6 +1509,47 @@ class _SubmitReportSheetState extends State<_SubmitReportSheet> {
 
   Future<void> _retakePhoto() async { if (_capturedPhoto != null) await CameraService.cleanUp(_capturedPhoto!); setState(() => _capturedPhoto = null); await _capturePhoto(); }
 
+  void _showBioPrompt(BuildContext context, AuthProvider auth) {
+    showModalBottomSheet(
+      context: context,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (ctx) {
+        final bioController = TextEditingController();
+        return Padding(
+          padding: EdgeInsets.fromLTRB(24, 24, 24, MediaQuery.of(ctx).viewInsets.bottom + 24),
+          child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Center(child: Container(width: 40, height: 4, decoration: BoxDecoration(color: Colors.grey.shade300, borderRadius: BorderRadius.circular(2)))),
+            const SizedBox(height: 16),
+            Text(context.t('Add a Bio'), style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w600)),
+            const SizedBox(height: 4),
+            Text(context.t('Tell others about yourself. This shows on your profile.'), style: TextStyle(color: Colors.grey.shade600, fontSize: 13)),
+            const SizedBox(height: 16),
+            TextField(
+              controller: bioController,
+              maxLines: 3,
+              maxLength: 200,
+              decoration: InputDecoration(hintText: context.t('e.g. Traveler, foodie, Kathmandu local...'), border: OutlineInputBorder(borderRadius: BorderRadius.circular(12))),
+            ),
+            const SizedBox(height: 16),
+            Row(children: [
+              Expanded(child: OutlinedButton(onPressed: () => Navigator.pop(ctx), child: Text(context.t('Later')))),
+              const SizedBox(width: 12),
+              Expanded(child: ElevatedButton(
+                onPressed: () async {
+                  final bio = bioController.text.trim();
+                  if (bio.isEmpty) return;
+                  await auth.updateProfile({'bio': bio});
+                  if (ctx.mounted) Navigator.pop(ctx);
+                },
+                child: Text(context.t('Save')),
+              )),
+            ]),
+          ]),
+        );
+      },
+    );
+  }
+
   Future<void> _submitReport() async {
     if (!_formKey.currentState!.validate()) return;
     final provider = context.read<ReportProvider>();
@@ -1430,11 +1574,30 @@ class _SubmitReportSheetState extends State<_SubmitReportSheet> {
       }
       return;
     }
-    final success = await provider.submitReport(title: _formValues['title']?.toString() ?? '', description: _formValues['description']?.toString() ?? '', categoryId: int.tryParse(_formValues['category_id']?.toString() ?? '') ?? 0, latitude: _lat!, longitude: _lng!, district: _district, priority: _formValues['priority']?.toString(), photoPath: _capturedPhoto?.path, captureLatitude: _captureLocationService.captureLatitude, captureLongitude: _captureLocationService.captureLongitude);
+    final success = await provider.submitReport(
+      description: _formValues['description']?.toString() ?? '',
+      latitude: _lat!,
+      longitude: _lng!,
+      district: _district,
+      photoPath: _capturedPhoto?.path,
+      captureLatitude: _captureLocationService.captureLatitude,
+      captureLongitude: _captureLocationService.captureLongitude,
+    );
     _captureLocationService.clear();
     if (mounted) {
       setState(() => _isSubmitting = false);
-      if (success) { if (_capturedPhoto != null) CameraService.cleanUp(_capturedPhoto!); Navigator.pop(context); ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(successMsg), backgroundColor: AppTheme.successColor)); provider.fetchReports(lat: _lat, lng: _lng, radiusKm: 20.0); provider.fetchMyReports(); }
+      if (success) {
+        if (_capturedPhoto != null) CameraService.cleanUp(_capturedPhoto!);
+        Navigator.pop(context);
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(successMsg), backgroundColor: AppTheme.successColor));
+        provider.fetchReports(lat: _lat, lng: _lng, radiusKm: 20.0);
+        provider.fetchMyReports();
+
+        final auth = context.read<AuthProvider>();
+        if (auth.user?.bio == null || auth.user!.bio!.trim().isEmpty) {
+          _showBioPrompt(context, auth);
+        }
+      }
     }
   }
 
@@ -1508,7 +1671,7 @@ class _SubmitReportSheetState extends State<_SubmitReportSheet> {
               ),
               child: _isSubmitting
                   ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                  : Text(formConfig?.submitButtonText ?? context.t('Submit'), style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+                  : Text(formConfig?.submitButtonText ?? context.t('Submit'), style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
             ),
           ),
         ],

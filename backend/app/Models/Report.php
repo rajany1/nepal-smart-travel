@@ -35,6 +35,12 @@ class Report extends Model
         'is_live_capture',
         'ai_analysis',
         'ai_analyzed_at',
+        'location_name',
+        'report_subcategory',
+        'is_active',
+        'expires_at',
+        'confirmed_by_count',
+        'last_confirmed_at',
     ];
 
     protected $casts = [
@@ -44,14 +50,18 @@ class Report extends Model
         'photo_gps_lng' => 'decimal:7',
         'gps_distance_km' => 'decimal:3',
         'is_live_capture' => 'boolean',
+        'is_active' => 'boolean',
         'photo_captured_at' => 'datetime',
         'verified_at' => 'datetime',
+        'expires_at' => 'datetime',
+        'last_confirmed_at' => 'datetime',
         'ai_analysis' => 'array',
         'ai_analyzed_at' => 'datetime',
         'authenticity_score' => 'decimal:2',
         'helpful_count' => 'integer',
         'unhelpful_count' => 'integer',
         'comments_count' => 'integer',
+        'confirmed_by_count' => 'integer',
     ];
 
     public function place(): BelongsTo
@@ -82,6 +92,27 @@ class Report extends Model
     public function media(): HasMany
     {
         return $this->hasMany(ReportMedia::class);
+    }
+
+    public function confirmations(): HasMany
+    {
+        return $this->hasMany(ReportConfirmation::class);
+    }
+
+    public function getConfidenceScoreAttribute(): int
+    {
+        $authScore = (int) ($this->authenticity_score ?? 0);
+        $confirmBonus = min(100, $this->confirmed_by_count * 15);
+        return min(100, $confirmBonus + $authScore);
+    }
+
+    public function getTimeStateAttribute(): string
+    {
+        $minutesAgo = now()->diffInMinutes($this->created_at);
+        if ($minutesAgo < 60) return 'live';
+        if ($this->created_at->isToday()) return 'today';
+        if ($this->created_at->diffInDays(now()) <= 7) return 'recent';
+        return 'expired';
     }
 
     protected static function booted(): void

@@ -38,6 +38,8 @@ class DatabaseSeeder extends Seeder
             ['name' => 'Hotels', 'icon' => 'hotel'],
             ['name' => 'Restaurants', 'icon' => 'restaurant'],
             ['name' => 'Emergency', 'icon' => 'local_hospital'],
+            ['name' => 'Blood Bank', 'icon' => 'bloodtype'],
+            ['name' => 'Pharmacy', 'icon' => 'medication'],
             ['name' => 'ATMs', 'icon' => 'account_balance'],
             ['name' => 'Fuel', 'icon' => 'local_gas_station'],
             ['name' => 'Activities', 'icon' => 'directions_bike'],

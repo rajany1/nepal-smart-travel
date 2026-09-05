@@ -9,7 +9,14 @@ class DashboardController extends Controller
 {
     public function index()
     {
-        $partner = auth()->user()->business;
+        $user = auth()->user();
+
+        // Enforce email + phone verification
+        if (!$user->email_verified_at) {
+            return redirect()->route('partner.wizard');
+        }
+
+        $partner = $user->business;
         $offers = $partner->offers()->orderBy('created_at', 'desc')->limit(5)->get();
 
         $stats = [
@@ -38,6 +45,6 @@ class DashboardController extends Controller
         $stats['payout_paid'] = round($stats['payout_paid'], 2);
         $stats['payout_pending'] = round($stats['payout_pending'], 2);
 
-        return view('partner.dashboard', compact('partner', 'offers', 'stats'));
+        return view('partner.dashboard', compact('user', 'partner', 'offers', 'stats'));
     }
 }

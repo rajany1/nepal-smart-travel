@@ -26,7 +26,8 @@ class AnalyzeReport implements ShouldQueue
     public function handle(ReportAnalysisService $service): void
     {
         $report = Report::find($this->reportId);
-        if (!$report || $report->status !== 'pending') return;
+        // Skip if missing, already human-reviewed, or no longer pending.
+        if (!$report || $report->verified_by !== null || $report->status !== 'pending') return;
 
         try {
             $service->process($report);

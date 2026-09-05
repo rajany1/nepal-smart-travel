@@ -1,8 +1,6 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
-import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
-import '../../config/themes/app_theme.dart';
-import '../../config/constants/app_constants.dart';
 import '../../providers/auth_provider.dart';
 import '../../providers/profile_provider.dart';
 import '../../core/services/localization_service.dart';
@@ -16,117 +14,188 @@ class AuthInitializationWrapper extends StatefulWidget {
 }
 
 class _AuthInitializationWrapperState
-    extends State<AuthInitializationWrapper> {
+    extends State<AuthInitializationWrapper>
+    with SingleTickerProviderStateMixin {
   bool _initialized = false;
+  static const Duration _timeout = Duration(seconds: 12);
+
+  late AnimationController _animController;
+  late Animation<double> _fadeAnim;
+  late Animation<double> _scaleAnim;
+  late Animation<Offset> _slideAnim;
+
+  @override
+  void initState() {
+    super.initState();
+    _animController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1200),
+    );
+    _fadeAnim = CurvedAnimation(parent: _animController, curve: Curves.easeOut);
+    _scaleAnim = CurvedAnimation(
+      parent: _animController,
+      curve: const Interval(0.0, 0.6, curve: Curves.elasticOut),
+    );
+    _slideAnim = Tween<Offset>(
+      begin: const Offset(0, 0.3),
+      end: Offset.zero,
+    ).animate(CurvedAnimation(parent: _animController, curve: Curves.easeOutCubic));
+
+    _animController.forward();
+  }
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-
     if (_initialized) return;
     _initialized = true;
-
-    _init();
+    WidgetsBinding.instance.addPostFrameCallback((_) => _init());
   }
-
-  static const Duration _timeout = Duration(seconds: 12);
 
   Future<void> _init() async {
     final auth = context.read<AuthProvider>();
-
     try {
-      // Hard safety ceiling: even if a restore / network / settings call
-      // stalls, we must never leave the user staring at the splash. Whatever
-      // finishes first wins; the user is routed to a valid screen either way.
       await auth.initializeAuth().timeout(_timeout);
+    } catch (_) {}
 
-      if (!mounted) return;
+    if (!mounted) return;
 
-      if (auth.isAuthenticated) {
+    if (auth.isAuthenticated) {
+      try {
         final profileProvider = context.read<ProfileProvider>();
         await profileProvider.loadSettings().timeout(_timeout);
-
         if (!mounted) return;
-
         await context
             .read<LocalizationService>()
             .syncFromBackend(profileProvider.settings['language'] as String?)
             .timeout(_timeout);
-
-        if (!mounted) return;
-
-        if (auth.isProfileCompletionRequired) {
-          Navigator.pushReplacementNamed(context, '/profile-completion');
-        } else {
-          Navigator.pushReplacementNamed(context, '/home');
-        }
-      } else {
-        Navigator.pushReplacementNamed(context, '/login');
-      }
-    } catch (e) {
+      } catch (_) {}
       if (!mounted) return;
-      Navigator.pushReplacementNamed(context, '/login');
+      Navigator.pushReplacementNamed(context, '/home');
+      return;
     }
+
+    if (!mounted) return;
+    Navigator.pushReplacementNamed(context, '/home');
+  }
+
+  @override
+  void dispose() {
+    _animController.dispose();
+    super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    final bg = isDark ? AppTheme.darkSurfaceColor : AppTheme.backgroundColor;
-    final primary = isDark ? AppTheme.primaryLight : AppTheme.primaryColor;
-    final text = isDark ? AppTheme.textSecondary.withValues(alpha: 0.8) : AppTheme.textSecondary;
-
     return Scaffold(
-      backgroundColor: bg,
-      body: Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            // Brand mark
-            Container(
-              width: 88,
-              height: 88,
-              decoration: BoxDecoration(
-                color: primary,
-                shape: BoxShape.circle,
-                boxShadow: [
-                  BoxShadow(
-                    color: primary.withValues(alpha: 0.35),
-                    blurRadius: 28,
-                    offset: const Offset(0, 10),
+      body: Container(
+        width: double.infinity,
+        height: double.infinity,
+        decoration: const BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [
+              Color(0xFF004D40),
+              Color(0xFF00695C),
+              Color(0xFF00897B),
+            ],
+          ),
+        ),
+        child: SafeArea(
+          child: Column(
+            children: [
+              const Spacer(flex: 3),
+              // Logo with scale animation
+              ScaleTransition(
+                scale: _scaleAnim,
+                child: Container(
+                  width: 120,
+                  height: 120,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: Colors.white.withOpacity(0.15),
+                    border: Border.all(color: Colors.white.withOpacity(0.3), width: 2),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withOpacity(0.2),
+                        blurRadius: 30,
+                        spreadRadius: 5,
+                      ),
+                    ],
                   ),
-                ],
+                  child: ClipOval(
+                    child: Image.asset(
+                      'assets/images/oripori_logo_dark.png',
+                      fit: BoxFit.contain,
+                      errorBuilder: (_, __, ___) => const Icon(
+                        Icons.explore,
+                        size: 64,
+                        color: Colors.white,
+                      ),
+                    ),
+                  ),
+                ),
               ),
-              child: const Icon(Icons.travel_explore, color: Colors.white, size: 44),
-            ),
-            const SizedBox(height: 22),
-            Text(
-              AppConstants.appName,
-              style: GoogleFonts.poppins(
-                fontSize: 22,
-                fontWeight: FontWeight.w700,
-                color: isDark ? AppTheme.textPrimary : AppTheme.textPrimary,
+              const SizedBox(height: 24),
+              // App name with slide animation
+              SlideTransition(
+                position: _slideAnim,
+                child: FadeTransition(
+                  opacity: _fadeAnim,
+                  child: Column(
+                    children: [
+                      const Text(
+                        'Oripori',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 36,
+                          fontWeight: FontWeight.w800,
+                          letterSpacing: 1.5,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        'Nepal Smart Travel & Local Intelligence',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          color: Colors.white.withOpacity(0.8),
+                          fontSize: 13,
+                          letterSpacing: 0.5,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
               ),
-            ),
-            const SizedBox(height: 6),
-            Text(
-              AppConstants.appTagline,
-              textAlign: TextAlign.center,
-              style: GoogleFonts.poppins(
-                fontSize: AppTheme.textSm,
-                color: text,
+              const Spacer(flex: 3),
+              // Loading indicator
+              FadeTransition(
+                opacity: _fadeAnim,
+                child: Column(
+                  children: [
+                    SizedBox(
+                      width: 32,
+                      height: 32,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 3,
+                        color: Colors.white.withOpacity(0.8),
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    Text(
+                      'Loading...',
+                      style: TextStyle(
+                        color: Colors.white.withOpacity(0.6),
+                        fontSize: 13,
+                      ),
+                    ),
+                  ],
+                ),
               ),
-            ),
-            const SizedBox(height: 34),
-            SizedBox(
-              height: 20,
-              width: 20,
-              child: CircularProgressIndicator(
-                strokeWidth: 2.5,
-                color: primary,
-              ),
-            ),
-          ],
+              const Spacer(),
+            ],
+          ),
         ),
       ),
     );

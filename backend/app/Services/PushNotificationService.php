@@ -72,6 +72,39 @@ class PushNotificationService
         self::sendFcm($fcmTokens, $title, $body, $data, $language);
     }
 
+    /** Send push notification to ALL subscribed users (platform-wide broadcast).
+     *  Used for admin "broadcast to all users" alerts — no location scoping.
+     *  Sends bilingual payload based on each user's language preference.
+     */
+    public static function notifyAllUsers(
+        string $title,
+        string $message,
+        array $data = [],
+        string $settingsKey = 'push_notifications'
+    ): void {
+        $query = PushToken::where('subscribed', true);
+
+        $candidateIds = $query->clone()->distinct()->pluck('user_id');
+        $excludedIds = User::whereIn('id', $candidateIds)
+            ->get()
+            ->filter(fn (User $u) => self::isOptedOut($u, $settingsKey))
+            ->pluck('id');
+        if ($excludedIds->isNotEmpty()) {
+            $query->whereNotIn('user_id', $excludedIds);
+        }
+
+        $tokensByLanguage = [];
+        $tokens = $query->with('user:id,settings')->get();
+        foreach ($tokens as $token) {
+            $lang = $token->user->settings['language'] ?? 'en';
+            $tokensByLanguage[$lang][] = $token->fcm_token;
+        }
+
+        foreach ($tokensByLanguage as $language => $langTokens) {
+            self::sendFcm($langTokens, $title, $message, $data, $language);
+        }
+    }
+
     /**
      * Send push notification to users near a location.
      * Sends bilingual payload based on each user's language preference.

@@ -13,6 +13,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Auth\Events\PasswordReset;
 use Illuminate\Support\Str;
 use Laravel\Sanctum\PersonalAccessToken;
+use Carbon\Carbon;
 
 class AuthController extends Controller
 {
@@ -32,7 +33,7 @@ class AuthController extends Controller
         $request->validate([
             'name' => 'required|string',
             'email' => 'required|email|unique:users',
-            'phone' => 'required|unique:users',
+            'phone' => 'nullable|unique:users',
             'password' => 'required|min:8|regex:/[a-z]/|regex:/[A-Z]/|regex:/[0-9]/',
         ]);
 
@@ -52,15 +53,17 @@ class AuthController extends Controller
 
         $tokens = $this->issueTokenPair($user);
 
-        $otp = $this->sendVerificationOtp($user);
+        $this->sendVerificationOtp($user);
 
         return response()->json([
             'success' => true,
-            'message' => 'User registered successfully',
+            'message' => 'User registered successfully. Verification code sent to your email.',
             ...$tokens,
-            'data' => $user,
-            // Dev bridge: lets the app continue to the OTP screen without a mail server.
-            'otp' => $otp,
+            'data' => [
+                'id' => $user->id,
+                'name' => $user->name,
+                'email' => $user->email,
+            ],
         ]);
     }
 
@@ -104,7 +107,13 @@ class AuthController extends Controller
         return response()->json([
             'success' => true,
             ...$tokens,
-            'data' => $user
+            'data' => [
+                'id' => $user->id,
+                'name' => $user->name,
+                'email' => $user->email,
+                'avatar' => $user->avatar,
+                'role' => $user->roleName ?? 'user',
+            ]
         ]);
     }
 
@@ -125,7 +134,7 @@ class AuthController extends Controller
             'name' => $user->name,
             'email' => $user->email,
             'phone' => $user->phone,
-            'avatar_url' => $user->avatar,
+            'avatar_url' => $user->avatar ? (str_starts_with($user->avatar, 'http') ? $user->avatar : asset('storage/' . $user->avatar)) : null,
             'bio' => $user->bio,
             'role' => $user->roleName ?? 'user',
             'role_display' => $user->role?->display_name ?? 'User',
@@ -139,14 +148,13 @@ class AuthController extends Controller
         ]);
     }
 
-    // UPDATE PROFILE
+    // UPDATE PROFILE (phone/email changes must go through OTP endpoints)
     public function update(Request $request)
     {
         $user = $request->user();
 
         $validated = $request->validate([
             'name' => 'sometimes|string|max:255',
-            'phone' => 'sometimes|string|max:20|unique:users,phone,' . $request->user()->id,
             'bio' => 'nullable|string|max:500',
             'avatar' => 'nullable|string',
             'gender' => 'nullable|string',
@@ -154,6 +162,9 @@ class AuthController extends Controller
             'expertise_regions' => 'nullable|array',
             'expertise_regions.*' => 'string',
         ]);
+
+        // Phone/email changes are NOT allowed here — must use OTP endpoints
+        // (requestPhoneChange/verifyPhoneChange, requestEmailChange/verifyEmailChange)
 
         $user->update($validated);
 
@@ -167,7 +178,257 @@ class AuthController extends Controller
         return response()->json([
             'success' => true,
             'message' => 'Profile updated successfully',
-            'user' => $user->fresh()
+            'user' => array_merge($user->fresh()->toArray(), [
+                'avatar_url' => $user->fresh()->avatar ? (str_starts_with($user->fresh()->avatar, 'http') ? $user->fresh()->avatar : asset('storage/' . $user->fresh()->avatar)) : null,
+            ])
+        ]);
+    }
+
+    // ── Phone/Email Change with OTP + Yearly Limit ──────────────────────
+
+    /**
+     * Request phone change — sends OTP to the new phone number.
+     * Only allowed once per year.
+     */
+    public function requestPhoneChange(Request $request)
+    {
+        $request->validate([
+            'phone' => 'required|string|max:20|unique:users,phone',
+        ]);
+
+        $user = $request->user();
+        $newPhone = $request->input('phone');
+
+        // Check yearly limit
+        if ($user->phone_changed_at && Carbon::parse($user->phone_changed_at)->diffInDays(Carbon::now()) < 365) {
+            $daysLeft = 365 - Carbon::parse($user->phone_changed_at)->diffInDays(Carbon::now());
+            return response()->json([
+                'success' => false,
+                'message' => "Phone can only be changed once per year. Try again in {$daysLeft} days.",
+            ], 422);
+        }
+
+        // Generate OTP (6 digits)
+        $otp = str_pad(random_int(100000, 999999), 6, '0', STR_PAD_LEFT);
+        $otpHash = hash('sha256', $otp);
+
+        // Store in session with expiry
+        session([
+            'phone_change_otp' => $otpHash,
+            'phone_change_new' => $newPhone,
+            'phone_change_expires' => now()->addMinutes(10),
+            'phone_change_user_id' => $user->id,
+        ]);
+
+        // Send OTP via SMS
+        \App\Services\SmsService::send($newPhone, "Your Oripori verification code: {$otp}. Valid for 10 minutes.");
+
+        return response()->json([
+            'success' => true,
+            'message' => "OTP sent to {$newPhone}",
+        ]);
+    }
+
+    /**
+     * Verify phone change — confirms OTP and updates the phone.
+     */
+    public function verifyPhoneChange(Request $request)
+    {
+        $request->validate([
+            'otp' => 'required|string|size:6',
+        ]);
+
+        $user = $request->user();
+
+        // Check session data
+        $storedHash = session('phone_change_otp');
+        $newPhone = session('phone_change_new');
+        $expires = session('phone_change_expires');
+        $userId = session('phone_change_user_id');
+
+        if (!$storedHash || !$newPhone || !$expires || !$userId) {
+            return response()->json([
+                'success' => false,
+                'message' => 'No phone change request found. Please request a new OTP.',
+            ], 422);
+        }
+
+        if ($userId != $user->id) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Invalid request.',
+            ], 422);
+        }
+
+        if (Carbon::parse($expires)->isPast()) {
+            session()->forget(['phone_change_otp', 'phone_change_new', 'phone_change_expires', 'phone_change_user_id']);
+            return response()->json([
+                'success' => false,
+                'message' => 'OTP has expired. Please request a new one.',
+            ], 422);
+        }
+
+        $otpHash = hash('sha256', $request->input('otp'));
+        if (!hash_equals($storedHash, $otpHash)) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Invalid OTP. Please try again.',
+            ], 422);
+        }
+
+        // Update phone
+        $user->update([
+            'phone' => $newPhone,
+            'phone_changed_at' => Carbon::now(),
+        ]);
+
+        // Clear session
+        session()->forget(['phone_change_otp', 'phone_change_new', 'phone_change_expires', 'phone_change_user_id']);
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Phone number updated successfully.',
+            'user' => $user->fresh(),
+        ]);
+    }
+
+    /**
+     * Request email change — sends OTP to the new email.
+     * Only allowed once per year.
+     */
+    public function requestEmailChange(Request $request)
+    {
+        $request->validate([
+            'email' => 'required|email|max:255|unique:users,email',
+        ]);
+
+        $user = $request->user();
+        $newEmail = $request->input('email');
+
+        // Check yearly limit
+        if ($user->email_changed_at && Carbon::parse($user->email_changed_at)->diffInDays(Carbon::now()) < 365) {
+            $daysLeft = 365 - Carbon::parse($user->email_changed_at)->diffInDays(Carbon::now());
+            return response()->json([
+                'success' => false,
+                'message' => "Email can only be changed once per year. Try again in {$daysLeft} days.",
+            ], 422);
+        }
+
+        // Generate OTP (6 digits)
+        $otp = str_pad(random_int(100000, 999999), 6, '0', STR_PAD_LEFT);
+        $otpHash = hash('sha256', $otp);
+
+        // Store in session with expiry
+        session([
+            'email_change_otp' => $otpHash,
+            'email_change_new' => $newEmail,
+            'email_change_expires' => now()->addMinutes(10),
+            'email_change_user_id' => $user->id,
+        ]);
+
+        // Send OTP via email
+        \Illuminate\Support\Facades\Mail::raw(
+            "Your Oripori email verification code: {$otp}\n\nThis code is valid for 10 minutes.\n\nIf you did not request this change, please ignore this email.",
+            function ($message) use ($newEmail) {
+                $message->to($newEmail)
+                    ->subject('Oripori - Email Verification Code');
+            }
+        );
+
+        return response()->json([
+            'success' => true,
+            'message' => "OTP sent to {$newEmail}",
+        ]);
+    }
+
+    /**
+     * Verify email change — confirms OTP and updates the email.
+     */
+    public function verifyEmailChange(Request $request)
+    {
+        $request->validate([
+            'otp' => 'required|string|size:6',
+        ]);
+
+        $user = $request->user();
+
+        // Check session data
+        $storedHash = session('email_change_otp');
+        $newEmail = session('email_change_new');
+        $expires = session('email_change_expires');
+        $userId = session('email_change_user_id');
+
+        if (!$storedHash || !$newEmail || !$expires || !$userId) {
+            return response()->json([
+                'success' => false,
+                'message' => 'No email change request found. Please request a new OTP.',
+            ], 422);
+        }
+
+        if ($userId != $user->id) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Invalid request.',
+            ], 422);
+        }
+
+        if (Carbon::parse($expires)->isPast()) {
+            session()->forget(['email_change_otp', 'email_change_new', 'email_change_expires', 'email_change_user_id']);
+            return response()->json([
+                'success' => false,
+                'message' => 'OTP has expired. Please request a new one.',
+            ], 422);
+        }
+
+        $otpHash = hash('sha256', $request->input('otp'));
+        if (!hash_equals($storedHash, $otpHash)) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Invalid OTP. Please try again.',
+            ], 422);
+        }
+
+        // Update email
+        $user->update([
+            'email' => $newEmail,
+            'email_changed_at' => Carbon::now(),
+        ]);
+
+        // Clear session
+        session()->forget(['email_change_otp', 'email_change_new', 'email_change_expires', 'email_change_user_id']);
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Email updated successfully.',
+            'user' => $user->fresh(),
+        ]);
+    }
+
+    /**
+     * Check remaining days before phone/email can be changed.
+     */
+    public function checkChangeLimits(Request $request)
+    {
+        $user = $request->user();
+
+        $phoneDays = null;
+        if ($user->phone_changed_at && Carbon::parse($user->phone_changed_at)->diffInDays(Carbon::now()) < 365) {
+            $phoneDays = 365 - Carbon::parse($user->phone_changed_at)->diffInDays(Carbon::now());
+        }
+
+        $emailDays = null;
+        if ($user->email_changed_at && Carbon::parse($user->email_changed_at)->diffInDays(Carbon::now()) < 365) {
+            $emailDays = 365 - Carbon::parse($user->email_changed_at)->diffInDays(Carbon::now());
+        }
+
+        return response()->json([
+            'success' => true,
+            'data' => [
+                'phone_change_days_remaining' => $phoneDays,
+                'email_change_days_remaining' => $emailDays,
+                'phone_can_change' => $phoneDays === null,
+                'email_can_change' => $emailDays === null,
+            ],
         ]);
     }
 
@@ -301,12 +562,19 @@ class AuthController extends Controller
                 'success' => true,
                 'message' => 'Logged in with Google successfully',
                 ...$tokens,
-                'data' => $user,
+                'data' => [
+                    'id' => $user->id,
+                    'name' => $user->name,
+                    'email' => $user->email,
+                    'avatar' => $user->avatar,
+                    'role' => $user->roleName ?? 'user',
+                ],
             ]);
         } catch (\Exception $e) {
+            \Illuminate\Support\Facades\Log::warning('Google auth failed: ' . $e->getMessage());
             return response()->json([
                 'success' => false,
-                'message' => 'Google authentication failed: ' . $e->getMessage(),
+                'message' => 'Google authentication failed. Please try again.',
             ], 401);
         }
     }
@@ -365,13 +633,13 @@ class AuthController extends Controller
         $user = $request->user();
 
         $validated = $request->validate([
-            'bio' => 'required|string|min:10|max:500',
+            'bio' => 'nullable|string|max:500',
             'avatar' => 'nullable|string',
-            'phone' => 'sometimes|string|min:7|max:20',
+            'phone' => 'sometimes|nullable|string|min:7|max:20',
         ]);
 
         $update = [
-            'bio' => $validated['bio'],
+            'bio' => $validated['bio'] ?? $user->bio,
             'avatar' => $validated['avatar'] ?? $user->avatar,
             'phone' => $validated['phone'] ?? $user->phone,
         ];
@@ -389,7 +657,7 @@ class AuthController extends Controller
                 'name' => $user->name,
                 'email' => $user->email,
                 'phone' => $user->phone,
-                'avatar_url' => $user->avatar,
+            'avatar_url' => $user->avatar ? (str_starts_with($user->avatar, 'http') ? $user->avatar : asset('storage/' . $user->avatar)) : null,
                 'bio' => $user->bio,
                 'profile_completed' => (bool)$user->profile_completed,
             ]
@@ -421,9 +689,6 @@ class AuthController extends Controller
         return response()->json([
             'success' => true,
             'message' => 'Password reset link sent to your email.',
-            // Returned so the app can continue to the reset screen directly.
-            // In production, ship this via deep link/email code instead.
-            'reset_token' => $token,
         ]);
     }
 
@@ -432,7 +697,7 @@ class AuthController extends Controller
         $request->validate([
             'email' => 'required|email',
             'token' => 'required|string',
-            'password' => 'required|string|min:8|confirmed',
+            'password' => 'required|min:8|regex:/[a-z]/|regex:/[A-Z]/|regex:/[0-9]/|confirmed',
         ]);
 
         $status = Password::reset(
@@ -500,7 +765,13 @@ class AuthController extends Controller
         return response()->json([
             'success' => true,
             ...$tokens,
-            'data' => $user,
+            'data' => [
+                'id' => $user->id,
+                'name' => $user->name,
+                'email' => $user->email,
+                'avatar' => $user->avatar,
+                'role' => $user->roleName ?? 'user',
+            ],
         ]);
     }
 
@@ -518,9 +789,9 @@ class AuthController extends Controller
             ]);
         }
 
-        // Simple OTP verification - check against stored hash
+        // Simple OTP verification - check against stored hash (timing-safe)
         $storedOtp = cache('email_otp_' . $user->id);
-        if (!$storedOtp || $storedOtp !== $request->otp) {
+        if (!$storedOtp || !hash_equals($storedOtp, (string) $request->otp)) {
             // Brute-force lock: 5 wrong attempts invalidate the OTP entirely.
             $attemptKey = 'email_otp_attempts_' . $user->id;
             $attempts = (int) cache($attemptKey, 0) + 1;
@@ -565,7 +836,6 @@ class AuthController extends Controller
         return response()->json([
             'success' => true,
             'message' => 'Verification code sent to your email.',
-            'otp' => $otp,
         ]);
     }
 
@@ -599,14 +869,139 @@ class AuthController extends Controller
     {
         $missing = [];
 
-        if (empty($user->bio)) {
-            $missing[] = 'bio';
-        }
-
-        if (empty($user->phone)) {
-            $missing[] = 'phone';
-        }
+        // Bio and phone are now optional — no longer required for profile completion
 
         return $missing;
+    }
+
+    // PHONE VERIFICATION — Send OTP via Firebase Push Notification
+    public function sendPhoneOtp(Request $request)
+    {
+        $request->validate([
+            'phone' => 'required|string|min:7|max:20',
+        ]);
+
+        $user = $request->user();
+        $phone = $request->phone;
+
+        // Generate 6-digit OTP
+        $otp = str_pad(random_int(0, 999999), 6, '0', STR_PAD_LEFT);
+
+        // Store in Redis for 10 minutes
+        Cache::put("phone_otp_" . $user->id, [
+            'otp' => $otp,
+            'phone' => $phone,
+        ], now()->addMinutes(10));
+
+        // Fresh attempts
+        Cache::forget("phone_otp_attempts_" . $user->id);
+
+        // Send via Firebase Push Notification to user's devices
+        $tokens = \App\Models\PushToken::where('user_id', $user->id)
+            ->where('subscribed', true)
+            ->pluck('fcm_token')
+            ->toArray();
+
+        if (!empty($tokens)) {
+            foreach ($tokens as $token) {
+                $this->sendFcmNotification($token, [
+                    'title' => 'Nepal Smart Travel',
+                    'body' => "Your phone verification code is: {$otp}",
+                ]);
+            }
+        }
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Verification code sent via app notification',
+        ]);
+    }
+
+    // PHONE VERIFICATION — Verify OTP
+    public function verifyPhone(Request $request)
+    {
+        $request->validate([
+            'otp' => 'required|string|size:6',
+        ]);
+
+        $user = $request->user();
+        $cached = Cache::get("phone_otp_" . $user->id);
+
+        if (!$cached) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Verification code expired. Please request a new one.',
+            ], 422);
+        }
+
+        // Brute-force protection
+        $attemptsKey = "phone_otp_attempts_" . $user->id;
+        $attempts = (int) Cache::get($attemptsKey, 0);
+        if ($attempts >= 5) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Too many failed attempts. Please try again later.',
+            ], 429);
+        }
+
+        if (!hash_equals($cached['otp'], (string) $request->otp)) {
+            Cache::increment($attemptsKey);
+            Cache::put($attemptsKey, Cache::get($attemptsKey, 0), now()->addMinutes(15));
+            return response()->json([
+                'success' => false,
+                'message' => 'Invalid verification code. ' . (5 - $attempts - 1) . ' attempts remaining.',
+            ], 422);
+        }
+
+        // Verified! Update user
+        $user->update([
+            'phone' => $cached['phone'],
+            'phone_verified_at' => now(),
+        ]);
+
+        // Clean up
+        Cache::forget("phone_otp_" . $user->id);
+        Cache::forget($attemptsKey);
+
+        // Award +50 XP for verification
+        $user->increment('total_xp', 50);
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Phone verified successfully! +50 XP earned!',
+            'phone' => $user->phone,
+        ]);
+    }
+
+    // Send Firebase Cloud Messaging notification
+    private function sendFcmNotification(string $fcmToken, array $data): void
+    {
+        try {
+            $serverKey = config('services.firebase.server_key', env('FIREBASE_SERVER_KEY'));
+            if (empty($serverKey)) {
+                \Illuminate\Support\Facades\Log::warning('Firebase server key not configured');
+                return;
+            }
+
+            $ch = curl_init('https://fcm.googleapis.com/fcm/send');
+            curl_setopt_array($ch, [
+                CURLOPT_POST => true,
+                CURLOPT_HTTPHEADER => [
+                    'Authorization: key=' . $serverKey,
+                    'Content-Type: application/json',
+                ],
+                CURLOPT_RETURNTRANSFER => true,
+                CURLOPT_POSTFIELDS => json_encode([
+                    'to' => $fcmToken,
+                    'notification' => $data,
+                    'data' => $data,
+                    'priority' => 'high',
+                ]),
+            ]);
+            curl_exec($ch);
+            curl_close($ch);
+        } catch (\Throwable $e) {
+            \Illuminate\Support\Facades\Log::warning('FCM notification failed: ' . $e->getMessage());
+        }
     }
 }

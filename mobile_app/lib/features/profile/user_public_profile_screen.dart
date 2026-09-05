@@ -50,7 +50,22 @@ class _UserPublicProfileScreenState extends State<UserPublicProfileScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Profile')),
+      appBar: AppBar(
+        title: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: const Color(0xFF0EA5E9).withOpacity(0.1),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: const Icon(Icons.person, color: Color(0xFF0EA5E9), size: 22),
+            ),
+            const SizedBox(width: 12),
+            const Text('Profile'),
+          ],
+        ),
+      ),
       body: Consumer<ProfileProvider>(
         builder: (context, prov, _) {
           if (!_initialized || prov.isLoadingPublic) {

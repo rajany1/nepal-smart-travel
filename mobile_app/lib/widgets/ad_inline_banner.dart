@@ -56,12 +56,16 @@ class AdInlineBanner extends StatefulWidget {
   final String adContext;
   final String? category;
   final String? district;
+  final dynamic reportId;
+  final bool persistent;
 
   const AdInlineBanner({
     super.key,
     this.adContext = 'explore',
     this.category,
     this.district,
+    this.reportId,
+    this.persistent = false,
   });
 
   @override
@@ -86,21 +90,24 @@ class _AdInlineBannerState extends State<AdInlineBanner> {
         category: widget.category,
         district: widget.district,
         limit: 1,
+        persistent: widget.persistent,
       );
       final data = (res.data['data'] as List<dynamic>?) ?? [];
       if (data.isNotEmpty && data.first is Map<String, dynamic>) {
         final ad = AdCampaignModel.fromJson(data.first as Map<String, dynamic>);
-        _api.trackAdImpression(ad.id).then((_) {}).catchError((_) {});
+        _api.trackAdImpression(ad.id, reportId: widget.reportId, context: widget.adContext).then((_) {}).catchError((_) {});
         if (mounted) setState(() => _ad = ad);
       }
-    } catch (_) {}
+    } catch (e) {
+      debugPrint('AdInlineBanner load error: $e');
+    }
     if (mounted) setState(() => _loaded = true);
   }
 
   Future<void> _onTap() async {
     final ad = _ad;
     if (ad == null) return;
-    _api.trackAdClick(ad.id).then((_) {}).catchError((_) {});
+    _api.trackAdClick(ad.id, reportId: widget.reportId, context: widget.adContext).then((_) {}).catchError((_) {});
     final target = ad.targetUrl;
     if (target != null && target.isNotEmpty) {
       final uri = Uri.tryParse(target);

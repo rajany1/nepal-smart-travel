@@ -24,6 +24,7 @@ class AdProvider extends ChangeNotifier {
     String? district,
     String? category,
     int? limit,
+    bool persistent = false,
   }) async {
     _isLoading = true;
     notifyListeners();
@@ -34,6 +35,7 @@ class AdProvider extends ChangeNotifier {
         district: district,
         category: category,
         limit: limit,
+        persistent: persistent,
       );
       final data = (res.data['data'] as List<dynamic>?) ?? [];
       final ads = data.map((e) => AdCampaignModel.fromJson(e as Map<String, dynamic>)).toList();
@@ -51,6 +53,17 @@ class AdProvider extends ChangeNotifier {
 
     _isLoading = false;
     notifyListeners();
+  }
+
+  Future<AdCampaignModel?> fetchReportAd(dynamic reportId) async {
+    try {
+      final res = await _api.getReportAd(reportId);
+      final data = res.data['data'];
+      if (data == null) return null;
+      return AdCampaignModel.fromJson(data as Map<String, dynamic>);
+    } catch (_) {
+      return null;
+    }
   }
 
   void clear() {

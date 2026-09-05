@@ -3,12 +3,26 @@
 
 @section('content')
     <div class="space-y-6">
-        <!-- XP Settings -->
+        <!-- XP Settings (includes all settings in one form) -->
         <div class="bg-white rounded-3xl shadow-sm border border-slate-200 p-6 max-w-3xl">
             <h2 class="text-xl font-semibold text-slate-900 mb-4">XP Settings</h2>
 
             <form method="POST" action="{{ route('admin.settings.update') }}" class="space-y-6">
                 @csrf
+
+                <div class="border-b border-slate-200 pb-5">
+                    <h3 class="text-base font-semibold text-slate-900 mb-1"><i class="fas fa-link text-primary-500 mr-2"></i>Admin Panel URL</h3>
+                    <p class="text-sm text-slate-500 mb-3">Change the URL prefix for the admin panel. Default is <code class="bg-slate-100 px-1.5 py-0.5 rounded">admin</code>. After saving, the page will reload at the new URL.</p>
+                    <div class="max-w-md">
+                        <label class="block text-sm font-medium text-slate-700">Route Prefix</label>
+                        <div class="flex items-center gap-2 mt-1">
+                            <span class="text-sm text-slate-500">/</span>
+                            <input type="text" name="admin_route_prefix" value="{{ old('admin_route_prefix', $settings['admin_route_prefix']) }}" min="3" max="50" pattern="[a-z][a-z0-9\-]*" required class="block w-full rounded-xl border-slate-300 shadow-sm focus:ring-primary-500 focus:border-primary-500" placeholder="admin" />
+                        </div>
+                        @error('admin_route_prefix')<p class="text-sm text-red-600 mt-1">{{ $message }}</p>@enderror
+                        <p class="text-xs text-slate-400 mt-1">Lowercase letters, numbers, hyphens only. Must start with a letter. Min 3 chars.</p>
+                    </div>
+                </div>
 
                 <div>
                     <label class="block text-sm font-medium text-slate-700">Report Approval XP</label>
@@ -177,6 +191,44 @@
                                 <option value="0" @selected((int) old('safety_ai_enabled', $settings['safety_ai_enabled']) === 0)>Disabled</option>
                             </select>
                             @error('safety_ai_enabled')<p class="text-sm text-red-600 mt-1">{{ $message }}</p>@enderror
+                        </div>
+                    </div>
+                </div>
+
+                <div class="mt-8">
+                    <h3 class="text-lg font-bold text-slate-800 mb-1"><i class="fas fa-comment-sms text-emerald-500 mr-2"></i>SMS Configuration (Emergency SOS)</h3>
+                    <p class="text-sm text-slate-500 mb-4">Configure SMS fallback for SOS emergency contacts who don't have the app installed.</p>
+                    <div class="grid md:grid-cols-2 gap-4">
+                        <div>
+                            <label class="block text-sm font-medium text-slate-700">SMS Fallback</label>
+                            <select name="sms_enabled" class="mt-1 block w-full rounded-xl border-slate-300 shadow-sm focus:ring-primary-500 focus:border-primary-500">
+                                <option value="1" @selected((int) old('sms_enabled', $settings['sms_enabled']) === 1)>Enabled</option>
+                                <option value="0" @selected((int) old('sms_enabled', $settings['sms_enabled']) === 0)>Disabled</option>
+                            </select>
+                            @error('sms_enabled')<p class="text-sm text-red-600 mt-1">{{ $message }}</p>@enderror
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-slate-700">SMS Provider</label>
+                            <select name="sms_provider" class="mt-1 block w-full rounded-xl border-slate-300 shadow-sm focus:ring-primary-500 focus:border-primary-500">
+                                <option value="http_api" @selected(old('sms_provider', $settings['sms_provider']) === 'http_api')">HTTP API Gateway</option>
+                                <option value="twilio" @selected(old('sms_provider', $settings['sms_provider']) === 'twilio')">Twilio</option>
+                            </select>
+                            @error('sms_provider')<p class="text-sm text-red-600 mt-1">{{ $message }}</p>@enderror
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-slate-700">API URL</label>
+                            <input type="text" name="sms_api_url" value="{{ old('sms_api_url', $settings['sms_api_url']) }}" placeholder="https://api.sms-provider.com/send" class="mt-1 block w-full rounded-xl border-slate-300 shadow-sm focus:ring-primary-500 focus:border-primary-500" />
+                            @error('sms_api_url')<p class="text-sm text-red-600 mt-1">{{ $message }}</p>@enderror
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-slate-700">API Key</label>
+                            <input type="text" name="sms_api_key" value="{{ old('sms_api_key', $settings['sms_api_key']) }}" placeholder="Your API key" class="mt-1 block w-full rounded-xl border-slate-300 shadow-sm focus:ring-primary-500 focus:border-primary-500" />
+                            @error('sms_api_key')<p class="text-sm text-red-600 mt-1">{{ $message }}</p>@enderror
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-slate-700">Sender Phone</label>
+                            <input type="text" name="sms_from" value="{{ old('sms_from', $settings['sms_from']) }}" placeholder="+977XXXXXXXXX" class="mt-1 block w-full rounded-xl border-slate-300 shadow-sm focus:ring-primary-500 focus:border-primary-500" />
+                            @error('sms_from')<p class="text-sm text-red-600 mt-1">{{ $message }}</p>@enderror
                         </div>
                     </div>
                 </div>

@@ -43,6 +43,14 @@ class CheckUserStatus
 
             // API response: return 403 JSON
             $reason = $user->status;
+
+            // The latest system-generated account notice for this user, so the app
+            // can show them their ban/suspension notice (the ONLY thing they may see).
+            $accountAlert = \App\Models\Alert::where('target_user_id', $user->id)
+                ->where('sender_type', 'system')
+                ->orderByDesc('created_at')
+                ->first();
+
             return response()->json([
                 'success' => false,
                 'message' => match ($reason) {
@@ -58,6 +66,16 @@ class CheckUserStatus
                     default => 'ACCOUNT_DELETED',
                 },
                 'requires_logout' => $reason !== 'suspended',
+                'account_alert' => $accountAlert ? [
+                    'id' => $accountAlert->id,
+                    'title' => $accountAlert->title,
+                    'description' => $accountAlert->description,
+                    'severity' => $accountAlert->severity,
+                    'sender_type' => $accountAlert->sender_type,
+                    'link_type' => $accountAlert->link_type,
+                    'link_value' => $accountAlert->link_value,
+                    'created_at' => $accountAlert->created_at,
+                ] : null,
             ], 403);
         }
 

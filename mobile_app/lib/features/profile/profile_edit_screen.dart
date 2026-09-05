@@ -104,7 +104,6 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
   }
 
   Future<void> _handleSave() async {
-    // Validate all fields
     _fieldErrors.clear();
     final profileProv = context.read<ProfileProvider>();
 
@@ -117,25 +116,34 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
 
     if (_fieldErrors.isNotEmpty) {
       setState(() {});
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(context.t('Please fix the errors in your profile')),
-          backgroundColor: AppTheme.errorColor,
-        ),
-      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(context.t('Please fix the errors in your profile')),
+            backgroundColor: AppTheme.errorColor,
+          ),
+        );
+      }
       return;
     }
 
+    if (!mounted) return;
     setState(() => _isLoading = true);
 
     bool avatarFailed = false;
     try {
-      // Upload avatar first if changed (base64 → backend stores as public URL)
       if (_avatarChanged && _avatarUrl != null && !_avatarUrl!.startsWith('http')) {
         final bytes = await File(_avatarUrl!).readAsBytes();
         final base64Image = base64Encode(bytes);
         final ok = await profileProv.updateAvatar('data:image/jpeg;base64,$base64Image');
-        if (!ok) avatarFailed = true;
+        if (ok) {
+          final newAvatarUrl = profileProv.profile?.avatarUrl;
+          if (newAvatarUrl != null && newAvatarUrl.startsWith('http')) {
+            setState(() => _avatarUrl = newAvatarUrl);
+          }
+        } else {
+          avatarFailed = true;
+        }
       }
     } catch (e) {
       avatarFailed = true;
@@ -144,6 +152,8 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
     try {
       final data = Map<String, dynamic>.from(_formValues);
       data.removeWhere((k, v) => v == null || (v is String && v.isEmpty));
+      data.remove('email');
+      data.remove('phone');
 
       await context.read<AuthProvider>().updateProfile(data);
       await context.read<ProfileProvider>().loadProfile(forceRefresh: true);
@@ -151,29 +161,84 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text(
-              avatarFailed
-                  ? '${context.t('Profile saved')}, ${context.t('avatar upload failed')}'
-                  : context.t('Profile saved successfully'),
+            content: Row(
+              children: [
+                Icon(Icons.check_circle, color: Colors.white, size: 20),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    avatarFailed
+                        ? '${context.t('Profile saved')}, ${context.t('avatar upload failed')}'
+                        : context.t('Profile saved successfully'),
+                  ),
+                ),
+              ],
             ),
             backgroundColor: avatarFailed ? AppTheme.warningColor : AppTheme.successColor,
             duration: const Duration(seconds: 2),
+            behavior: SnackBarBehavior.floating,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+            margin: const EdgeInsets.all(16),
           ),
         );
-        Navigator.of(context).pop();
+        await Future.delayed(const Duration(milliseconds: 1500));
+        if (mounted) Navigator.of(context).pop(true);
       }
     } catch (e) {
       if (mounted) {
+        final msg = e.toString().contains('Exception')
+            ? e.toString().replaceFirst('Exception: ', '')
+            : e.toString();
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('${context.t('Error saving profile')}: ${e.toString().substring(0, 100)}'),
+            content: Row(
+              children: [
+                const Icon(Icons.error_outline, color: Colors.white, size: 20),
+                const SizedBox(width: 8),
+                Expanded(child: Text('${context.t('Error')}: $msg')),
+              ],
+            ),
             backgroundColor: AppTheme.errorColor,
+            duration: const Duration(seconds: 3),
+            behavior: SnackBarBehavior.floating,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+            margin: const EdgeInsets.all(16),
           ),
         );
       }
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
+  }
+
+  Widget _buildDefaultAvatar() {
+    final initials = (_formValues['name'] as String? ?? '').isNotEmpty
+        ? (_formValues['name'] as String)[0].toUpperCase()
+        : '';
+    return Container(
+      width: 100,
+      height: 100,
+      decoration: const BoxDecoration(
+        shape: BoxShape.circle,
+        gradient: LinearGradient(
+          colors: [Color(0xFF00695C), Color(0xFF00897B), Color(0xFF26A69A)],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+      ),
+      child: Center(
+        child: initials.isNotEmpty
+            ? Text(
+                initials,
+                style: const TextStyle(
+                  fontSize: 40,
+                  color: Colors.white,
+                  fontWeight: FontWeight.w800,
+                ),
+              )
+            : const Icon(Icons.person, size: 48, color: Colors.white),
+      ),
+    );
   }
 
   List<ProfileFieldDefinition> _sectionFields(ProfileProvider prov, String section) {
@@ -236,12 +301,43 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: AppTheme.backgroundColor,
+      backgroundColor: const Color(0xFFF8F9FA),
       appBar: AppBar(
-        title: Text(context.t('Edit Profile')),
-        backgroundColor: AppTheme.primaryColor,
-        foregroundColor: Colors.white,
+        backgroundColor: Colors.white,
         elevation: 0,
+        leading: GestureDetector(
+          onTap: () => Navigator.pop(context),
+          child: Container(
+            margin: const EdgeInsets.all(8),
+            padding: const EdgeInsets.all(6),
+            decoration: BoxDecoration(
+              color: Colors.grey.shade50,
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: const Icon(Icons.arrow_back_ios_new, color: Color(0xFF2D3436), size: 18),
+          ),
+        ),
+        title: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(6),
+              decoration: BoxDecoration(
+                color: const Color(0xFF00695C).withOpacity(0.1),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: const Icon(Icons.edit, color: Color(0xFF00695C), size: 20),
+            ),
+            const SizedBox(width: 10),
+            Text(
+              context.t('Edit Profile'),
+              style: const TextStyle(
+                color: Color(0xFF2D3436),
+                fontSize: 20,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ],
+        ),
       ),
       body: Consumer<ProfileProvider>(
         builder: (context, profileProv, _) {
@@ -272,84 +368,104 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
                   Center(
                     child: Column(
                       children: [
-                        Stack(
-                          children: [
-                            CircleAvatar(
-                              radius: 50,
-                              backgroundColor: AppTheme.primaryColor.withValues(alpha: 0.1),
-                              backgroundImage: _avatarUrl != null && _avatarUrl!.startsWith('http')
-                                  ? NetworkImage(_avatarUrl!)
-                                  : null,
-                              child: _avatarUrl == null || !_avatarUrl!.startsWith('http')
-                                  ? (_avatarUrl != null
-                                      ? ClipOval(
-                                          child: Image.file(
-                                            File(_avatarUrl!),
-                                            width: 100,
-                                            height: 100,
-                                            fit: BoxFit.cover,
-                                            errorBuilder: (_, __, ___) => const Icon(
-                                              Icons.person,
-                                              size: 48,
-                                              color: AppTheme.primaryColor,
-                                            ),
-                                          ),
-                                        )
-                                      : Text(
-                                          (_formValues['name'] as String? ?? '').isNotEmpty
-                                              ? (_formValues['name'] as String)[0].toUpperCase()
-                                              : '?',
-                                          style: const TextStyle(
-                                            fontSize: 40,
-                                            color: AppTheme.primaryColor,
-                                            fontWeight: FontWeight.bold,
-                                          ),
-                                        ))
-                                  : null,
+                        Container(
+                          padding: const EdgeInsets.all(4),
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            border: Border.all(
+                              color: const Color(0xFF00695C).withOpacity(0.2),
+                              width: 3,
                             ),
-                            Positioned(
-                              bottom: 0,
-                              right: 0,
-                              child: GestureDetector(
-                                onTap: _isPicking ? null : _pickImage,
-                                child: Container(
-                                  padding: const EdgeInsets.all(4),
-                                  decoration: BoxDecoration(
-                                    color: AppTheme.primaryColor,
-                                    shape: BoxShape.circle,
-                                    border: Border.all(color: Colors.white, width: 2),
+                          ),
+                          child: Stack(
+                            children: [
+                              CircleAvatar(
+                                radius: 50,
+                                backgroundColor: const Color(0xFF00695C).withOpacity(0.1),
+                                backgroundImage: _avatarUrl != null && _avatarUrl!.startsWith('http')
+                                    ? NetworkImage(_avatarUrl!)
+                                    : null,
+                                child: _avatarUrl == null || !_avatarUrl!.startsWith('http')
+                                    ? (_avatarUrl != null
+                                        ? ClipOval(
+                                            child: Image.file(
+                                              File(_avatarUrl!),
+                                              width: 100,
+                                              height: 100,
+                                              fit: BoxFit.cover,
+                                              errorBuilder: (_, __, ___) => _buildDefaultAvatar(),
+                                            ),
+                                          )
+                                        : _buildDefaultAvatar())
+                                    : null,
+                              ),
+                              Positioned(
+                                bottom: 2,
+                                right: 2,
+                                child: GestureDetector(
+                                  onTap: _isPicking ? null : _pickImage,
+                                  child: Container(
+                                    padding: const EdgeInsets.all(8),
+                                    decoration: BoxDecoration(
+                                      gradient: const LinearGradient(
+                                        colors: [Color(0xFF00695C), Color(0xFF00897B)],
+                                      ),
+                                      shape: BoxShape.circle,
+                                      border: Border.all(color: Colors.white, width: 2),
+                                      boxShadow: [
+                                        BoxShadow(
+                                          color: const Color(0xFF00695C).withOpacity(0.3),
+                                          blurRadius: 6,
+                                          offset: const Offset(0, 2),
+                                        ),
+                                      ],
+                                    ),
+                                    child: _isPicking
+                                        ? const SizedBox(
+                                            width: 16,
+                                            height: 16,
+                                            child: CircularProgressIndicator(
+                                              strokeWidth: 2,
+                                              valueColor: AlwaysStoppedAnimation(Colors.white),
+                                            ),
+                                          )
+                                        : const Icon(Icons.camera_alt, size: 16, color: Colors.white),
                                   ),
-                                  child: _isPicking
-                                      ? const SizedBox(
-                                          width: 18,
-                                          height: 18,
-                                          child: CircularProgressIndicator(
-                                            strokeWidth: 2,
-                                            valueColor: AlwaysStoppedAnimation(Colors.white),
-                                          ),
-                                        )
-                                      : const Icon(Icons.camera_alt, size: 18, color: Colors.white),
                                 ),
                               ),
-                            ),
-                          ],
+                            ],
+                          ),
                         ),
                         const SizedBox(height: 10),
-                        Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            const Icon(Icons.photo_library_outlined, size: 14, color: AppTheme.textSecondary),
-                            const SizedBox(width: 4),
-                            Text(
-                              context.t('Change Photo'),
-                              style: const TextStyle(color: AppTheme.textSecondary, fontSize: AppTheme.textSm),
+                        GestureDetector(
+                          onTap: _isPicking ? null : _pickImage,
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFF00695C).withOpacity(0.08),
+                              borderRadius: BorderRadius.circular(20),
                             ),
-                          ],
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                const Icon(Icons.photo_library_outlined, size: 14, color: Color(0xFF00695C)),
+                                const SizedBox(width: 4),
+                                Text(
+                                  context.t('Change Photo'),
+                                  style: const TextStyle(
+                                    color: Color(0xFF00695C),
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
                         ),
                       ],
                     ),
                   ),
-                  const SizedBox(height: 24),
+                  const SizedBox(height: 28),
 
                   if (basicFields.isNotEmpty) ...[
                     _sectionHeader(context, 'Basic Info', Icons.person, AppTheme.primaryColor),
@@ -379,45 +495,53 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
                   ],
 
                   // Save Button
-                  SizedBox(
-                    height: 50,
-                    child: DecoratedBox(
-                      decoration: BoxDecoration(
-                        gradient: const LinearGradient(
-                          colors: [AppTheme.primaryColor, AppTheme.primaryLight],
-                          begin: Alignment.centerLeft,
-                          end: Alignment.centerRight,
-                        ),
-                        borderRadius: BorderRadius.circular(14),
-                        boxShadow: [
-                          BoxShadow(
-                            color: AppTheme.primaryColor.withValues(alpha: 0.3),
-                            blurRadius: 12,
-                            offset: const Offset(0, 4),
-                          ),
-                        ],
+                  Container(
+                    decoration: BoxDecoration(
+                      gradient: const LinearGradient(
+                        colors: [Color(0xFF00695C), Color(0xFF00897B)],
                       ),
-                      child: ElevatedButton.icon(
-                        onPressed: _isLoading ? null : _handleSave,
-                        icon: _isLoading
-                            ? const SizedBox(
-                                width: 20,
-                                height: 20,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2,
-                                  valueColor: AlwaysStoppedAnimation(Colors.white),
-                                ),
-                              )
-                            : const Icon(Icons.save, size: 18),
-                        label: Text(
-                          _isLoading ? context.t('Saving...') : context.t('Save Profile'),
-                          style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 15),
+                      borderRadius: BorderRadius.circular(14),
+                      boxShadow: [
+                        BoxShadow(
+                          color: const Color(0xFF00695C).withOpacity(0.3),
+                          blurRadius: 12,
+                          offset: const Offset(0, 4),
                         ),
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.transparent,
-                          shadowColor: Colors.transparent,
-                          foregroundColor: Colors.white,
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                      ],
+                    ),
+                    child: Material(
+                      color: Colors.transparent,
+                      child: InkWell(
+                        onTap: _isLoading ? null : _handleSave,
+                        borderRadius: BorderRadius.circular(14),
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 16),
+                          child: Center(
+                            child: _isLoading
+                                ? const SizedBox(
+                                    width: 22,
+                                    height: 22,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2.5,
+                                      valueColor: AlwaysStoppedAnimation(Colors.white),
+                                    ),
+                                  )
+                                : Row(
+                                    mainAxisAlignment: MainAxisAlignment.center,
+                                    children: [
+                                      const Icon(Icons.save, size: 18, color: Colors.white),
+                                      const SizedBox(width: 8),
+                                      Text(
+                                        context.t('Save Profile'),
+                                        style: const TextStyle(
+                                          color: Colors.white,
+                                          fontSize: 16,
+                                          fontWeight: FontWeight.w700,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                          ),
                         ),
                       ),
                     ),

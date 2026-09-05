@@ -94,7 +94,7 @@ class ExplorePlaceCard extends StatelessWidget {
                                 style: TextStyle(
                                   color: Colors.white,
                                   fontSize: 9,
-                                  fontWeight: FontWeight.w800,
+                                  fontWeight: FontWeight.w700,
                                   letterSpacing: 0.6,
                                 ),
                               ),
@@ -120,7 +120,7 @@ class ExplorePlaceCard extends StatelessWidget {
                               overflow: TextOverflow.ellipsis,
                               style: const TextStyle(
                                 fontSize: AppTheme.textBase,
-                                fontWeight: FontWeight.w700,
+                                fontWeight: FontWeight.w600,
                                 height: 1.15,
                               ),
                             ),
@@ -222,7 +222,7 @@ class ExplorePlaceCard extends StatelessWidget {
                             overflow: TextOverflow.ellipsis,
                             style: const TextStyle(
                               fontSize: AppTheme.textBase,
-                              fontWeight: FontWeight.w700,
+                              fontWeight: FontWeight.w600,
                               height: 1.15,
                             ),
                           ),

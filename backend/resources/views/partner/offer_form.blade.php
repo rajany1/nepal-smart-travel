@@ -25,7 +25,7 @@
             </div>
         @endif
 
-        <form method="POST" action="{{ $offer->exists ? route('partner.offers.update', $offer) : route('partner.offers.store') }}" class="space-y-5">
+        <form method="POST" action="{{ $offer->exists ? route('partner.offers.update', $offer) : route('partner.offers.store') }}" enctype="multipart/form-data" class="space-y-5">
             @csrf
             @if($offer->exists) @method('PUT') @endif
 
@@ -48,7 +48,6 @@
                 <div>
                     <label class="block text-sm font-medium text-slate-700 mb-1">Discount Value <span class="text-xs text-slate-400">(only for % / Rs.)</span></label>
                     <input type="number" step="0.01" min="0" name="discount_value" id="discount_value" value="{{ old('discount_value', $offer->discount_value) }}"
-                           oninput="updateXpPrice()"
                            class="w-full rounded-xl border border-slate-300 px-4 py-2.5 focus:ring-2 focus:ring-primary-500 outline-none">
                 </div>
             </div>
@@ -58,17 +57,10 @@
                 <input type="number" step="0.01" min="0" name="value_npr" value="{{ old('value_npr', $offer->value_npr ?? 0) }}"
                        @if($offer->value_npr_locked) disabled @endif
                        class="w-full rounded-xl border border-slate-300 px-4 py-2.5 focus:ring-2 focus:ring-primary-500 outline-none @if($offer->value_npr_locked) bg-slate-50 text-slate-500 @endif">
-                <p class="text-xs text-slate-400 mt-1">When a user uses this offer, you earn the value minus the admin commission (set in admin Settings).</p>
+                <p class="text-xs text-slate-500 mt-1">When a user uses this offer, you earn the value minus the admin commission (set in admin Settings).</p>
                 @if($offer->value_npr_locked)
                     <p class="text-xs text-amber-600 mt-1"><i class="fas fa-lock"></i> Value is locked after admin approval. Contact the admin to change it.</p>
                 @endif
-            </div>
-
-            <div>
-                <label class="block text-sm font-medium text-slate-700 mb-1">XP Price <span class="text-xs text-slate-400">(auto: Rs. 1 = 1 XP)</span></label>
-                <input type="number" name="price_xp_preview" id="price_xp_preview" value="{{ old('price_xp_preview', $offer->price_xp ?: 0) }}" disabled
-                       class="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-2.5 text-slate-500">
-                <p class="text-xs text-slate-400 mt-1">Users spend this much XP to redeem. Admin can change the Rs.-to-XP ratio in Settings.</p>
             </div>
 
             <div>
@@ -81,6 +73,25 @@
                 <label class="block text-sm font-medium text-slate-700 mb-1">Terms & Conditions</label>
                 <textarea name="terms" rows="2" placeholder="e.g. Valid on dine-in only. Cannot be combined with other offers."
                           class="w-full rounded-xl border border-slate-300 px-4 py-2.5 focus:ring-2 focus:ring-primary-500 outline-none">{{ old('terms', $offer->terms) }}</textarea>
+            </div>
+
+            <div>
+                <label class="block text-sm font-medium text-slate-700 mb-1">Offer Image <span class="text-xs text-slate-400">(optional, max 2MB)</span></label>
+                <div class="flex items-center gap-4">
+                    <div id="imagePreview" class="w-24 h-24 rounded-xl border-2 border-dashed border-slate-300 flex items-center justify-center overflow-hidden bg-slate-50">
+                        @if($offer->image)
+                            <img src="{{ asset('storage/' . $offer->image) }}" alt="Offer image" class="w-full h-full object-cover">
+                        @else
+                            <i class="fas fa-image text-slate-300 text-2xl"></i>
+                        @endif
+                    </div>
+                    <div class="flex-1">
+                        <input type="file" name="image" id="imageInput" accept="image/jpeg,image/jpg,image/png,image/webp"
+                               class="w-full text-sm text-slate-600 file:mr-3 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-primary-50 file:text-primary-700 hover:file:bg-primary-100"
+                               onchange="previewImage(this)">
+                        <p class="text-xs text-slate-400 mt-1">JPG, PNG, or WebP. Max 2MB.</p>
+                    </div>
+                </div>
             </div>
 
             <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
@@ -111,13 +122,16 @@
         </form>
     </div>
 </div>
-
 <script>
-function updateXpPrice() {
-    var v = parseFloat(document.getElementById('discount_value').value) || 0;
-    var p = document.getElementById('price_xp_preview');
-    if (p) p.value = Math.max(1, Math.round(v));
+function previewImage(input) {
+    var preview = document.getElementById('imagePreview');
+    if (input.files && input.files[0]) {
+        var reader = new FileReader();
+        reader.onload = function(e) {
+            preview.innerHTML = '<img src="' + e.target.result + '" class="w-full h-full object-cover">';
+        };
+        reader.readAsDataURL(input.files[0]);
+    }
 }
-updateXpPrice();
 </script>
 @endsection

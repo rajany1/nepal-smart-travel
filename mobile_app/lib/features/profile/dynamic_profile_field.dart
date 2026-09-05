@@ -227,49 +227,95 @@ class _DynamicProfileFieldState extends State<DynamicProfileField> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         if (_selectedItems.isEmpty)
-          Text(
-            widget.fieldDef.placeholder ?? 'No selections yet',
-            style: const TextStyle(
-              color: AppTheme.textSecondary,
-              fontSize: AppTheme.textBase,
+          Container(
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              color: const Color(0xFFF8F9FA),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: Colors.grey.shade200),
+            ),
+            child: Row(
+              children: [
+                Icon(Icons.info_outline, size: 16, color: Colors.grey.shade400),
+                const SizedBox(width: 8),
+                Text(
+                  widget.fieldDef.placeholder ?? 'No selections yet',
+                  style: TextStyle(
+                    color: Colors.grey.shade500,
+                    fontSize: 14,
+                  ),
+                ),
+              ],
             ),
           ),
         if (_selectedItems.isNotEmpty) ...[
           Wrap(
-            spacing: 6,
-            runSpacing: 6,
+            spacing: 8,
+            runSpacing: 8,
             children: _selectedItems.map((item) {
-              return Chip(
-                label: Text(item),
-                onDeleted: () {
-                  setState(() {
-                    _selectedItems.remove(item);
-                  });
-                  widget.onChanged(List<String>.from(_selectedItems));
-                },
-                backgroundColor: AppTheme.primaryColor.withOpacity(0.1),
-                labelStyle: const TextStyle(color: AppTheme.primaryColor),
+              return Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF00695C).withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(color: const Color(0xFF00695C).withOpacity(0.3)),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      item,
+                      style: const TextStyle(
+                        color: Color(0xFF004D40),
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    const SizedBox(width: 6),
+                    GestureDetector(
+                      onTap: () {
+                        setState(() => _selectedItems.remove(item));
+                        widget.onChanged(List<String>.from(_selectedItems));
+                      },
+                      child: const Icon(Icons.close, size: 14, color: Color(0xFF00695C)),
+                    ),
+                  ],
+                ),
               );
             }).toList(),
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: 10),
         ],
         Wrap(
-          spacing: 6,
-          runSpacing: 6,
+          spacing: 8,
+          runSpacing: 8,
           children: options
               .where((opt) => !_selectedItems.contains(opt.value))
               .map((opt) {
-            return FilterChip(
-              label: Text(opt.label),
-              onSelected: (selected) {
-                if (selected) {
-                  setState(() {
-                    _selectedItems.add(opt.value);
-                  });
-                  widget.onChanged(List<String>.from(_selectedItems));
-                }
+            final isSelected = _selectedItems.contains(opt.value);
+            return GestureDetector(
+              onTap: () {
+                setState(() => _selectedItems.add(opt.value));
+                widget.onChanged(List<String>.from(_selectedItems));
               },
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                decoration: BoxDecoration(
+                  color: isSelected ? const Color(0xFF00695C) : Colors.white,
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(
+                    color: isSelected ? const Color(0xFF00695C) : Colors.grey.shade300,
+                  ),
+                ),
+                child: Text(
+                  opt.label,
+                  style: TextStyle(
+                    color: isSelected ? Colors.white : const Color(0xFF2D3436),
+                    fontSize: 13,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ),
             );
           }).toList(),
         ),

@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Admin;
 
 use App\Http\Controllers\Controller;
 use App\Models\AdCampaign;
+use App\Models\AdRevenueLedger;
 use App\Models\TravelPartner;
 use App\Services\ModeratorService;
 use Illuminate\Http\Request;
@@ -34,18 +35,27 @@ class AdCampaignController extends Controller
         $this->requireAdmin($request);
         $status = $request->get('status');
         $query = AdCampaign::with('business');
-        if ($status) $query->where('status', $status);
+        if ($status === 'flagged') {
+            $query->where('fraud_score', '>=', 80);
+        } elseif ($status) {
+            $query->where('status', $status);
+        }
         $campaigns = $query->orderBy('created_at', 'desc')->paginate(20);
         $partners = TravelPartner::active()->orderBy('name')->get();
 
         $all = AdCampaign::all();
+        $totalAdminRevenue = AdRevenueLedger::where('admin_share', '>', 0)->sum('admin_share');
+        $totalUserPayout = AdRevenueLedger::where('user_share', '>', 0)->sum('user_share');
         $stats = [
             'total' => $all->count(),
             'pending' => $all->where('status', 'pending')->count(),
             'active' => $all->where('status', 'active')->count(),
+            'flagged' => $all->filter(fn($c) => $c->fraud_score >= 80)->count(),
             'impressions' => (int) $all->sum('current_impressions'),
             'clicks' => (int) $all->sum('current_clicks'),
             'revenue' => 0,
+            'admin_revenue' => round($totalAdminRevenue, 2),
+            'user_payout' => round($totalUserPayout, 2),
             'unpaid' => 0,
             'ctr' => 0,
         ];
@@ -69,8 +79,9 @@ class AdCampaignController extends Controller
             'target_category' => 'nullable|string|max:100',
             'budget' => 'required|numeric|min:0',
             'cost_per_view' => 'required|numeric|min:0',
+            'cost_per_click' => 'nullable|numeric|min:0',
             'max_impressions' => 'required|integer|min:0',
-            'status' => 'required|in:pending,active,paused,rejected',
+            'status' => 'required|in:pending,active,paused',
             'starts_at' => 'nullable|date',
             'ends_at' => 'nullable|date|after:starts_at',
         ]));
@@ -92,8 +103,9 @@ class AdCampaignController extends Controller
             'target_category' => 'nullable|string|max:100',
             'budget' => 'required|numeric|min:0',
             'cost_per_view' => 'required|numeric|min:0',
+            'cost_per_click' => 'nullable|numeric|min:0',
             'max_impressions' => 'required|integer|min:0',
-            'status' => 'required|in:pending,active,paused,rejected',
+            'status' => 'required|in:pending,active,paused',
             'starts_at' => 'nullable|date',
             'ends_at' => 'nullable|date|after:starts_at',
         ]));
@@ -118,34 +130,6 @@ class AdCampaignController extends Controller
         \App\Support\LiveFeed::bump('ad_campaigns', $adCampaign->id);
         $this->moderatorService->log(Auth::user(), 'ad-campaign.deleted', 'ad_campaign', $adCampaign->id, 'Deleted campaign: ' . $name);
         return redirect()->route('admin.ad-campaigns')->with('success', 'Campaign deleted.');
-    }
-
-    public function approve(Request $request, AdCampaign $adCampaign)
-    {
-        $this->requireAdmin($request);
-        if ($adCampaign->status !== 'pending') {
-            return back()->withErrors(['status' => 'Only pending campaigns can be approved.']);
-        }
-        if (($reason = $this->cannotRunReason($adCampaign)) !== null) {
-            return back()->withErrors(['status' => 'Cannot approve: ' . $reason]);
-        }
-        $adCampaign->update([
-            'status' => 'active',
-            'paused_by' => null,
-            'rejection_reason' => null,
-            'starts_at' => $adCampaign->starts_at ?? now(),
-        ]);
-        $this->moderatorService->log(Auth::user(), 'ad-campaign.approved', 'ad_campaign', $adCampaign->id, 'Approved campaign: ' . $adCampaign->name);
-        return redirect()->route('admin.ad-campaigns')->with('success', 'Campaign approved and is now live.');
-    }
-
-    public function reject(Request $request, AdCampaign $adCampaign)
-    {
-        $this->requireAdmin($request);
-        $reason = $request->input('reason', 'Not approved');
-        $adCampaign->update(['status' => 'rejected', 'rejection_reason' => $reason]);
-        $this->moderatorService->log(Auth::user(), 'ad-campaign.rejected', 'ad_campaign', $adCampaign->id, 'Rejected campaign: ' . $adCampaign->name . ' — ' . $reason);
-        return redirect()->route('admin.ad-campaigns')->with('success', 'Campaign rejected.');
     }
 
     public function pause(Request $request, AdCampaign $adCampaign)

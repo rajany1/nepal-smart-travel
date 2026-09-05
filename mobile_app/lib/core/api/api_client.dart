@@ -69,14 +69,14 @@ class ApiClient {
   Future<Response> register({
     required String name,
     required String email,
-    required String phone,
+    String? phone,
     required String password,
     required String passwordConfirmation,
   }) async {
     return _dio.post('/auth/register', data: {
       'name': name,
       'email': email,
-      'phone': phone,
+      if (phone != null && phone.isNotEmpty) 'phone': phone,
       'password': password,
       'password_confirmation': passwordConfirmation,
     });
@@ -112,6 +112,14 @@ class ApiClient {
 
   Future<Response> resendVerificationEmail(String email) async {
     return _dio.post('/auth/resend-verification', data: {'email': email});
+  }
+
+  Future<Response> sendPhoneOtp(String phone) async {
+    return _dio.post('/auth/send-phone-otp', data: {'phone': phone});
+  }
+
+  Future<Response> verifyPhone(String otp) async {
+    return _dio.post('/auth/verify-phone', data: {'otp': otp});
   }
 
   Future<Response> sendPasswordReset(String email) async {
@@ -427,12 +435,12 @@ class ApiClient {
   Future<Response> getAvailableOfferCodes() => _dio.get('/offers/available');
   /// Complete the user profile with required information
   Future<Response> completeProfile({
-    required String bio,
+    String? bio,
     String? avatar,
     String? phone,
   }) async {
     return _dio.post('/auth/complete-profile', data: {
-      'bio': bio,
+      if (bio != null && bio.isNotEmpty) 'bio': bio,
       if (avatar != null) 'avatar': avatar,
       if (phone != null) 'phone': phone,
     });
@@ -509,21 +517,35 @@ class ApiClient {
     String? district,
     String? category,
     int? limit,
+    bool persistent = false,
   }) async {
     final params = <String, dynamic>{};
     if (adContext != null && adContext.isNotEmpty) params['context'] = adContext;
     if (district != null && district.isNotEmpty) params['district'] = district;
     if (category != null && category.isNotEmpty) params['category'] = category;
     if (limit != null) params['limit'] = limit;
+    if (persistent) params['persistent'] = '1';
     return _dio.get('/ads/active', queryParameters: params);
   }
 
-  Future<Response> trackAdImpression(int adCampaignId) {
-    return _dio.post('/ads/track-impression', data: {'ad_campaign_id': adCampaignId});
+  Future<Response> trackAdImpression(int adCampaignId, {dynamic reportId, String? context}) {
+    return _dio.post('/ads/track-impression', data: {
+      'ad_campaign_id': adCampaignId,
+      if (reportId != null) 'report_id': int.tryParse(reportId.toString()) ?? reportId,
+      if (context != null) 'context': context,
+    });
   }
 
-  Future<Response> trackAdClick(int adCampaignId) {
-    return _dio.post('/ads/track-click', data: {'ad_campaign_id': adCampaignId});
+  Future<Response> trackAdClick(int adCampaignId, {dynamic reportId, String? context}) {
+    return _dio.post('/ads/track-click', data: {
+      'ad_campaign_id': adCampaignId,
+      if (reportId != null) 'report_id': int.tryParse(reportId.toString()) ?? reportId,
+      if (context != null) 'context': context,
+    });
+  }
+
+  Future<Response> getReportAd(dynamic reportId) {
+    return _dio.get('/ads/report/${reportId}');
   }
 
   // ============ Subscription Plans ============
@@ -577,6 +599,63 @@ class ApiClient {
   Future<Response> getRouteById(int id) async {
     return _dio.get('/routes/$id');
   }
+
+  // ===== Oripori Coins / Wallet =====
+
+  Future<Response> getWallet() async {
+    return _dio.get('/wallet');
+  }
+
+  Future<Response> getWalletTransactions({int limit = 20, int offset = 0}) async {
+    return _dio.get('/wallet/transactions', queryParameters: {
+      'limit': limit,
+      'offset': offset,
+    });
+  }
+
+  Future<Response> requestWithdrawal({
+    required double amount,
+    required String method,
+    required Map<String, dynamic> accountDetails,
+  }) async {
+    return _dio.post('/wallet/withdraw', data: {
+      'amount': amount,
+      'method': method,
+      'account_details': accountDetails,
+    });
+  }
+
+  Future<Response> cancelWithdrawal(int id) async {
+    return _dio.post('/wallet/withdraw/$id/cancel');
+  }
+
+  // ===== Partner Payments =====
+
+  Future<Response> getPartnerList() async {
+    return _dio.get('/partner-payments/partners');
+  }
+
+  Future<Response> initiatePartnerPayment({
+    required int partnerId,
+    required double amount,
+    required String paymentMethod,
+    String? description,
+  }) async {
+    return _dio.post('/partner-payments/initiate', data: {
+      'partner_id': partnerId,
+      'amount': amount,
+      'payment_method': paymentMethod,
+      'description': description,
+    });
+  }
+
+  Future<Response> getMyPayments({int page = 1}) async {
+    return _dio.get('/partner-payments/my', queryParameters: {'page': page});
+  }
+
+  Future<Response> getPartnerPaymentDetail(int paymentId) async {
+    return _dio.get('/partner-payments/$paymentId');
+  }
 }
 
 class AuthInterceptor extends Interceptor {
@@ -591,12 +670,9 @@ class AuthInterceptor extends Interceptor {
       final token = await session.getAccessToken();
       if (token != null) {
         options.headers['Authorization'] = 'Bearer $token';
-        print('✅ Auth token attached to request: ${options.path}');
-      } else {
-        print('⚠️ No auth token available for request: ${options.path}');
       }
     } catch (e) {
-      print('❌ Error fetching auth token: $e');
+      // Token fetch failed silently
     }
     handler.next(options);
   }
@@ -604,7 +680,6 @@ class AuthInterceptor extends Interceptor {
   @override
   Future<void> onError(DioException err, ErrorInterceptorHandler handler) async {
     if (err.response?.statusCode == 401) {
-      // Prevent retry loops on the refresh endpoint itself
       if (err.requestOptions.path.contains('/auth/refresh')) {
         await session.clearSession();
         handler.next(err);
@@ -614,9 +689,6 @@ class AuthInterceptor extends Interceptor {
       final storedRefreshToken = await session.getRefreshToken();
       if (storedRefreshToken != null) {
         try {
-          print('🔄 Attempting to refresh token...');
-          // Send the refresh token in the body so the request interceptor
-          // (which attaches the access token header) cannot clobber it.
           final response = await dio.post('/auth/refresh',
             data: {'refresh_token': storedRefreshToken},
           );
@@ -627,7 +699,6 @@ class AuthInterceptor extends Interceptor {
             if (newRefreshToken != null) {
               await session.setRefreshToken(newRefreshToken);
             }
-            print('✅ Token refreshed successfully');
 
             final retryOptions = err.requestOptions;
             retryOptions.headers['Authorization'] = 'Bearer $newToken';
@@ -636,7 +707,7 @@ class AuthInterceptor extends Interceptor {
             return;
           }
         } catch (e) {
-          print('❌ Token refresh failed: $e');
+          // Token refresh failed silently
         }
       }
       await session.clearSession();
@@ -648,10 +719,7 @@ class AuthInterceptor extends Interceptor {
       final requiresLogout = data is Map && data['requires_logout'] == true;
       final isAccountProblem = code == 'ACCOUNT_BANNED' || code == 'ACCOUNT_SUSPENDED';
       if (isAccountProblem || requiresLogout) {
-        print('🚫 Account banned or suspended — clearing session');
         await session.clearSession();
-      } else {
-        print('🚫 Access denied (not a session issue) — keeping session');
       }
       handler.next(err);
       return;

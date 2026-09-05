@@ -4,8 +4,9 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../config/themes/app_theme.dart';
 import '../../providers/alert_provider.dart';
+import '../../providers/sos_provider.dart';
 import '../../core/services/location_service.dart';
-import '../../core/services/localization_service.dart';
+import '../emergency/emergency_screen.dart';
 import '../../core/widgets/shimmer_loading.dart';
 
 class AlertsScreen extends StatefulWidget {
@@ -32,6 +33,9 @@ class _AlertsScreenState extends State<AlertsScreen> {
         provider.setLocation(loc.latitude, loc.longitude);
       }
       provider.fetchNearby();
+      if (loc != null) {
+        context.read<SosProvider>().fetchNearbySos(loc.latitude, loc.longitude, radiusKm: 10);
+      }
       // Seed seen-keys so the first poll doesn't re-notify existing items
       _seenItemKeys.addAll(provider.items.map((i) => '${i.source}:${i.id}'));
     });
@@ -77,17 +81,57 @@ class _AlertsScreenState extends State<AlertsScreen> {
     return Consumer<AlertProvider>(
       builder: (context, provider, _) {
         return Scaffold(
+          backgroundColor: const Color(0xFFF8F9FA),
           appBar: AppBar(
-            title: Text(context.t('Live Alerts')),
+            backgroundColor: Colors.white,
+            elevation: 0,
+            leading: GestureDetector(
+              onTap: () => Navigator.pop(context),
+              child: Container(
+                margin: const EdgeInsets.all(8),
+                padding: const EdgeInsets.all(6),
+                decoration: BoxDecoration(
+                  color: Colors.grey.shade50,
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: const Icon(Icons.arrow_back_ios_new, color: Color(0xFF2D3436), size: 18),
+              ),
+            ),
+            title: Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(6),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFE74C3C).withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: const Icon(Icons.warning_amber, color: Color(0xFFE74C3C), size: 20),
+                ),
+                const SizedBox(width: 10),
+                Text(
+                  context.t('Live Alerts'),
+                  style: const TextStyle(
+                    color: Color(0xFF2D3436),
+                    fontSize: 20,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ],
+            ),
             actions: [
-              IconButton(
-                icon: const Icon(Icons.refresh),
-                onPressed: () => provider.fetchNearby(),
+              GestureDetector(
+                onTap: () => provider.fetchNearby(),
+                child: Container(
+                  margin: const EdgeInsets.symmetric(vertical: 10, horizontal: 4),
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: Colors.grey.shade50,
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Icon(Icons.refresh, color: Colors.grey.shade600, size: 20),
+                ),
               ),
-              IconButton(
-                icon: const Icon(Icons.filter_list),
-                onPressed: () {},
-              ),
+              const SizedBox(width: 8),
             ],
           ),
           body: provider.isLoading
@@ -126,13 +170,51 @@ class _AlertsScreenState extends State<AlertsScreen> {
                     ),
                     // Alert List
                     Expanded(
-                      child: provider.filteredItems.isEmpty
+                      child: provider.filteredItems.isEmpty && context.watch<SosProvider>().nearbySos.isEmpty
                           ? Center(child: Column(mainAxisSize: MainAxisSize.min, children: [const Icon(Icons.notifications_off, size: 48, color: AppTheme.textSecondary), const SizedBox(height: 12), Text(context.t('No alerts found'), style: const TextStyle(color: AppTheme.textSecondary)), const SizedBox(height: 4), Text(context.t('Everything looks clear in your area'), style: const TextStyle(color: AppTheme.textSecondary, fontSize: AppTheme.textSm))]))
                           : ListView.builder(
                               padding: const EdgeInsets.all(12),
-                              itemCount: provider.filteredItems.length,
+                              itemCount: provider.filteredItems.length + context.watch<SosProvider>().nearbySos.length,
                               itemBuilder: (context, index) {
-                                final item = provider.filteredItems[index];
+                                final sosList = context.read<SosProvider>().nearbySos;
+                                if (index < sosList.length) {
+                                  final sos = sosList[index];
+                                  return Card(
+                                    margin: const EdgeInsets.only(bottom: 8),
+                                    color: const Color(0xFFFEF2F2),
+                                    shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(12),
+                                      side: const BorderSide(color: Color(0xFFDC2626), width: 1.5),
+                                    ),
+                                    child: ListTile(
+                                      leading: Container(
+                                        padding: const EdgeInsets.all(8),
+                                        decoration: BoxDecoration(
+                                          color: const Color(0xFFDC2626).withOpacity(0.1),
+                                          borderRadius: BorderRadius.circular(8),
+                                        ),
+                                        child: const Icon(Icons.warning_rounded, color: Color(0xFFDC2626), size: 22),
+                                      ),
+                                      title: Text(
+                                        'SOS ${sos.emergencyType.toUpperCase()}',
+                                        style: const TextStyle(
+                                          fontWeight: FontWeight.w700,
+                                          color: Color(0xFFDC2626),
+                                        ),
+                                      ),
+                                      subtitle: Text(
+                                        sos.distanceKm != null ? '${sos.distanceKm!.toStringAsFixed(1)} km away' : 'Nearby',
+                                        style: const TextStyle(color: Color(0xFF991B1B), fontSize: 12),
+                                      ),
+                                      trailing: const Icon(Icons.chevron_right, color: Color(0xFFDC2626)),
+                                      onTap: () => Navigator.push(
+                                        context,
+                                        MaterialPageRoute(builder: (_) => const EmergencyScreen()),
+                                      ),
+                                    ),
+                                  );
+                                }
+                                final item = provider.filteredItems[index - sosList.length];
                                 final severityColor = item.severity == 'critical' ? AppTheme.severityCritical :
                                                        item.severity == 'high' ? AppTheme.severityHigh :
                                                        item.severity == 'medium' ? AppTheme.severityMedium :
@@ -239,7 +321,7 @@ class _AlertStat extends StatelessWidget {
     return Column(
       children: [
         Text(count, style: TextStyle(fontSize: AppTheme.text3xl, fontWeight: FontWeight.bold, color: color)),
-        Text(label, style: const TextStyle(fontSize: AppTheme.textSm, color: AppTheme.textSecondary)),
+        Text(label, style: const TextStyle(fontSize: AppTheme.textSm, color: AppTheme.textSecondary, fontWeight: FontWeight.normal)),
       ],
     );
   }

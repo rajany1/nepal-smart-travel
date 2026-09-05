@@ -13,6 +13,9 @@ use App\Http\Controllers\Admin\AdCampaignController;
 use App\Http\Controllers\Admin\AiAgentController;
 use App\Http\Controllers\Admin\AiAgentTaskController;
 use App\Http\Controllers\Admin\TranslatorController;
+use App\Http\Controllers\Admin\WithdrawalController;
+
+$adminPrefix = \App\Models\GameSetting::getValue('admin_route_prefix', 'admin') ?? 'admin';
 
 // ============ PUBLIC TOURIST WEB ============
 Route::prefix('/')->name('web.')->group(function () {
@@ -26,10 +29,10 @@ Route::prefix('/')->name('web.')->group(function () {
 });
 
 // ============ ADMIN LOGIN (no auth) ============
-Route::get('/login', function () {
+Route::get('/login', function () use ($adminPrefix) {
     return redirect()->route('admin.login');
 })->name('login');
-Route::prefix('admin')->name('admin.')->group(function () {
+Route::prefix($adminPrefix)->name('admin.')->group(function () {
     Route::get('/login', [WebAuthController::class, 'showLoginForm'])->name('login');
     Route::post('/login', [WebAuthController::class, 'login'])->name('login.post')->middleware('throttle:admin-login');
 });
@@ -50,6 +53,13 @@ Route::prefix('partner')->name('partner.')->middleware(['auth', 'status'])->grou
     Route::get('/pending', [\App\Http\Controllers\Partner\PartnerAuthController::class, 'pending'])->name('pending');
     Route::get('/business-form', [\App\Http\Controllers\Partner\PartnerAuthController::class, 'businessForm'])->name('business-form');
     Route::post('/business-form', [\App\Http\Controllers\Partner\PartnerAuthController::class, 'submitBusinessForm'])->name('business-form.post');
+
+    // Registration wizard
+    Route::get('/wizard', [\App\Http\Controllers\Partner\PartnerAuthController::class, 'wizard'])->name('wizard');
+    Route::post('/send-email-otp', [\App\Http\Controllers\Partner\PartnerAuthController::class, 'sendEmailOtp'])->name('send-email-otp');
+    Route::post('/verify-email-otp', [\App\Http\Controllers\Partner\PartnerAuthController::class, 'verifyEmailOtp'])->name('verify-email-otp');
+    Route::post('/send-phone-otp', [\App\Http\Controllers\Partner\PartnerAuthController::class, 'sendPhoneOtp'])->name('send-phone-otp');
+    Route::post('/verify-phone', [\App\Http\Controllers\Partner\PartnerAuthController::class, 'verifyPhone'])->name('verify-phone');
 });
 
 Route::prefix('partner')->name('partner.')->middleware(['auth', 'status', 'business'])->group(function () {
@@ -82,10 +92,18 @@ Route::prefix('partner')->name('partner.')->middleware(['auth', 'status', 'busin
     Route::post('/payouts', [\App\Http\Controllers\Partner\PayoutController::class, 'store'])->name('payouts.store');
     Route::delete('/payouts/{payout}', [\App\Http\Controllers\Partner\PayoutController::class, 'cancel'])->name('payouts.cancel');
     Route::delete('/ads/{adCampaign}', [\App\Http\Controllers\Partner\AdController::class, 'destroy'])->name('ads.destroy');
+
+    // Partner Wallet & Payments
+    Route::get('/wallet', [\App\Http\Controllers\Partner\PartnerPaymentController::class, 'wallet'])->name('wallet');
+    Route::get('/payments/scan', [\App\Http\Controllers\Partner\PartnerPaymentController::class, 'scanPage'])->name('payments.scan');
+    Route::post('/payments/verify', [\App\Http\Controllers\Partner\PartnerPaymentController::class, 'verifyCode'])->name('payments.verify');
+    Route::get('/payments/history', [\App\Http\Controllers\Partner\PartnerPaymentController::class, 'paymentHistory'])->name('payments.history');
+    Route::post('/withdraw', [\App\Http\Controllers\Partner\PartnerPaymentController::class, 'requestWithdrawal'])->name('withdraw');
+    Route::post('/withdraw/{withdrawal}/cancel', [\App\Http\Controllers\Partner\PartnerPaymentController::class, 'cancelWithdrawal'])->name('withdraw.cancel');
 });
 
 // ============ ADMIN PROTECTED ROUTES ============
-Route::prefix('admin')->name('admin.')->middleware(['auth', 'status'])->group(function () {
+Route::prefix($adminPrefix)->name('admin.')->middleware(['auth', 'status', 'role:admin,super_admin,moderator'])->group(function () {
     // Dashboard
     Route::get('/', [AdminController::class, 'dashboard'])->name('dashboard');
     Route::get('/dashboard', [AdminController::class, 'dashboard'])->name('dashboard');
@@ -110,6 +128,11 @@ Route::prefix('admin')->name('admin.')->middleware(['auth', 'status'])->group(fu
     Route::get('/alerts', [AdminController::class, 'alerts'])->name('alerts');
     Route::post('/alerts', [AdminController::class, 'createAlert'])->name('alerts.create');
     Route::post('/alerts/{id}/delete', [AdminController::class, 'deleteAlert'])->name('alerts.delete');
+
+    // SOS Emergency
+    Route::get('/sos', [AdminController::class, 'sosAlerts'])->name('sos');
+    Route::post('/sos/{id}/restrict', [AdminController::class, 'restrictSosUser'])->name('sos.restrict');
+    Route::post('/sos/{id}/unrestrict', [AdminController::class, 'unrestrictSosUser'])->name('sos.unrestrict');
 
     // Places
     Route::get('/places', [AdminController::class, 'places'])->name('places');
@@ -179,6 +202,16 @@ Route::prefix('admin')->name('admin.')->middleware(['auth', 'status'])->group(fu
     Route::post('/user-achievements/{userAchievement}/flag', [AchievementController::class, 'flagAchievement'])->name('user-achievements.flag');
     Route::post('/user-achievements/{userAchievement}/clear', [AchievementController::class, 'clearSuspicious'])->name('user-achievements.clear');
 
+    // Legal Documents
+    Route::get('/legal-documents', [\App\Http\Controllers\LegalDocumentController::class, 'index'])->name('legal-documents.index');
+    Route::get('/legal-documents/create', [\App\Http\Controllers\LegalDocumentController::class, 'create'])->name('legal-documents.create');
+    Route::post('/legal-documents', [\App\Http\Controllers\LegalDocumentController::class, 'store'])->name('legal-documents.store');
+    Route::get('/legal-documents/{id}/edit', [\App\Http\Controllers\LegalDocumentController::class, 'edit'])->name('legal-documents.edit');
+    Route::put('/legal-documents/{id}', [\App\Http\Controllers\LegalDocumentController::class, 'update'])->name('legal-documents.update');
+    Route::post('/legal-documents/{id}/publish', [\App\Http\Controllers\LegalDocumentController::class, 'publish'])->name('legal-documents.publish');
+    Route::post('/legal-documents/{id}/unpublish', [\App\Http\Controllers\LegalDocumentController::class, 'unpublish'])->name('legal-documents.unpublish');
+    Route::post('/legal-documents/{id}/delete', [\App\Http\Controllers\LegalDocumentController::class, 'destroy'])->name('legal-documents.delete');
+
     // Travel Partners & Bookings
     Route::get('/travel-partners', [TravelPartnerController::class, 'partners'])->name('travel-partners');
     Route::post('/travel-partners', [TravelPartnerController::class, 'partnerStore'])->name('travel-partners.store');
@@ -204,16 +237,12 @@ Route::prefix('admin')->name('admin.')->middleware(['auth', 'status'])->group(fu
     Route::post('/ad-campaigns', [AdCampaignController::class, 'store'])->name('ad-campaigns.store');
     Route::put('/ad-campaigns/{adCampaign}', [AdCampaignController::class, 'update'])->name('ad-campaigns.update');
     Route::delete('/ad-campaigns/{adCampaign}', [AdCampaignController::class, 'destroy'])->name('ad-campaigns.destroy');
-    Route::post('/ad-campaigns/{adCampaign}/approve', [AdCampaignController::class, 'approve'])->name('ad-campaigns.approve');
-    Route::post('/ad-campaigns/{adCampaign}/reject', [AdCampaignController::class, 'reject'])->name('ad-campaigns.reject');
     Route::post('/ad-campaigns/{adCampaign}/pause', [AdCampaignController::class, 'pause'])->name('ad-campaigns.pause');
     Route::post('/ad-campaigns/{adCampaign}/resume', [AdCampaignController::class, 'resume'])->name('ad-campaigns.resume');
     Route::post('/ad-campaigns/{adCampaign}/refund', [AdCampaignController::class, 'refund'])->name('ad-campaigns.refund');
 
     // Reward Offers
     Route::get('/offers', [\App\Http\Controllers\Admin\OfferController::class, 'index'])->name('offers');
-    Route::post('/offers/{offer}/approve', [\App\Http\Controllers\Admin\OfferController::class, 'approve'])->name('offers.approve');
-    Route::post('/offers/{offer}/reject', [\App\Http\Controllers\Admin\OfferController::class, 'reject'])->name('offers.reject');
     Route::post('/offers/{offer}/pause', [\App\Http\Controllers\Admin\OfferController::class, 'pause'])->name('offers.pause');
     Route::post('/offers/{offer}/resume', [\App\Http\Controllers\Admin\OfferController::class, 'resume'])->name('offers.resume');
     Route::post('/offers/{offer}/value', [\App\Http\Controllers\Admin\OfferController::class, 'updateValue'])->name('offers.value');
@@ -240,6 +269,8 @@ Route::prefix('admin')->name('admin.')->middleware(['auth', 'status'])->group(fu
     // Business verification
     Route::post('/travel-partners/{travelPartner}/verify', [TravelPartnerController::class, 'verifyPartner'])->name('travel-partners.verify');
     Route::post('/travel-partners/{travelPartner}/reject', [TravelPartnerController::class, 'rejectPartner'])->name('travel-partners.reject');
+    Route::post('/travel-partners/{travelPartner}/suspend', [TravelPartnerController::class, 'suspendPartner'])->name('travel-partners.suspend');
+    Route::post('/travel-partners/{travelPartner}/reinstate', [TravelPartnerController::class, 'reinstatePartner'])->name('travel-partners.reinstate');
 
     // AI Agents
     Route::get('/ai/agents', [AiAgentController::class, 'index'])->name('ai.agents');
@@ -257,4 +288,43 @@ Route::prefix('admin')->name('admin.')->middleware(['auth', 'status'])->group(fu
     Route::post('/translator/{translation}/update', [TranslatorController::class, 'update'])->name('translator.update');
     Route::post('/translator/{translation}/toggle', [TranslatorController::class, 'toggle'])->name('translator.toggle');
     Route::post('/translator/{translation}/delete', [TranslatorController::class, 'destroy'])->name('translator.delete');
+
+    // Withdrawals & Coin System
+    Route::get('/withdrawals', [WithdrawalController::class, 'index'])->name('withdrawals');
+    Route::get('/withdrawals/{id}', [WithdrawalController::class, 'show'])->name('withdrawals.show');
+    Route::post('/withdrawals/{id}/approve', [WithdrawalController::class, 'approve'])->name('withdrawals.approve');
+    Route::post('/withdrawals/{id}/complete', [WithdrawalController::class, 'complete'])->name('withdrawals.complete');
+    Route::post('/withdrawals/{id}/reject', [WithdrawalController::class, 'reject'])->name('withdrawals.reject');
+    Route::get('/coin-settings', [WithdrawalController::class, 'coinSettings'])->name('coin-settings');
+    Route::post('/coin-settings', [WithdrawalController::class, 'updateCoinSettings'])->name('coin-settings.update');
+    Route::get('/earnings-report', [WithdrawalController::class, 'earningsReport'])->name('earnings-report');
+
+    // Platform Expenses
+    Route::get('/expenses', [\App\Http\Controllers\Admin\PlatformExpenseController::class, 'index'])->name('expenses');
+    Route::post('/expenses', [\App\Http\Controllers\Admin\PlatformExpenseController::class, 'store'])->name('expenses.store');
+    Route::put('/expenses/{expense}', [\App\Http\Controllers\Admin\PlatformExpenseController::class, 'update'])->name('expenses.update');
+    Route::delete('/expenses/{expense}', [\App\Http\Controllers\Admin\PlatformExpenseController::class, 'destroy'])->name('expenses.destroy');
+    Route::post('/expenses/{expense}/mark-paid', [\App\Http\Controllers\Admin\PlatformExpenseController::class, 'markPaid'])->name('expenses.mark-paid');
+    Route::get('/expenses/renewal-alerts', [\App\Http\Controllers\Admin\PlatformExpenseController::class, 'renewalAlerts'])->name('expenses.renewal-alerts');
+
+    // Employee Salaries
+    Route::get('/salaries', [\App\Http\Controllers\Admin\PlatformExpenseController::class, 'employees'])->name('salaries');
+    Route::post('/salaries', [\App\Http\Controllers\Admin\PlatformExpenseController::class, 'storeSalary'])->name('salaries.store');
+    Route::post('/salaries/{salary}/mark-paid', [\App\Http\Controllers\Admin\PlatformExpenseController::class, 'markSalaryPaid'])->name('salaries.mark-paid');
+    Route::put('/salaries/{salary}', [\App\Http\Controllers\Admin\PlatformExpenseController::class, 'updateSalary'])->name('salaries.update');
+    Route::delete('/salaries/{salary}', [\App\Http\Controllers\Admin\PlatformExpenseController::class, 'deleteSalary'])->name('salaries.delete');
+
+    // Financial Overview
+    Route::get('/financial-overview', [\App\Http\Controllers\Admin\PlatformExpenseController::class, 'financialOverview'])->name('financial-overview');
 });
+
+// ============ REDIRECT /admin to custom prefix ============
+if ($adminPrefix !== 'admin') {
+    Route::match(['get', 'post'], '/admin/{any?}', function ($any = null) use ($adminPrefix) {
+        $path = '/' . $adminPrefix;
+        if ($any) {
+            $path .= '/' . $any;
+        }
+        return redirect($path, 301);
+    })->where('any', '.*');
+}

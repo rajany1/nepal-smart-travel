@@ -4,7 +4,6 @@ import 'package:provider/provider.dart';
 import '../../config/themes/app_theme.dart';
 import '../../providers/auth_provider.dart';
 import '../../providers/profile_provider.dart';
-import '../../providers/theme_provider.dart';
 import '../../services/push_notification_service.dart';
 import '../../core/services/offline_db_service.dart';
 import '../../core/services/app_settings_service.dart';
@@ -24,13 +23,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool _pushNotifications = true;
   bool _showOnMap = true;
   String _selectedLanguage = 'English';
-  String _selectedTheme = 'Light';
   bool _dataSaverMode = false;
   bool _autoDownload = true;
   bool _saving = false;
 
   final List<String> _languages = ['English', 'नेपाली'];
-  final List<String> _themes = ['Light', 'Dark', 'System'];
 
   @override
   void initState() {
@@ -50,8 +47,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
       _emailNotifications = settings['email_notifications'] ?? true;
       _pushNotifications = settings['push_notifications'] ?? true;
       _selectedLanguage = settings['language'] == 'ne' ? 'नेपाली' : 'English';
-      _selectedTheme = settings['theme'] == 'dark' ? 'Dark' :
-                      settings['theme'] == 'system' ? 'System' : 'Light';
       _showOnMap = settings['show_on_map'] ?? true;
     });
 
@@ -62,7 +57,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   Future<void> _saveSettings() async {
     final languageCode = _selectedLanguage == 'नेपाली' ? 'ne' : 'en';
-    final themeMode = _selectedTheme.toLowerCase();
 
     setState(() => _saving = true);
 
@@ -71,7 +65,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
       'email_notifications': _emailNotifications,
       'push_notifications': _pushNotifications,
       'language': languageCode,
-      'theme': themeMode,
       'show_on_map': _showOnMap,
     });
 
@@ -83,9 +76,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text(
-            ok ? context.t('Settings saved') : context.t('Could not save settings. Please try again.')),
+        content: Row(
+          children: [
+            Icon(ok ? Icons.check_circle : Icons.error, color: Colors.white, size: 20),
+            const SizedBox(width: 10),
+            Text(ok ? context.t('Settings saved') : context.t('Could not save settings. Please try again.')),
+          ],
+        ),
         backgroundColor: ok ? AppTheme.successColor : AppTheme.errorColor,
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+        margin: const EdgeInsets.all(16),
         duration: const Duration(seconds: 2),
       ),
     );
@@ -94,12 +95,43 @@ class _SettingsScreenState extends State<SettingsScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: AppTheme.backgroundColor,
+      backgroundColor: const Color(0xFFF8F9FA),
       appBar: AppBar(
-        title: Text(context.t('Settings')),
-        backgroundColor: AppTheme.primaryColor,
-        foregroundColor: Colors.white,
+        backgroundColor: Colors.white,
         elevation: 0,
+        leading: GestureDetector(
+          onTap: () => Navigator.pop(context),
+          child: Container(
+            margin: const EdgeInsets.all(8),
+            padding: const EdgeInsets.all(6),
+            decoration: BoxDecoration(
+              color: Colors.grey.shade50,
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: const Icon(Icons.arrow_back_ios_new, color: Color(0xFF2D3436), size: 18),
+          ),
+        ),
+        title: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(6),
+              decoration: BoxDecoration(
+                color: const Color(0xFF00695C).withOpacity(0.1),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: const Icon(Icons.settings, color: Color(0xFF00695C), size: 20),
+            ),
+            const SizedBox(width: 10),
+            Text(
+              context.t('Settings'),
+              style: const TextStyle(
+                color: Color(0xFF2D3436),
+                fontSize: 20,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ],
+        ),
         actions: [
           _saving
               ? const Padding(
@@ -107,87 +139,96 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   child: SizedBox(
                     width: 20,
                     height: 20,
-                    child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                    child: CircularProgressIndicator(strokeWidth: 2, color: Color(0xFF00695C)),
                   ),
                 )
-              : IconButton(
-                  icon: const Icon(Icons.save),
-                  onPressed: _saveSettings,
+              : GestureDetector(
+                  onTap: _saveSettings,
+                  child: Container(
+                    margin: const EdgeInsets.symmetric(vertical: 10, horizontal: 8),
+                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF00695C),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: const Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.save_rounded, color: Colors.white, size: 16),
+                        SizedBox(width: 4),
+                        Text('Save', style: TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w600)),
+                      ],
+                    ),
+                  ),
                 ),
         ],
       ),
       body: ListView(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.fromLTRB(16, 20, 16, 32),
         children: [
+          // Header text
+          Padding(
+            padding: const EdgeInsets.only(bottom: 20),
+            child: Text(
+              context.t('Customize your experience'),
+              style: TextStyle(
+                fontSize: 14,
+                color: AppTheme.textSecondary.withOpacity(0.8),
+              ),
+            ),
+          ),
+
           // Section: Notifications
-          _buildSectionCard(
+          _buildModernSection(
             title: context.t('Notifications'),
             icon: Icons.notifications_outlined,
-            color: AppTheme.infoColor,
+            gradient: [const Color(0xFF667EEA), const Color(0xFF764BA2)],
             children: [
-              _buildSwitchTile(
-                context.t('Push Notifications'),
-                context.t('Receive push notifications for alerts and updates'),
-                Icons.notifications_active,
-                _pushNotifications,
-                (v) {
+              _buildModernSwitch(
+                title: context.t('Push Notifications'),
+                subtitle: context.t('Alerts and updates'),
+                icon: Icons.notifications_active_rounded,
+                value: _pushNotifications,
+                onChanged: (v) {
                   setState(() => _pushNotifications = v);
                   PushNotificationService().setSubscription(v);
                 },
               ),
-              const Divider(height: 1),
-              _buildSwitchTile(
-                context.t('Email Notifications'),
-                context.t('Receive email updates about your reports'),
-                Icons.email_outlined,
-                _emailNotifications,
-                (v) => setState(() => _emailNotifications = v),
+              _buildModernSwitch(
+                title: context.t('Email Notifications'),
+                subtitle: context.t('Report updates via email'),
+                icon: Icons.mail_rounded,
+                value: _emailNotifications,
+                onChanged: (v) => setState(() => _emailNotifications = v),
               ),
-              const Divider(height: 1),
-              _buildSwitchTile(
-                context.t('Alert Alerts'),
-                context.t('Get notified about critical alerts near you'),
-                Icons.warning_amber,
-                _notificationsEnabled,
-                (v) => setState(() => _notificationsEnabled = v),
+              _buildModernSwitch(
+                title: context.t('Critical Alerts'),
+                subtitle: context.t('Emergency notifications near you'),
+                icon: Icons.warning_amber_rounded,
+                value: _notificationsEnabled,
+                onChanged: (v) => setState(() => _notificationsEnabled = v),
               ),
             ],
           ),
           const SizedBox(height: 16),
 
           // Section: Appearance
-          _buildSectionCard(
+          _buildModernSection(
             title: context.t('Appearance'),
             icon: Icons.palette_outlined,
-            color: AppTheme.accentColor,
+            gradient: [const Color(0xFFF093FB), const Color(0xFFF5576C)],
             children: [
-              _buildDropdownTile(
-                context.t('Language'),
-                Icons.language,
-                _selectedLanguage,
-                _languages,
-                (v) {
+              _buildModernDropdown(
+                title: context.t('Language'),
+                subtitle: context.t('Choose your preferred language'),
+                icon: Icons.language_rounded,
+                value: _selectedLanguage,
+                items: _languages,
+                onChanged: (v) {
                   setState(() => _selectedLanguage = v!);
                   context.read<LocalizationService>().setLanguage(
                         v == 'नेपाली' ? 'ne' : 'en',
                       );
-                },
-              ),
-              const Divider(height: 1),
-              _buildDropdownTile(
-                context.t('Theme'),
-                Icons.dark_mode,
-                _selectedTheme,
-                _themes,
-                (v) {
-                  setState(() => _selectedTheme = v!);
-                  context.read<ThemeProvider>().setMode(
-                    v == 'Dark'
-                        ? ThemeMode.dark
-                        : v == 'System'
-                            ? ThemeMode.system
-                            : ThemeMode.light,
-                  );
                 },
               ),
             ],
@@ -195,23 +236,24 @@ class _SettingsScreenState extends State<SettingsScreen> {
           const SizedBox(height: 16),
 
           // Section: Privacy
-          _buildSectionCard(
+          _buildModernSection(
             title: context.t('Privacy & Security'),
-            icon: Icons.security,
-            color: AppTheme.warningColor,
+            icon: Icons.shield_outlined,
+            gradient: [const Color(0xFF4FACFE), const Color(0xFF00F2FE)],
             children: [
-              _buildSwitchTile(
-                context.t('Show on Map'),
-                context.t('Allow others to see your contributions on the map'),
-                Icons.map,
-                _showOnMap,
-                (v) => setState(() => _showOnMap = v),
+              _buildModernSwitch(
+                title: context.t('Show on Map'),
+                subtitle: context.t('Visible contributions on map'),
+                icon: Icons.map_rounded,
+                value: _showOnMap,
+                onChanged: (v) => setState(() => _showOnMap = v),
               ),
-              const Divider(height: 1),
-              ListTile(
-                leading: const Icon(Icons.delete_outline, color: AppTheme.errorColor),
-                title: Text(context.t('Delete Account'), style: const TextStyle(color: AppTheme.errorColor)),
-                subtitle: Text(context.t('Permanently delete your account and data')),
+              _buildModernAction(
+                title: context.t('Delete Account'),
+                subtitle: context.t('Permanently remove your data'),
+                icon: Icons.delete_forever_rounded,
+                iconColor: AppTheme.errorColor,
+                titleColor: AppTheme.errorColor,
                 onTap: () => _showDeleteConfirmation(context),
               ),
             ],
@@ -219,53 +261,46 @@ class _SettingsScreenState extends State<SettingsScreen> {
           const SizedBox(height: 16),
 
           // Section: Data & Storage
-          _buildSectionCard(
+          _buildModernSection(
             title: context.t('Data & Storage'),
-            icon: Icons.storage,
-            color: AppTheme.infoColor,
+            icon: Icons.storage_outlined,
+            gradient: [const Color(0xFF43E97B), const Color(0xFF38F9D7)],
             children: [
-              _buildSwitchTile(
-                context.t('Data Saver Mode'),
-                context.t('Skip background map downloads and use less memory for images'),
-                Icons.data_saver_on,
-                _dataSaverMode,
-                (v) => setState(() => _dataSaverMode = v),
+              _buildModernSwitch(
+                title: context.t('Data Saver Mode'),
+                subtitle: context.t('Reduce data usage'),
+                icon: Icons.data_saver_on_rounded,
+                value: _dataSaverMode,
+                onChanged: (v) => setState(() => _dataSaverMode = v),
               ),
-              const Divider(height: 1),
-              _buildSwitchTile(
-                context.t('Auto-download Maps'),
-                context.t('Cache map tiles so the map works without internet'),
-                Icons.download,
-                _autoDownload,
-                (v) => setState(() => _autoDownload = v),
+              _buildModernSwitch(
+                title: context.t('Auto-download Maps'),
+                subtitle: context.t('Cache maps for offline use'),
+                icon: Icons.download_rounded,
+                value: _autoDownload,
+                onChanged: (v) => setState(() => _autoDownload = v),
               ),
-              const Divider(height: 1),
-              ListTile(
-                leading: const Icon(Icons.map_outlined, color: AppTheme.primaryColor),
-                title: Text(context.t('Offline Maps')),
-                subtitle: Text(context.t('Download the full Nepal map (30/60 days), update or delete it'),
-                    style: TextStyle(color: AppTheme.textSecondary.withOpacity(0.7))),
-                trailing: const Icon(Icons.chevron_right, color: AppTheme.textSecondary),
+              _buildModernAction(
+                title: context.t('Offline Maps'),
+                subtitle: context.t('Download Nepal map for offline'),
+                icon: Icons.map_rounded,
+                iconColor: AppTheme.primaryColor,
                 onTap: () {
                   Navigator.push(
                     context,
-                    MaterialPageRoute(
-                      builder: (context) => const OfflineMapsScreen(),
-                    ),
+                    MaterialPageRoute(builder: (context) => const OfflineMapsScreen()),
                   );
                 },
               ),
-              const Divider(height: 1),
-              ListTile(
-                leading: const Icon(Icons.delete_sweep_outlined, color: AppTheme.textSecondary),
-                title: Text(context.t('Clear Cache')),
-                subtitle: Text(context.t('Free up storage space (maps, places, images)'),
-                    style: TextStyle(color: AppTheme.textSecondary.withOpacity(0.7))),
+              _buildModernAction(
+                title: context.t('Clear Cache'),
+                subtitle: context.t('Free up storage space'),
+                icon: Icons.cleaning_services_rounded,
+                iconColor: AppTheme.warningColor,
                 onTap: _clearCache,
               ),
             ],
           ),
-          const SizedBox(height: 32),
         ],
       ),
     );
@@ -274,10 +309,22 @@ class _SettingsScreenState extends State<SettingsScreen> {
   Future<void> _clearCache() async {
     final messenger = ScaffoldMessenger.of(context);
     final db = OfflineDbService.instance;
-
     final dbBytes = await db.cacheSizeBytes();
 
-    messenger.showSnackBar(SnackBar(content: Text(context.t('Clearing cache...'))));
+    messenger.showSnackBar(
+      SnackBar(
+        content: const Row(
+          children: [
+            SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white)),
+            SizedBox(width: 12),
+            Text('Clearing cache...'),
+          ],
+        ),
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+        margin: const EdgeInsets.all(16),
+      ),
+    );
 
     await db.clearAll();
     PaintingBinding.instance.imageCache.clear();
@@ -289,51 +336,76 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final freedMb = (dbBytes / (1024 * 1024)).toStringAsFixed(1);
     messenger.showSnackBar(
       SnackBar(
-        content: Text('${context.t('Cache cleared')} ($freedMb MB freed)'),
+        content: Row(
+          children: [
+            const Icon(Icons.check_circle, color: Colors.white, size: 20),
+            const SizedBox(width: 10),
+            Text('${context.t('Cache cleared')} ($freedMb MB freed)'),
+          ],
+        ),
         backgroundColor: AppTheme.successColor,
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+        margin: const EdgeInsets.all(16),
       ),
     );
   }
 
-  Widget _buildSectionCard({
+  Widget _buildModernSection({
     required String title,
     required IconData icon,
-    required Color color,
+    required List<Color> gradient,
     required List<Widget> children,
   }) {
     return Container(
       decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: AppTheme.dividerColor),
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.04),
+            blurRadius: 12,
+            offset: const Offset(0, 4),
+          ),
+        ],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 14, 16, 8),
+          // Section Header with gradient
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                colors: gradient,
+                begin: Alignment.centerLeft,
+                end: Alignment.centerRight,
+              ),
+              borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),
+            ),
             child: Row(
               children: [
                 Container(
                   padding: const EdgeInsets.all(6),
                   decoration: BoxDecoration(
-                    color: color.withOpacity(0.1),
+                    color: Colors.white.withOpacity(0.25),
                     borderRadius: BorderRadius.circular(8),
                   ),
-                  child: Icon(icon, size: 18, color: color),
+                  child: Icon(icon, size: 18, color: Colors.white),
                 ),
                 const SizedBox(width: 10),
                 Text(
                   title,
-                  style: TextStyle(
+                  style: const TextStyle(
                     fontSize: 15,
-                    fontWeight: FontWeight.bold,
-                    color: AppTheme.textPrimary,
+                    fontWeight: FontWeight.w600,
+                    color: Colors.white,
                   ),
                 ),
               ],
             ),
           ),
+          // Children
           ...children,
           const SizedBox(height: 4),
         ],
@@ -341,42 +413,190 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
   }
 
-  Widget _buildSwitchTile(
-    String title,
-    String subtitle,
-    IconData icon,
-    bool value,
-    ValueChanged<bool> onChanged,
-  ) {
-    return SwitchListTile(
-      title: Text(title, style: const TextStyle(fontSize: AppTheme.textBase, fontWeight: FontWeight.w500)),
-      subtitle: Text(subtitle, style: const TextStyle(fontSize: AppTheme.textSm, color: AppTheme.textSecondary)),
-      secondary: Icon(icon, size: 20, color: value ? AppTheme.primaryColor : AppTheme.textSecondary),
-      value: value,
-      activeColor: AppTheme.primaryColor,
-      dense: true,
-      onChanged: onChanged,
+  Widget _buildModernSwitch({
+    required String title,
+    required String subtitle,
+    required IconData icon,
+    required bool value,
+    required ValueChanged<bool> onChanged,
+  }) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+      child: Row(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              color: value
+                  ? AppTheme.primaryColor.withOpacity(0.1)
+                  : Colors.grey.withOpacity(0.1),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Icon(
+              icon,
+              size: 20,
+              color: value ? AppTheme.primaryColor : Colors.grey,
+            ),
+          ),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: const TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w500,
+                    color: AppTheme.textPrimary,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  subtitle,
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: AppTheme.textSecondary.withOpacity(0.7),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          Transform.scale(
+            scale: 0.9,
+            child: Switch(
+              value: value,
+              onChanged: onChanged,
+              activeColor: AppTheme.primaryColor,
+              activeTrackColor: AppTheme.primaryColor.withOpacity(0.3),
+            ),
+          ),
+        ],
+      ),
     );
   }
 
-  Widget _buildDropdownTile(
-    String title,
-    IconData icon,
-    String value,
-    List<String> items,
-    ValueChanged<String?> onChanged,
-  ) {
-    return ListTile(
-      leading: Icon(icon, size: 20, color: AppTheme.textSecondary),
-      title: Text(title, style: const TextStyle(fontSize: AppTheme.textBase, fontWeight: FontWeight.w500)),
-      trailing: DropdownButton<String>(
-        value: value,
-        underline: const SizedBox(),
-        style: TextStyle(fontSize: AppTheme.textBase, color: AppTheme.primaryColor),
-        items: items.map((item) {
-          return DropdownMenuItem(value: item, child: Text(item));
-        }).toList(),
-        onChanged: onChanged,
+  Widget _buildModernDropdown({
+    required String title,
+    required String subtitle,
+    required IconData icon,
+    required String value,
+    required List<String> items,
+    required ValueChanged<String?> onChanged,
+  }) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      child: Row(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              color: AppTheme.primaryColor.withOpacity(0.1),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Icon(icon, size: 20, color: AppTheme.primaryColor),
+          ),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: const TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w500,
+                    color: AppTheme.textPrimary,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  subtitle,
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: AppTheme.textSecondary.withOpacity(0.7),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+            decoration: BoxDecoration(
+              color: AppTheme.primaryColor.withOpacity(0.08),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: DropdownButtonHideUnderline(
+              child: DropdownButton<String>(
+                value: value,
+                isDense: true,
+                style: TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w500,
+                  color: AppTheme.primaryColor,
+                ),
+                items: items.map((item) {
+                  return DropdownMenuItem(value: item, child: Text(item));
+                }).toList(),
+                onChanged: onChanged,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildModernAction({
+    required String title,
+    required String subtitle,
+    required IconData icon,
+    required Color iconColor,
+    Color? titleColor,
+    required VoidCallback onTap,
+  }) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(12),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        child: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: iconColor.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Icon(icon, size: 20, color: iconColor),
+            ),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    title,
+                    style: TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w500,
+                      color: titleColor ?? AppTheme.textPrimary,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    subtitle,
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: AppTheme.textSecondary.withOpacity(0.7),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            Icon(Icons.chevron_right_rounded, color: Colors.grey.withOpacity(0.5), size: 22),
+          ],
+        ),
       ),
     );
   }
@@ -385,7 +605,21 @@ class _SettingsScreenState extends State<SettingsScreen> {
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: Text(ctx.t('Delete Account')),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: AppTheme.errorColor.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: const Icon(Icons.delete_forever, color: AppTheme.errorColor, size: 24),
+            ),
+            const SizedBox(width: 12),
+            Text(ctx.t('Delete Account')),
+          ],
+        ),
         content: Text(ctx.t(
           'Are you sure you want to delete your account? This action cannot be undone. All your data, reports, and contributions will be permanently removed.',
         )),
@@ -394,12 +628,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
             onPressed: () => Navigator.of(ctx).pop(),
             child: Text(ctx.t('Cancel')),
           ),
-          TextButton(
+          ElevatedButton(
             onPressed: () {
               Navigator.of(ctx).pop();
               _deleteAccount(context);
             },
-            style: TextButton.styleFrom(foregroundColor: AppTheme.errorColor),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppTheme.errorColor,
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+            ),
             child: Text(ctx.t('Delete')),
           ),
         ],
@@ -415,13 +653,23 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final deleted = await authProvider.deleteAccount();
     if (deleted) {
       messenger.showSnackBar(
-          SnackBar(content: Text(context.t('Your account has been deleted.'))));
+        SnackBar(
+          content: Text(context.t('Your account has been deleted.')),
+          backgroundColor: AppTheme.successColor,
+          behavior: SnackBarBehavior.floating,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+          margin: const EdgeInsets.all(16),
+        ),
+      );
       navigator.pushReplacementNamed('/login');
     } else {
       messenger.showSnackBar(
         SnackBar(
           content: Text(context.t('Could not delete your account. Please try again.')),
           backgroundColor: AppTheme.errorColor,
+          behavior: SnackBarBehavior.floating,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+          margin: const EdgeInsets.all(16),
         ),
       );
     }

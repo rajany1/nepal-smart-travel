@@ -11,7 +11,7 @@ class TravelPartner extends Model
         'name', 'type', 'description', 'logo', 'phone', 'email',
         'website', 'address', 'district', 'commission_rate',
         'commission_fixed', 'value_npr', 'is_active',
-        'user_id', 'verification_status', 'rejected_reason',
+        'user_id', 'verification_status', 'rejected_reason', 'suspended_reason', 'verified_at',
     ];
 
     protected function casts(): array

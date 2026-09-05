@@ -100,7 +100,15 @@ class PlaceController extends Controller
         ]);
 
         if ($request->hasFile('images')) {
+            $finfo = new \finfo(FILEINFO_MIME_TYPE);
+            $allowedTypes = ['image/jpeg', 'image/png', 'image/webp'];
+            
             foreach ($request->file('images') as $image) {
+                // Validate actual file content
+                $mimeType = $finfo->buffer(file_get_contents($image->getRealPath()));
+                if (!in_array($mimeType, $allowedTypes)) {
+                    continue; // Skip invalid files silently
+                }
                 $path = $image->store('places/' . $place->id, 'public');
                 PlaceImage::create([
                     'place_id' => $place->id,
@@ -554,7 +562,7 @@ class PlaceController extends Controller
             "node[\"amenity\"~\"" . implode('|', [
                 'restaurant', 'cafe', 'fast_food', 'pub', 'bar',
                 'hotel', 'motel', 'hostel', 'guest_house',
-                'hospital', 'clinic', 'pharmacy', 'doctors',
+                'hospital', 'clinic', 'pharmacy', 'doctors', 'blood_bank',
                 'bank', 'atm', 'fuel', 'taxi',
                 'police', 'fire_station', 'embassy',
                 'marketplace', 'theatre', 'cinema', 'community_centre',
@@ -753,7 +761,7 @@ class PlaceController extends Controller
                 'restaurant' => 'Restaurant', 'cafe' => 'Cafe', 'fast_food' => 'Food',
                 'pub' => 'Pub', 'bar' => 'Bar',
                 'hotel' => 'Hotel', 'motel' => 'Hotel', 'hostel' => 'Hotel', 'guest_house' => 'Hotel',
-                'hospital' => 'Hospital', 'clinic' => 'Clinic', 'pharmacy' => 'Pharmacy', 'doctors' => 'Clinic',
+                'hospital' => 'Hospital', 'clinic' => 'Clinic', 'pharmacy' => 'Pharmacy', 'doctors' => 'Clinic', 'blood_bank' => 'Blood Bank',
                 'bank' => 'Bank', 'atm' => 'ATM',
                 'fuel' => 'Fuel Station', 'taxi' => 'Transport',
                 'police' => 'Emergency', 'fire_station' => 'Emergency',
@@ -923,6 +931,17 @@ class PlaceController extends Controller
         }
         Cache::put($dailyKey, $dailyCount + 1, now()->endOfDay());
 
+        // Fraud detection
+        $fraud = app(\App\Services\FraudDetectionService::class);
+        $fraudResult = $fraud->checkReview($request, $place->id, $user);
+        if ($fraudResult['blocked']) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Review blocked due to suspicious activity.',
+                'reasons' => $fraudResult['reasons'],
+            ], 422);
+        }
+
         // Re-submitting an existing review overwrites it; reviews publish directly
         // (admin can edit/hide later from the places list -> Reviews)
         $review = PlaceReview::updateOrCreate(
@@ -933,6 +952,8 @@ class PlaceController extends Controller
                 'rating' => $request->rating,
                 'moderation_status' => 'approved',
                 'moderated_at' => now(),
+                'ip_address' => $request->ip(),
+                'user_agent' => $request->userAgent(),
             ]
         );
 
@@ -1283,6 +1304,39 @@ class PlaceController extends Controller
         return response()->json([
             'success' => true,
             'data' => $corrections,
+        ]);
+    }
+
+    public function updateStatus(Request $request, string $id)
+    {
+        $place = Place::findOrFail($id);
+        $user = $request->user();
+
+        // Only the creator or business role can update status
+        if ($place->created_by !== $user->id && $user->role !== 'business' && $user->role !== 'admin') {
+            return response()->json(['success' => false, 'message' => 'Unauthorized'], 403);
+        }
+
+        $validated = $request->validate([
+            'is_open' => 'nullable|boolean',
+            'today_offer' => 'nullable|string|max:255',
+            'live_event' => 'nullable|string|max:255',
+            'opening_hours' => 'nullable|array',
+        ]);
+
+        $place->update(array_merge($validated, [
+            'last_status_update' => now(),
+        ]));
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Business status updated',
+            'data' => [
+                'is_open' => $place->is_open,
+                'today_offer' => $place->today_offer,
+                'live_event' => $place->live_event,
+                'opening_hours' => $place->opening_hours,
+            ],
         ]);
     }
 }

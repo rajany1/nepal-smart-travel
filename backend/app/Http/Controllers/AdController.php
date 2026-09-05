@@ -5,6 +5,11 @@ namespace App\Http\Controllers;
 use App\Models\AdCampaign;
 use App\Models\AdClick;
 use App\Models\AdImpression;
+use App\Models\AdRevenueLedger;
+use App\Models\Report;
+use App\Models\CoinSetting;
+use App\Services\FraudDetectionService;
+use App\Services\CoinService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -17,7 +22,8 @@ class AdController extends Controller
         $district = $request->get('district');
         $category = $request->get('category');
         $limit = min((int) ($request->get('limit') ?: 3), 10);
-        $cap = (int) \App\Models\GameSetting::getValue('ad_freq_cap', 3);
+        $persistent = $request->boolean('persistent', false);
+        $cap = $persistent ? 0 : (int) \App\Models\GameSetting::getValue('ad_freq_cap', 3);
         $userId = Auth::id();
         $today = today()->startOfDay();
 
@@ -38,6 +44,7 @@ class AdController extends Controller
                         $q2->whereNull('budget')->orWhere('budget', '<=', 0);
                     });
             })
+            ->where('fraud_score', '<', 80)
             ->get()
             ->filter(function ($campaign) use ($context) {
                 return $campaign->matchesContext($context);
@@ -81,7 +88,7 @@ class AdController extends Controller
                 'name' => $campaign->name,
                 'ad_type' => $campaign->ad_type,
                 'content' => $campaign->content,
-                'image' => $campaign->image,
+                'image' => $campaign->image ? asset('storage/' . $campaign->image) : null,
                 'target_url' => $campaign->target_url,
                 'target_district' => $campaign->target_district,
                 'target_category' => $campaign->target_category,
@@ -89,6 +96,297 @@ class AdController extends Controller
                 'business_name' => $campaign->business?->name,
             ];
         })->values()]);
+    }
+
+    /**
+     * Get ad for specific report screen.
+     * Returns ad + report owner info for coin crediting.
+     */
+    public function forReport(Request $request, int $reportId): JsonResponse
+    {
+        $report = Report::with('user:id,name')->find($reportId);
+
+        if (!$report) {
+            return response()->json(['error' => 'Report not found'], 404);
+        }
+
+        $context = 'report';
+        $district = $report->district;
+        $category = $report->category?->slug ?? null;
+        $userId = Auth::id();
+
+        // Get active campaigns — filter by context/district in PHP (not SQL LIKE on JSON)
+        $campaigns = AdCampaign::with('business')
+            ->active()
+            ->where(function ($q) {
+                $q->where('max_impressions', 0)
+                    ->orWhereColumn('current_impressions', '<', 'max_impressions');
+            })
+            ->where(function ($q) {
+                $q->where(function ($q2) {
+                    $q2->whereNull('budget')->orWhere('budget', '<=', 0);
+                })->orWhereColumn('spent_amount', '<', 'budget');
+            })
+            ->where(function ($q) {
+                $q->where('payment_status', 'paid')
+                    ->orWhere(function ($q2) {
+                        $q2->whereNull('budget')->orWhere('budget', '<=', 0);
+                    });
+            })
+            ->where('fraud_score', '<', 80)
+            ->get()
+            ->filter(fn ($c) => $c->matchesContext('report'))
+            ->values();
+
+        if ($campaigns->isEmpty()) {
+            return response()->json(['data' => null]);
+        }
+
+        // Pick best match: prefer district match, then random
+        $districtMatch = $campaigns->filter(fn ($c) => $district && $c->target_district && strcasecmp($c->target_district, $district) === 0);
+        $campaign = $districtMatch->isNotEmpty() ? $districtMatch->random() : $campaigns->random();
+
+        // Get coin settings for mobile app to display
+        $impressionValue = (float) CoinSetting::getValue('impression_value', 0.05);
+        $clickValue = (float) CoinSetting::getValue('click_value', 0.50);
+        $userSharePercent = (float) CoinSetting::getValue('user_share_percent', 70);
+
+        return response()->json([
+            'data' => [
+                'id' => $campaign->id,
+                'name' => $campaign->name,
+                'ad_type' => $campaign->ad_type,
+                'content' => $campaign->content,
+                'image' => $campaign->image ? asset('storage/' . $campaign->image) : null,
+                'target_url' => $campaign->target_url,
+                'business_name' => $campaign->business?->name,
+                'contexts' => $campaign->contexts ?? [],
+                'report_id' => $report->id,
+                'report_owner_id' => $report->user_id,
+                'report_owner_name' => $report->user->name,
+                'coin_earning' => [
+                    'impression_value' => round($impressionValue * ($userSharePercent / 100), 4),
+                    'click_value' => round($clickValue * ($userSharePercent / 100), 4),
+                    'user_share_percent' => $userSharePercent,
+                ],
+            ],
+        ]);
+    }
+
+    /**
+     * Track ad impression and credit coins to report owner.
+     * report_id is optional - only coin credit on report screens.
+     */
+    public function trackImpression(Request $request): JsonResponse
+    {
+        $request->validate([
+            'ad_campaign_id' => 'required|exists:ad_campaigns,id',
+            'report_id' => 'nullable|exists:reports,id',
+            'context' => 'nullable|string|max:50',
+        ]);
+
+        $campaign = AdCampaign::findOrFail($request->ad_campaign_id);
+        $report = $request->report_id ? Report::findOrFail($request->report_id) : null;
+        $context = $request->get('context') ?: ($report ? 'report' : 'unknown');
+        $isReportScreen = ($report !== null && $context === 'report');
+
+        if (!$this->isServable($campaign)) {
+            return response()->json(['success' => false, 'error' => 'Campaign is not active'], 422);
+        }
+
+        $fraud = app(FraudDetectionService::class);
+        $result = $fraud->checkImpression($request, $campaign);
+        if ($result['blocked']) {
+            return response()->json(['success' => false, 'error' => 'Event blocked', 'reasons' => $result['reasons']], 422);
+        }
+
+        $userId = Auth::id();
+
+        $recent = AdImpression::where('ad_campaign_id', $campaign->id)
+            ->where('viewed_at', '>=', now()->subMinutes(10))
+            ->when(
+                $userId,
+                fn($q) => $q->where('user_id', $userId),
+                fn($q) => $q->where('ip_address', $request->ip())
+            )
+            ->exists();
+
+        if ($recent) {
+            return response()->json(['success' => false, 'error' => 'Impression already recorded'], 422);
+        }
+
+        AdImpression::create([
+            'ad_campaign_id' => $campaign->id,
+            'user_id' => $userId,
+            'ip_address' => $request->ip(),
+            'user_agent' => $request->userAgent(),
+            'viewed_at' => now(),
+        ]);
+
+        $campaign->increment('current_impressions');
+        $this->applySpend($campaign);
+
+        // Calculate gross amount for this impression
+        $grossAmount = $this->calculateGrossAmount($campaign, 'impression');
+
+        // Credit coins to report owner (report screen only)
+        $coinService = app(CoinService::class);
+        $coinTransaction = null;
+
+        if ($isReportScreen && $report) {
+            $reportOwner = \App\Models\User::find($report->user_id);
+            if ($reportOwner) {
+                $coinTransaction = $coinService->creditImpression($reportOwner, $campaign, $report);
+            }
+        }
+
+        // Record revenue in ledger
+        $userSharePercent = (float) CoinSetting::getValue('user_share_percent', 70);
+        $userShare = $isReportScreen ? round($grossAmount * ($userSharePercent / 100), 4) : 0;
+        $adminShare = $grossAmount - $userShare;
+
+        AdRevenueLedger::create([
+            'ad_campaign_id' => $campaign->id,
+            'report_id' => $report?->id,
+            'context' => $context,
+            'gross_amount' => $grossAmount,
+            'user_share' => $userShare,
+            'admin_share' => $adminShare,
+            'event_type' => 'impression',
+        ]);
+
+        return response()->json([
+            'success' => true,
+            'coins_earned' => $coinTransaction ? (float) $coinTransaction->amount : 0,
+        ]);
+    }
+
+    /**
+     * Track ad click and credit coins to report owner.
+     * report_id is optional - only coin credit on report screens.
+     */
+    public function trackClick(Request $request): JsonResponse
+    {
+        $request->validate([
+            'ad_campaign_id' => 'required|exists:ad_campaigns,id',
+            'report_id' => 'nullable|exists:reports,id',
+            'context' => 'nullable|string|max:50',
+        ]);
+
+        $campaign = AdCampaign::findOrFail($request->ad_campaign_id);
+        $report = $request->report_id ? Report::findOrFail($request->report_id) : null;
+        $context = $request->get('context') ?: ($report ? 'report' : 'unknown');
+        $isReportScreen = ($report !== null && $context === 'report');
+
+        if (!$this->isServable($campaign)) {
+            return response()->json(['success' => false, 'error' => 'Campaign is not active'], 422);
+        }
+
+        $fraud = app(FraudDetectionService::class);
+        $result = $fraud->checkClick($request, $campaign);
+        if ($result['blocked']) {
+            return response()->json(['success' => false, 'error' => 'Event blocked', 'reasons' => $result['reasons']], 422);
+        }
+
+        $userId = Auth::id();
+
+        // Ensure impression exists before recording click
+        $hasImpression = AdImpression::where('ad_campaign_id', $campaign->id)
+            ->when(
+                $userId,
+                fn($q) => $q->where('user_id', $userId),
+                fn($q) => $q->where('ip_address', $request->ip())
+            )
+            ->exists();
+
+        if (!$hasImpression) {
+            // Auto-record impression first
+            AdImpression::create([
+                'ad_campaign_id' => $campaign->id,
+                'user_id' => $userId,
+                'ip_address' => $request->ip(),
+                'user_agent' => $request->userAgent(),
+                'viewed_at' => now(),
+            ]);
+            $campaign->increment('current_impressions');
+            $this->applySpend($campaign);
+        }
+
+        $recent = AdClick::where('ad_campaign_id', $campaign->id)
+            ->where('clicked_at', '>=', now()->subMinutes(10))
+            ->when(
+                $userId,
+                fn($q) => $q->where('user_id', $userId),
+                fn($q) => $q->where('ip_address', $request->ip())
+            )
+            ->exists();
+
+        if ($recent) {
+            return response()->json(['success' => false, 'error' => 'Click already recorded'], 422);
+        }
+
+        AdClick::create([
+            'ad_campaign_id' => $campaign->id,
+            'user_id' => $userId,
+            'ip_address' => $request->ip(),
+            'user_agent' => $request->userAgent(),
+            'clicked_at' => now(),
+        ]);
+
+        $campaign->increment('current_clicks');
+        $this->applySpend($campaign);
+
+        // Calculate gross amount for this click
+        $grossAmount = $this->calculateGrossAmount($campaign, 'click');
+
+        // Credit coins to report owner (report screen only)
+        $coinService = app(CoinService::class);
+        $coinTransaction = null;
+
+        if ($isReportScreen && $report) {
+            $reportOwner = \App\Models\User::find($report->user_id);
+            if ($reportOwner) {
+                $coinTransaction = $coinService->creditClick($reportOwner, $campaign, $report);
+            }
+        }
+
+        // Record revenue in ledger
+        $userSharePercent = (float) CoinSetting::getValue('user_share_percent', 70);
+        $userShare = $isReportScreen ? round($grossAmount * ($userSharePercent / 100), 4) : 0;
+        $adminShare = $grossAmount - $userShare;
+
+        AdRevenueLedger::create([
+            'ad_campaign_id' => $campaign->id,
+            'report_id' => $report?->id,
+            'context' => $context,
+            'gross_amount' => $grossAmount,
+            'user_share' => $userShare,
+            'admin_share' => $adminShare,
+            'event_type' => 'click',
+        ]);
+
+        return response()->json([
+            'success' => true,
+            'coins_earned' => $coinTransaction ? (float) $coinTransaction->amount : 0,
+        ]);
+    }
+
+    /**
+     * Calculate gross NPR amount for an impression or click.
+     */
+    private function calculateGrossAmount(AdCampaign $campaign, string $type): float
+    {
+        if ($type === 'impression') {
+            $cpm = (float) $campaign->cost_per_view > 0
+                ? (float) $campaign->cost_per_view
+                : (float) \App\Models\GameSetting::getValue('ad_cpm', 50);
+            return round($cpm / 1000, 4);
+        } else {
+            $cpc = (float) $campaign->cost_per_click > 0
+                ? (float) $campaign->cost_per_click
+                : (float) \App\Models\GameSetting::getValue('ad_cpc', 10);
+            return round($cpc, 4);
+        }
     }
 
     private function weightedSample($campaigns, int $limit, ?string $context, ?string $district, ?string $category, $todayCounts): \Illuminate\Support\Collection
@@ -173,84 +471,6 @@ class AdController extends Controller
         $fairness = max(0.5, min(2.0, 1 + ((1 - $todayCount) / $avg)));
 
         return (1 + $score) * $fairness * $pacing;
-    }
-
-    public function trackImpression(Request $request): JsonResponse
-    {
-        $request->validate(['ad_campaign_id' => 'required|exists:ad_campaigns,id']);
-
-        $campaign = AdCampaign::findOrFail($request->ad_campaign_id);
-
-        if (!$this->isServable($campaign)) {
-            return response()->json(['success' => false, 'error' => 'Campaign is not active'], 422);
-        }
-
-        $userId = Auth::id();
-
-        $recent = AdImpression::where('ad_campaign_id', $campaign->id)
-            ->where('viewed_at', '>=', now()->subMinutes(10))
-            ->when(
-                $userId,
-                fn($q) => $q->where('user_id', $userId),
-                fn($q) => $q->where('ip_address', $request->ip())
-            )
-            ->exists();
-
-        if ($recent) {
-            return response()->json(['success' => false, 'error' => 'Impression already recorded'], 422);
-        }
-
-        AdImpression::create([
-            'ad_campaign_id' => $campaign->id,
-            'user_id' => $userId,
-            'ip_address' => $request->ip(),
-            'user_agent' => $request->userAgent(),
-            'viewed_at' => now(),
-        ]);
-
-        $campaign->increment('current_impressions');
-        $this->applySpend($campaign);
-
-        return response()->json(['success' => true]);
-    }
-
-    public function trackClick(Request $request): JsonResponse
-    {
-        $request->validate(['ad_campaign_id' => 'required|exists:ad_campaigns,id']);
-
-        $campaign = AdCampaign::findOrFail($request->ad_campaign_id);
-
-        if (!$this->isServable($campaign)) {
-            return response()->json(['success' => false, 'error' => 'Campaign is not active'], 422);
-        }
-
-        $userId = Auth::id();
-
-        $recent = AdClick::where('ad_campaign_id', $campaign->id)
-            ->where('clicked_at', '>=', now()->subMinutes(10))
-            ->when(
-                $userId,
-                fn($q) => $q->where('user_id', $userId),
-                fn($q) => $q->where('ip_address', $request->ip())
-            )
-            ->exists();
-
-        if ($recent) {
-            return response()->json(['success' => false, 'error' => 'Click already recorded'], 422);
-        }
-
-        AdClick::create([
-            'ad_campaign_id' => $campaign->id,
-            'user_id' => $userId,
-            'ip_address' => $request->ip(),
-            'user_agent' => $request->userAgent(),
-            'clicked_at' => now(),
-        ]);
-
-        $campaign->increment('current_clicks');
-        $this->applySpend($campaign);
-
-        return response()->json(['success' => true]);
     }
 
     private function applySpend(AdCampaign $campaign): void

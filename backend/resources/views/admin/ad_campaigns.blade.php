@@ -4,7 +4,7 @@
 @section('content')
 <div class="space-y-6">
     <div class="flex items-center justify-between">
-        <div><h3 class="text-2xl font-bold text-slate-900">Local Business Ads</h3><p class="text-sm text-slate-500 mt-1">Partner campaigns need approval. Admin earns the spend from partner-paid budgets (eSewa/Khalti): impressions x CPM/1000 + clicks x CPC..</p></div>
+        <div><h3 class="text-2xl font-bold text-slate-900">Local Business Ads</h3><p class="text-sm text-slate-500 mt-1">Partner campaigns go live after payment. Content safety AI monitors for vulgarity and abuse. Admin can pause for moderation.</p></div>
         <button onclick="document.getElementById('createModal').classList.remove('hidden')" class="bg-primary-600 hover:bg-primary-700 text-white px-5 py-2.5 rounded-xl text-sm font-semibold shadow transition flex items-center gap-2"><i class="fas fa-plus"></i> New Campaign</button>
     </div>
 
@@ -15,14 +15,14 @@
             <p class="text-xs text-slate-500 font-medium">Campaigns</p>
         </div>
         <div class="bg-white rounded-xl border border-slate-200 p-4 shadow-sm">
-            <div class="w-10 h-10 rounded-lg bg-amber-100 grid place-items-center text-amber-600 mb-2"><i class="fas fa-clock"></i></div>
-            <p class="text-xl font-bold text-amber-600">{{ $stats['pending'] }}</p>
-            <p class="text-xs text-slate-500 font-medium">Pending Approval</p>
-        </div>
-        <div class="bg-white rounded-xl border border-slate-200 p-4 shadow-sm">
             <div class="w-10 h-10 rounded-lg bg-green-100 grid place-items-center text-green-600 mb-2"><i class="fas fa-check-circle"></i></div>
             <p class="text-xl font-bold text-green-600">{{ $stats['active'] }}</p>
             <p class="text-xs text-slate-500 font-medium">Live</p>
+        </div>
+        <div class="bg-white rounded-xl border border-slate-200 p-4 shadow-sm">
+            <div class="w-10 h-10 rounded-lg bg-red-100 grid place-items-center text-red-600 mb-2"><i class="fas fa-shield-alt"></i></div>
+            <p class="text-xl font-bold text-red-600">{{ $stats['flagged'] }}</p>
+            <p class="text-xs text-slate-500 font-medium">Flagged</p>
         </div>
         <div class="bg-white rounded-xl border border-slate-200 p-4 shadow-sm">
             <div class="w-10 h-10 rounded-lg bg-blue-100 grid place-items-center text-blue-600 mb-2"><i class="fas fa-eye"></i></div>
@@ -43,10 +43,11 @@
 
     <div class="flex gap-2">
         <a href="{{ route('admin.ad-campaigns') }}" class="px-3 py-1.5 text-xs font-medium rounded-lg {{ !$status ? 'bg-primary-600 text-white' : 'bg-slate-100 text-slate-600' }}">All</a>
-        <a href="{{ route('admin.ad-campaigns', ['status' => 'pending']) }}" class="px-3 py-1.5 text-xs font-medium rounded-lg {{ $status === 'pending' ? 'bg-amber-600 text-white' : 'bg-slate-100 text-slate-600' }}">Pending</a>
         <a href="{{ route('admin.ad-campaigns', ['status' => 'active']) }}" class="px-3 py-1.5 text-xs font-medium rounded-lg {{ $status === 'active' ? 'bg-green-600 text-white' : 'bg-slate-100 text-slate-600' }}">Active</a>
         <a href="{{ route('admin.ad-campaigns', ['status' => 'paused']) }}" class="px-3 py-1.5 text-xs font-medium rounded-lg {{ $status === 'paused' ? 'bg-orange-600 text-white' : 'bg-slate-100 text-slate-600' }}">Paused</a>
-        <a href="{{ route('admin.ad-campaigns', ['status' => 'rejected']) }}" class="px-3 py-1.5 text-xs font-medium rounded-lg {{ $status === 'rejected' ? 'bg-red-600 text-white' : 'bg-slate-100 text-slate-600' }}">Rejected</a>
+        <a href="{{ route('admin.ad-campaigns', ['status' => 'flagged']) }}" class="px-3 py-1.5 text-xs font-medium rounded-lg {{ $status === 'flagged' ? 'bg-red-600 text-white' : 'bg-slate-100 text-slate-600' }}">
+            <i class="fas fa-shield-alt"></i> Flagged {{ $stats['flagged'] ? "($stats[flagged])" : '' }}
+        </a>
     </div>
 
     <div class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
@@ -54,7 +55,7 @@
 <div id="liveTable">
             <table class="w-full text-sm">
                 <thead class="bg-slate-50">
-                    <tr><th class="text-left px-4 py-3">Campaign</th><th class="text-left px-4 py-3">Business</th><th class="text-center px-4 py-3">Impressions</th><th class="text-center px-4 py-3">Clicks</th><th class="text-center px-4 py-3">CTR</th><th class="text-center px-4 py-3">Budget / Paid</th><th class="text-center px-4 py-3">Payment</th><th class="text-center px-4 py-3">Targeting</th><th class="text-center px-4 py-3">Status</th><th class="text-right px-4 py-3">Actions</th></tr>
+                    <tr><th class="text-left px-4 py-3">Campaign</th><th class="text-left px-4 py-3">Business</th><th class="text-center px-4 py-3">Impressions</th><th class="text-center px-4 py-3">Clicks</th><th class="text-center px-4 py-3">CTR</th><th class="text-center px-4 py-3">Budget</th><th class="text-center px-4 py-3">Spent</th><th class="text-center px-4 py-3">Remaining</th><th class="text-center px-4 py-3">Payment</th><th class="text-center px-4 py-3">Targeting</th><th class="text-center px-4 py-3"><i class="fas fa-shield-alt" title="Fraud Score"></i></th><th class="text-center px-4 py-3">Status</th><th class="text-right px-4 py-3">Actions</th></tr>
                 </thead>
                 <tbody class="divide-y divide-slate-100">
                     @forelse($campaigns as $c)
@@ -68,7 +69,10 @@
                         <td class="px-4 py-4 text-center text-sm">{{ number_format($c->current_impressions) }}{{ $c->max_impressions > 0 ? ' / '.number_format($c->max_impressions) : '' }}</td>
                         <td class="px-4 py-4 text-center text-sm">{{ number_format($c->current_clicks) }}</td>
                         <td class="px-4 py-4 text-center text-sm">{{ $c->ctr() }}%</td>
-                        <td class="px-4 py-4 text-center text-sm"><span class="text-xs font-semibold">Rs. {{ number_format((float) $c->budget, 0) }}</span><span class="text-xs text-slate-400 block">/ {{ number_format((float) $c->paid_amount, 0) }} paid</span></td><td class="px-4 py-4 text-center">@if($c->payment_status === 'paid')<span class="text-xs bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full">Paid</span>@elseif($c->payment_status === 'refunded')<span class="text-xs bg-slate-100 text-slate-500 px-2 py-0.5 rounded-full">Refunded</span>@else<span class="text-xs bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full">Unpaid</span>@endif</td>
+                        <td class="px-4 py-4 text-center text-sm font-semibold">Rs. {{ number_format((float) $c->budget, 0) }}</td>
+                        <td class="px-4 py-4 text-center text-sm text-amber-600 font-semibold">Rs. {{ number_format((float) $c->spent_amount, 1) }}</td>
+                        <td class="px-4 py-4 text-center text-sm text-emerald-600">Rs. {{ number_format((float) $c->budget - (float) $c->spent_amount, 1) }}</td>
+                        <td class="px-4 py-4 text-center">@if($c->payment_status === 'paid')<span class="text-xs bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full">Paid</span>@elseif($c->payment_status === 'refunded')<span class="text-xs bg-slate-100 text-slate-500 px-2 py-0.5 rounded-full">Refunded</span>@else<span class="text-xs bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full">Unpaid</span>@endif</td>
                         <td class="px-4 py-4 text-center">
                             <div class="text-xs text-slate-500">
                                 @if($c->contexts)<p class="text-[10px]"><i class="fas fa-crosshairs"></i> {{ implode(', ', array_map('ucfirst', $c->contexts)) }}</p>@endif
@@ -78,36 +82,37 @@
                             </div>
                         </td>
                         <td class="px-4 py-4 text-center">
-                            @if($c->status === 'rejected' && $c->rejection_reason)
-                                <div class="text-[10px] text-red-500 mb-1">{{ $c->rejection_reason }}</div>
+                            @if($c->fraud_score > 0)
+                                <div class="flex flex-col items-center">
+                                    <span class="text-xs font-bold px-2 py-0.5 rounded-full {{ $c->fraud_score >= 80 ? 'bg-red-100 text-red-700' : ($c->fraud_score >= 50 ? 'bg-amber-100 text-amber-700' : 'bg-slate-100 text-slate-600') }}">{{ $c->fraud_score }}</span>
+                                    @if($c->fraud_flags)
+                                        <div class="text-[9px] text-slate-400 mt-0.5" title="{{ implode(', ', array_column($c->fraud_flags, 'reason')) }}">{{ count($c->fraud_flags) }} flags</div>
+                                    @endif
+                                </div>
+                            @else
+                                <span class="text-xs text-slate-300">—</span>
                             @endif
+                        </td>
+                        <td class="px-4 py-4 text-center">
                             @switch($c->status)
                                 @case('active')
                                     <span class="text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded-full">Active</span>
-                                    @if($c->ends_at && $c->ends_at->lte(now()))<span class="block text-[10px] text-orange-500 mt-0.5">Ended â€” not serving</span>
-                                    @elseif(!$c->hasBudget())<span class="block text-[10px] text-orange-500 mt-0.5">Budget exhausted â€” not serving</span>@endif
+                                    @if($c->ends_at && $c->ends_at->lte(now()))<span class="block text-[10px] text-orange-500 mt-0.5">Ended — not serving</span>
+                                    @elseif(!$c->hasBudget())<span class="block text-[10px] text-orange-500 mt-0.5">Budget exhausted — not serving</span>@endif
                                     @break
-                                @case('pending')<span class="text-xs bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full">Pending</span>@break
+                                @case('pending')<span class="text-xs bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full">Awaiting Payment</span>@break
                                 @case('paused')
                                     <span class="text-xs bg-orange-100 text-orange-700 px-2 py-0.5 rounded-full">Paused</span>
-                                    @if($c->paused_by === 'system' && !$c->hasBudget())<span class="block text-[10px] text-orange-500 mt-0.5">Budget exhausted</span>
+                                    @if($c->paused_by === 'system' && $c->fraud_score >= 80)<span class="block text-[10px] text-red-500 mt-0.5"><i class="fas fa-shield-alt"></i> Auto-paused: fraud detected</span>
+                                    @elseif($c->paused_by === 'system' && !$c->hasBudget())<span class="block text-[10px] text-orange-500 mt-0.5">Budget exhausted</span>
                                     @elseif($c->paused_by === 'admin')<span class="block text-[10px] text-orange-500 mt-0.5">Paused by admin</span>
                                     @elseif($c->ends_at && $c->ends_at->lte(now()))<span class="block text-[10px] text-orange-500 mt-0.5">Ended</span>
                                     @elseif($c->paused_by === 'partner')<span class="block text-[10px] text-orange-500 mt-0.5">Paused by partner</span>@endif
                                     @break
                                 @case('completed')<span class="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full">Completed</span>@break
-                                @case('rejected')<span class="text-xs bg-red-100 text-red-700 px-2 py-0.5 rounded-full">Rejected</span>@break
                             @endswitch
                         </td>
                         <td class="px-4 py-4 text-right whitespace-nowrap">
-                            @if($c->status === 'pending')
-                                @if($c->business_id && $c->payment_status !== 'paid')<span class="inline-flex items-center gap-1 text-xs bg-amber-50 text-amber-700 px-2 py-1 rounded-lg mr-2" title="Partner must complete eSewa/Khalti payment first"><i class="fas fa-hourglass-half"></i></span>@endif
-                                <form method="POST" action="{{ route('admin.ad-campaigns.approve', $c) }}" class="inline">
-                                    @csrf
-                                    <button class="px-3 py-1.5 text-xs font-semibold bg-green-600 hover:bg-green-700 text-white rounded-lg"><i class="fas fa-check"></i> Approve</button>
-                                </form>
-                                <button onclick="openReject({{ $c->id }})" class="px-3 py-1.5 text-xs font-medium bg-red-50 text-red-600 rounded-lg hover:bg-red-100"><i class="fas fa-times"></i> Reject</button>
-                            @endif
                             @if($c->status === 'active')
                                 <form method="POST" action="{{ route('admin.ad-campaigns.pause', $c) }}" class="inline">
                                     @csrf
@@ -133,7 +138,7 @@
                         </td>
                     </tr>
                     @empty
-                    <tr><td colspan="9" class="px-6 py-12 text-center text-slate-400"><i class="fas fa-ad text-3xl mb-3"></i><p class="text-sm">No campaigns yet.</p></td></tr>
+                    <tr><td colspan="10" class="px-6 py-12 text-center text-slate-400"><i class="fas fa-ad text-3xl mb-3"></i><p class="text-sm">No campaigns yet.</p></td></tr>
                     @endforelse
                 </tbody>
             </table>
@@ -141,24 +146,6 @@
     </div>
     <div class="mt-4">{{ $campaigns->appends(['status' => $status])->links() }}</div>
 </div>
-</div>
-
-{{-- Reject Modal --}}
-<div id="rejectModal" class="hidden fixed inset-0 z-50 bg-black/40 grid place-items-center" onclick="if(event.target===this)this.classList.add('hidden')">
-    <div class="bg-white rounded-2xl shadow-xl w-full max-w-md mx-4 p-6">
-        <div class="flex items-center justify-between mb-4"><h4 class="text-lg font-bold">Reject Campaign</h4><button onclick="document.getElementById('rejectModal').classList.add('hidden')" class="text-slate-400 hover:text-slate-600"><i class="fas fa-times"></i></button></div>
-        <form method="POST" id="rejectForm" class="space-y-4">
-            @csrf
-            <div>
-                <label class="block text-xs font-semibold text-slate-600 mb-1">Reason</label>
-                <textarea name="reason" rows="3" required placeholder="e.g. Contains misleading claims..." class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm"></textarea>
-            </div>
-            <div class="flex justify-end gap-3 pt-2">
-                <button type="button" onclick="document.getElementById('rejectModal').classList.add('hidden')" class="px-4 py-2 text-sm text-slate-600 hover:bg-slate-100 rounded-lg">Cancel</button>
-                <button type="submit" class="px-4 py-2 text-sm font-semibold bg-red-600 text-white rounded-lg hover:bg-red-700">Reject</button>
-            </div>
-        </form>
-    </div>
 </div>
 
 <div id="createModal" class="hidden fixed inset-0 z-50 bg-black/40 grid place-items-center" onclick="if(event.target===this)this.classList.add('hidden')">
@@ -210,7 +197,7 @@
             <div><label>Content</label><textarea name="content" id="editContent" rows="2" class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm"></textarea></div>
             <div class="grid grid-cols-2 gap-4">
                 <div><label>Target URL</label><input type="url" name="target_url" id="editUrl" class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm"></div>
-                <div><label>Status</label><select name="status" id="editStatus" required class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm"><option value="pending">Pending</option><option value="active">Active</option><option value="paused">Paused</option><option value="rejected">Rejected</option></select></div>
+                <div><label>Status</label><select name="status" id="editStatus" required class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm"><option value="pending">Pending</option><option value="active">Active</option><option value="paused">Paused</option></select></div>
             </div>
             <div class="grid grid-cols-3 gap-4">
                 <div><label>Budget (Rs.)</label><input type="number" name="budget" id="editBudget" step="0.01" min="0" required class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm"></div>
@@ -230,17 +217,13 @@
 let campaigns = @json($campaigns->items());
 function openEdit(id) {
     const c = campaigns.find(x => x.id === id); if (!c) return;
-    document.getElementById('editForm').action = '/admin/ad-campaigns/' + id;
+    document.getElementById('editForm').action = '/' + window.adminPrefix + '/ad-campaigns/' + id;
     document.getElementById('editName').value = c.name; document.getElementById('editType').value = c.ad_type;
     document.getElementById('editBusiness').value = c.business_id || ''; document.getElementById('editContent').value = c.content || '';
     document.getElementById('editUrl').value = c.target_url || ''; document.getElementById('editStatus').value = c.status;
     document.getElementById('editBudget').value = c.budget; document.getElementById('editCost').value = c.cost_per_view;
     document.getElementById('editMax').value = c.max_impressions;
     document.getElementById('editModal').classList.remove('hidden');
-}
-function openReject(id) {
-    document.getElementById('rejectForm').action = '/admin/ad-campaigns/' + id + '/reject';
-    document.getElementById('rejectModal').classList.remove('hidden');
 }
 </script>
 @endsection

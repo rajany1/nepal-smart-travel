@@ -64,6 +64,6 @@ class WebAuthController extends Controller
         Auth::logout();
         $request->session()->invalidate();
         $request->session()->regenerateToken();
-        return redirect('/admin/login');
+        return redirect('/' . (\App\Models\GameSetting::getValue('admin_route_prefix', 'admin') ?? 'admin') . '/login');
     }
 }

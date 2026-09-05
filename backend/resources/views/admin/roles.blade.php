@@ -156,10 +156,10 @@
         // Find role card data from DOM
         const modal = document.getElementById('editRoleModal');
         const form = document.getElementById('editRoleForm');
-        form.action = `/admin/roles/${roleId}`;
+        form.action = `/${window.adminPrefix}/roles/${roleId}`;
 
         // Fetch role data via AJAX
-        fetch(`/admin/roles/${roleId}/edit`)
+        fetch(`/${window.adminPrefix}/roles/${roleId}/edit`)
             .then(r => r.json())
             .then(data => {
                 document.getElementById('editRoleTitle').textContent = `Edit ${data.display_name}`;

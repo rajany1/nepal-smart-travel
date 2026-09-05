@@ -71,6 +71,8 @@ return [
     'firebase' => [
         'credentials' => env('FIREBASE_CREDENTIALS'),
         'server_key' => env('FIREBASE_SERVER_KEY'),
+        'api_key' => env('FIREBASE_API_KEY'),
+        'project_id' => env('FIREBASE_PROJECT_ID', 'smart-travel-app-499714-cbd3f'),
     ],
 
     'alerts' => [

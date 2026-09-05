@@ -337,9 +337,11 @@ class ReportProvider extends ChangeNotifier {
       _submissionErrorMessage = null;
       notifyListeners();
       final formData = <String, dynamic>{
-        'title': title,
+        // title / category_id / priority are OPTIONAL: when omitted the
+        // backend auto-classifies them from the description.
+        if (title != null && title.isNotEmpty) 'title': title,
         'description': description,
-        'category_id': categoryId,
+        if (categoryId != null) 'category_id': categoryId,
         'latitude': latitude,
         'longitude': longitude,
         if (district != null) 'district': district,
@@ -502,5 +504,62 @@ class ReportProvider extends ChangeNotifier {
     
     _reports[index] = updated;
     notifyListeners();
+  }
+
+  Future<Map<String, dynamic>?> confirmReport(String reportId, {double? lat, double? lng, String? note}) async {
+    try {
+      final response = await ApiClient.instance.dio.post(
+        '/reports/$reportId/confirm',
+        data: {
+          if (lat != null) 'latitude': lat,
+          if (lng != null) 'longitude': lng,
+          if (note != null) 'note': note,
+        },
+      );
+      if (response.data['success'] == true) {
+        final data = response.data['data'];
+        // Update local report
+        final index = _reports.indexWhere((r) => r.id == reportId);
+        if (index != -1) {
+          final old = _reports[index];
+          _reports[index] = ReportModel(
+            id: old.id,
+            uuid: old.uuid,
+            title: old.title,
+            description: old.description,
+            categoryId: old.categoryId,
+            categoryName: old.categoryName,
+            categoryIcon: old.categoryIcon,
+            priority: old.priority,
+            status: old.status,
+            latitude: old.latitude,
+            longitude: old.longitude,
+            district: old.district,
+            locationName: old.locationName,
+            reportSubcategory: old.reportSubcategory,
+            isActive: old.isActive,
+            expiresAt: old.expiresAt,
+            confirmedByCount: data['confirmed_by_count'] ?? old.confirmedByCount,
+            lastConfirmedAt: DateTime.now(),
+            helpfulCount: old.helpfulCount,
+            unhelpfulCount: old.unhelpfulCount,
+            commentsCount: old.commentsCount,
+            reporterName: old.reporterName,
+            reporterAvatar: old.reporterAvatar,
+            reporterId: old.reporterId,
+            userReaction: old.userReaction,
+            imageUrls: old.imageUrls,
+            createdAt: old.createdAt,
+            updatedAt: old.updatedAt,
+            timeAgo: old.timeAgo,
+          );
+          notifyListeners();
+        }
+        return data;
+      }
+    } catch (e) {
+      // Silently fail
+    }
+    return null;
   }
 }

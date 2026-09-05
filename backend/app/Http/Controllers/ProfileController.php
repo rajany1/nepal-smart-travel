@@ -112,7 +112,7 @@ class ProfileController extends Controller
                 'name' => $user->name,
                 'email' => $user->email,
                 'phone' => $user->phone,
-                'avatar_url' => $user->avatar,
+                'avatar_url' => $user->avatar ? (str_starts_with($user->avatar, 'http') ? $user->avatar : asset('storage/' . $user->avatar)) : null,
                 'bio' => $user->bio,
                 'role' => $user->roleName ?? 'user',
                 'status' => $user->status ?? 'active',
@@ -188,7 +188,7 @@ class ProfileController extends Controller
                 'name' => $updatedUser->name,
                 'email' => $updatedUser->email,
                 'phone' => $updatedUser->phone,
-                'avatar_url' => $updatedUser->avatar,
+                'avatar_url' => $updatedUser->avatar ? (str_starts_with($updatedUser->avatar, 'http') ? $updatedUser->avatar : asset('storage/' . $updatedUser->avatar)) : null,
                 'bio' => $updatedUser->bio,
                 'gender' => $updatedUser->gender,
                 'interest' => $updatedUser->interest,
@@ -213,20 +213,48 @@ class ProfileController extends Controller
         // Convert base64 data URI into a stored file (returns public URL)
         if (preg_match('/^data:image\/(\w+);base64,/', $avatar, $m)) {
             try {
-                $ext = strtolower($m[1]) === 'png' ? 'png' : 'jpg';
                 $base64 = substr($avatar, strpos($avatar, ',') + 1);
                 $bytes = base64_decode($base64, true);
-                if ($bytes !== false && strlen($bytes) < 5 * 1024 * 1024) {
-                    $dir = public_path('uploads/avatars');
-                    if (!is_dir($dir)) {
-                        @mkdir($dir, 0775, true);
-                    }
-                    $name = 'avatar_' . $user->id . '_' . time() . '.' . $ext;
-                    file_put_contents($dir . '/' . $name, $bytes);
-                    $avatar = url('uploads/avatars/' . $name);
+                if ($bytes === false || strlen($bytes) > 5 * 1024 * 1024) {
+                    return response()->json([
+                        'success' => false,
+                        'message' => 'Avatar file too large or invalid encoding.',
+                    ], 422);
                 }
+                
+                // Validate actual file content using finfo (not just extension)
+                $finfo = new \finfo(FILEINFO_MIME_TYPE);
+                $mimeType = $finfo->buffer($bytes);
+                $allowedTypes = [
+                    'image/jpeg' => 'jpg',
+                    'image/png' => 'png',
+                    'image/webp' => 'webp',
+                    'image/gif' => 'gif',
+                ];
+                
+                if (!isset($allowedTypes[$mimeType])) {
+                    return response()->json([
+                        'success' => false,
+                        'message' => 'Invalid file type. Only JPEG, PNG, WebP, and GIF are allowed.',
+                    ], 422);
+                }
+                
+                $ext = $allowedTypes[$mimeType];
+                $dir = Storage::disk('public')->path('avatars');
+                if (!is_dir($dir)) {
+                    @mkdir($dir, 0755, true);
+                }
+                $name = 'avatar_' . $user->id . '_' . time() . '.' . $ext;
+                file_put_contents($dir . '/' . $name, $bytes);
+                
+                // Store as a relative path that goes through a signed route
+                $avatar = 'avatars/' . $name;
             } catch (\Throwable $e) {
-                // Fall back to storing the raw string
+                \Illuminate\Support\Facades\Log::warning('Avatar upload failed: ' . $e->getMessage());
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Failed to process avatar image.',
+                ], 422);
             }
         }
         
@@ -234,11 +262,16 @@ class ProfileController extends Controller
             'avatar' => $avatar,
         ]);
         
+        $fullUrl = $user->fresh()->avatar;
+        if ($fullUrl && !str_starts_with($fullUrl, 'http')) {
+            $fullUrl = asset('storage/' . $fullUrl);
+        }
+        
         return response()->json([
             'success' => true,
             'message' => 'Avatar updated successfully',
             'data' => [
-                'avatar_url' => $user->fresh()->avatar,
+                'avatar_url' => $fullUrl,
             ]
         ]);
     }

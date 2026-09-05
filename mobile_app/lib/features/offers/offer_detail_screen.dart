@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'dart:async';
 import "../../core/services/localization_service.dart";
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:provider/provider.dart';
 import 'package:dio/dio.dart';
 import 'package:flutter/services.dart';
@@ -175,7 +176,7 @@ class _OfferDetailScreenState extends State<OfferDetailScreen> {
                 textAlign: TextAlign.center,
                 style: const TextStyle(
                   fontSize: 28,
-                  fontWeight: FontWeight.w900,
+                  fontWeight: FontWeight.w700,
                   letterSpacing: 3,
                   color: AppTheme.primaryColor,
                   fontFamily: 'monospace',
@@ -255,20 +256,48 @@ class _OfferDetailScreenState extends State<OfferDetailScreen> {
                       color: Colors.white,
                       borderRadius: BorderRadius.circular(20),
                     ),
-                    child: Center(
-                      child: Padding(
-                        padding: const EdgeInsets.all(10),
-                        child: Text(
-                          offer.label,
-                          textAlign: TextAlign.center,
-                          style: const TextStyle(
-                            color: AppTheme.primaryColor,
-                            fontWeight: FontWeight.w900,
-                            fontSize: AppTheme.textLg,
+                    clipBehavior: Clip.antiAlias,
+                    child: offer.image != null && offer.image!.isNotEmpty
+                        ? CachedNetworkImage(
+                            imageUrl: offer.image!,
+                            fit: BoxFit.cover,
+                            placeholder: (_, __) => Center(
+                              child: Text(
+                                offer.label,
+                                textAlign: TextAlign.center,
+                                style: const TextStyle(
+                                  color: AppTheme.primaryColor,
+                                  fontWeight: FontWeight.w600,
+                                  fontSize: AppTheme.textLg,
+                                ),
+                              ),
+                            ),
+                            errorWidget: (_, __, ___) => Center(
+                              child: Text(
+                                offer.label,
+                                textAlign: TextAlign.center,
+                                style: const TextStyle(
+                                  color: AppTheme.primaryColor,
+                                  fontWeight: FontWeight.w600,
+                                  fontSize: AppTheme.textLg,
+                                ),
+                              ),
+                            ),
+                          )
+                        : Center(
+                            child: Padding(
+                              padding: const EdgeInsets.all(10),
+                              child: Text(
+                                offer.label,
+                                textAlign: TextAlign.center,
+                                style: const TextStyle(
+                                  color: AppTheme.primaryColor,
+                                  fontWeight: FontWeight.w600,
+                                  fontSize: AppTheme.textLg,
+                                ),
+                              ),
+                            ),
                           ),
-                        ),
-                      ),
-                    ),
                   ),
                   const SizedBox(height: 16),
                   Text(

@@ -12,14 +12,27 @@ class PoliciesScreen extends StatelessWidget {
       child: Scaffold(
         backgroundColor: AppTheme.backgroundColor,
         appBar: AppBar(
-          title: const Text('Policies & Info'),
-          backgroundColor: AppTheme.primaryColor,
-          foregroundColor: Colors.white,
+          title: Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF6366F1).withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: const Icon(Icons.policy, color: Color(0xFF6366F1), size: 22),
+              ),
+              const SizedBox(width: 12),
+              const Text('Policies & Info'),
+            ],
+          ),
+          backgroundColor: Colors.white,
+          foregroundColor: AppTheme.textPrimary,
           elevation: 0,
           bottom: TabBar(
-            indicatorColor: Colors.white,
-            labelColor: Colors.white,
-            unselectedLabelColor: Colors.white60,
+            indicatorColor: const Color(0xFF6366F1),
+            labelColor: const Color(0xFF6366F1),
+            unselectedLabelColor: Colors.grey,
             tabs: const [
               Tab(text: 'Terms', icon: Icon(Icons.description, size: 18)),
               Tab(text: 'Privacy', icon: Icon(Icons.security, size: 18)),

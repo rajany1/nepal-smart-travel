@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import "../../core/services/localization_service.dart";
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:provider/provider.dart';
 import 'package:flutter/services.dart';
 import 'package:share_plus/share_plus.dart';
@@ -8,7 +9,6 @@ import '../../core/models/offer_model.dart';
 import '../../providers/offer_provider.dart';
 import '../auth/login_screen.dart';
 import '../../providers/auth_provider.dart';
-import '../../core/services/localization_service.dart';
 import 'offer_detail_screen.dart';
 
 class OffersScreen extends StatefulWidget {
@@ -38,16 +38,32 @@ class _OffersScreenState extends State<OffersScreen> {
     return DefaultTabController(
       length: 2,
       child: Scaffold(
-        appBar: AppBar(
-          title: Text(context.t('Rewards')),
-          bottom: TabBar(
-            onTap: (i) => setState(() => _tab = i),
-            tabs: [
-              Tab(icon: const Icon(Icons.local_offer_outlined), text: context.t('Explore')),
-              Tab(icon: const Icon(Icons.confirmation_number_outlined), text: context.t('My Codes')),
-            ],
-          ),
+      appBar: AppBar(
+        title: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: const Color(0xFFF97316).withOpacity(0.1),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: const Icon(Icons.local_offer, color: Color(0xFFF97316), size: 22),
+            ),
+            const SizedBox(width: 12),
+            Text(context.t('Rewards')),
+          ],
         ),
+        bottom: TabBar(
+          onTap: (i) => setState(() => _tab = i),
+          labelColor: const Color(0xFFF97316),
+          unselectedLabelColor: Colors.grey,
+          indicatorColor: const Color(0xFFF97316),
+          tabs: [
+            Tab(icon: const Icon(Icons.explore_outlined), text: context.t('Explore')),
+            Tab(icon: const Icon(Icons.confirmation_number_outlined), text: context.t('My Codes')),
+          ],
+        ),
+      ),
         body: _tab == 0 ? const ExploreOffersView() : const MyCodesView(),
       ),
     );
@@ -168,22 +184,54 @@ class OfferCard extends StatelessWidget {
                   color: Colors.white,
                   borderRadius: BorderRadius.circular(14),
                 ),
-                child: Center(
-                  child: Padding(
-                    padding: const EdgeInsets.all(6),
-                    child: Text(
-                      offer.label,
-                      textAlign: TextAlign.center,
-                      maxLines: 3,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        color: AppTheme.primaryColor,
-                        fontWeight: FontWeight.w900,
-                        fontSize: AppTheme.textSm,
+                clipBehavior: Clip.antiAlias,
+                child: offer.image != null && offer.image!.isNotEmpty
+                    ? CachedNetworkImage(
+                        imageUrl: offer.image!,
+                        fit: BoxFit.cover,
+                        placeholder: (_, __) => Center(
+                          child: Text(
+                            offer.label,
+                            textAlign: TextAlign.center,
+                            maxLines: 3,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              color: AppTheme.primaryColor,
+                              fontWeight: FontWeight.w600,
+                              fontSize: AppTheme.textSm,
+                            ),
+                          ),
+                        ),
+                        errorWidget: (_, __, ___) => Center(
+                          child: Text(
+                            offer.label,
+                            textAlign: TextAlign.center,
+                            maxLines: 3,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              color: AppTheme.primaryColor,
+                              fontWeight: FontWeight.w600,
+                              fontSize: AppTheme.textSm,
+                            ),
+                          ),
+                        ),
+                      )
+                    : Center(
+                        child: Padding(
+                          padding: const EdgeInsets.all(6),
+                          child: Text(
+                            offer.label,
+                            textAlign: TextAlign.center,
+                            maxLines: 3,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              color: AppTheme.primaryColor,
+                              fontWeight: FontWeight.w600,
+                              fontSize: AppTheme.textSm,
+                            ),
+                          ),
+                        ),
                       ),
-                    ),
-                  ),
-                ),
               ),
               const SizedBox(width: 14),
               Expanded(
@@ -201,7 +249,7 @@ class OfferCard extends StatelessWidget {
                         style: const TextStyle(
                           color: Colors.white,
                           fontSize: 10,
-                          fontWeight: FontWeight.w800,
+                          fontWeight: FontWeight.w600,
                           letterSpacing: 0.8,
                         ),
                       ),
@@ -253,7 +301,7 @@ class OfferCard extends StatelessWidget {
                         style: const TextStyle(
                           color: Colors.black87,
                           fontSize: 11,
-                          fontWeight: FontWeight.w800,
+                          fontWeight: FontWeight.w700,
                         ),
                       ),
                     ],
@@ -392,7 +440,7 @@ class CodeCard extends StatelessWidget {
                 textAlign: TextAlign.center,
                 style: const TextStyle(
                   fontSize: 28,
-                  fontWeight: FontWeight.w900,
+                  fontWeight: FontWeight.w700,
                   letterSpacing: 3,
                   color: AppTheme.primaryColor,
                   fontFamily: 'monospace',
@@ -496,7 +544,7 @@ class CodeCard extends StatelessWidget {
                       redemption.code,
                       style: const TextStyle(
                         fontFamily: 'monospace',
-                        fontWeight: FontWeight.w800,
+                        fontWeight: FontWeight.w700,
                         letterSpacing: 1.5,
                         color: AppTheme.primaryColor,
                       ),
@@ -521,7 +569,7 @@ class CodeCard extends StatelessWidget {
                       used ? context.t('USED') : expired ? context.t('EXPIRED') : context.t('ACTIVE'),
                       style: TextStyle(
                         fontSize: 10,
-                        fontWeight: FontWeight.w800,
+                        fontWeight: FontWeight.w700,
                         color: used ? Colors.green : expired ? Colors.grey : AppTheme.warningColor,
                       ),
                     ),

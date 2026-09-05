@@ -131,6 +131,49 @@
             </dl>
             <a href="{{ route('partner.business-form') }}" class="inline-block mt-4 text-sm text-primary-600 hover:underline">Edit profile <i class="fas fa-edit"></i></a>
         </div>
+
+        @if(!$user->phone_verified_at)
+        <div class="bg-amber-50 border border-amber-200 rounded-2xl shadow p-6 mt-4">
+            <h3 class="font-semibold text-amber-800 mb-2"><i class="fas fa-phone-alt text-amber-600"></i> Phone Verification Required</h3>
+            <p class="text-sm text-amber-700 mb-3">Verify your phone number to build trust with customers and unlock all partner features.</p>
+            <div class="flex gap-2">
+                <form method="POST" action="{{ route('partner.send-phone-otp') }}">
+                    @csrf
+                    <button type="submit" class="bg-amber-600 hover:bg-amber-700 text-white text-sm font-semibold rounded-xl px-4 py-2 transition">
+                        <i class="fas fa-paper-plane mr-1"></i> Send Code
+                    </button>
+                </form>
+                <button type="button" onclick="document.getElementById('otpModal').classList.remove('hidden')" class="bg-white border border-amber-600 text-amber-700 text-sm font-semibold rounded-xl px-4 py-2 hover:bg-amber-50 transition">
+                    <i class="fas fa-key mr-1"></i> Enter Code
+                </button>
+            </div>
+        </div>
+
+        <!-- OTP Modal -->
+        <div id="otpModal" class="hidden fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+            <div class="bg-white rounded-2xl shadow-xl max-w-sm w-full p-6">
+                <h3 class="text-lg font-bold text-slate-800 mb-2">Enter Verification Code</h3>
+                <p class="text-sm text-slate-500 mb-4">Enter the 6-digit code sent to your phone via app notification.</p>
+                <form method="POST" action="{{ route('partner.verify-phone') }}">
+                    @csrf
+                    <input type="text" name="otp" maxlength="6" required placeholder="------"
+                           class="w-full text-center text-2xl tracking-[0.5em] font-mono border border-slate-300 rounded-xl px-4 py-3 focus:ring-2 focus:ring-amber-500 outline-none mb-4">
+                    @error('otp')
+                        <p class="text-red-500 text-sm mb-2">{{ $message }}</p>
+                    @enderror
+                    <div class="flex gap-2">
+                        <button type="button" onclick="document.getElementById('otpModal').classList.add('hidden')" class="flex-1 border border-slate-300 text-slate-600 rounded-xl py-2.5 hover:bg-slate-50 transition">Cancel</button>
+                        <button type="submit" class="flex-1 bg-amber-600 hover:bg-amber-700 text-white font-semibold rounded-xl py-2.5 transition">Verify</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+        @else
+        <div class="bg-green-50 border border-green-200 rounded-2xl shadow p-6 mt-4">
+            <h3 class="font-semibold text-green-800 mb-2"><i class="fas fa-check-circle text-green-600"></i> Phone Verified</h3>
+            <p class="text-sm text-green-700">Your phone number is verified. Customers can trust your business.</p>
+        </div>
+        @endif
     </div>
 </div>
 @endsection

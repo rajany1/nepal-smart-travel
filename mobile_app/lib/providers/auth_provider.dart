@@ -249,9 +249,17 @@ class AuthProvider extends ChangeNotifier {
     notifyListeners();
 
     try {
+      final serverClientId = AppConstants.googleServerClientId;
+      if (serverClientId.isEmpty) {
+        _errorMessage = 'Google Sign-In is not configured. Please contact support.';
+        _isLoading = false;
+        notifyListeners();
+        return false;
+      }
+
       final googleSignIn = GoogleSignIn.instance;
       await googleSignIn.initialize(
-        serverClientId: AppConstants.googleServerClientId,
+        serverClientId: serverClientId,
       );
 
       final account = await googleSignIn.authenticate();
@@ -303,7 +311,7 @@ class AuthProvider extends ChangeNotifier {
   Future<bool> register({
     required String name,
     required String email,
-    required String phone,
+    String? phone,
     required String password,
     required String passwordConfirmation,
   }) async {

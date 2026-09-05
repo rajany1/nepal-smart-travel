@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import "../../core/services/localization_service.dart";
 import '../core/api/api_client.dart';
 
 class NearbyItem {
@@ -13,6 +12,9 @@ class NearbyItem {
   final double? latitude;
   final double? longitude;
   final String? affectedDistrict;
+  final String? senderType; // user | admin | system
+  final String? linkType;   // report | external | screen
+  final String? linkValue;
   final DateTime createdAt;
 
   NearbyItem({
@@ -26,6 +28,9 @@ class NearbyItem {
     this.latitude,
     this.longitude,
     this.affectedDistrict,
+    this.senderType,
+    this.linkType,
+    this.linkValue,
     required this.createdAt,
   });
 
@@ -41,10 +46,21 @@ class NearbyItem {
       latitude: double.tryParse(json['latitude']?.toString() ?? ''),
       longitude: double.tryParse(json['longitude']?.toString() ?? ''),
       affectedDistrict: json['affected_district'],
+      senderType: json['sender_type'],
+      linkType: json['link_type'],
+      linkValue: json['link_value']?.toString(),
       createdAt: json['created_at'] != null
           ? DateTime.parse(json['created_at'])
           : DateTime.now(),
     );
+  }
+
+  bool get isSystem => senderType == 'system';
+  bool get isAdmin => senderType == 'admin';
+  String get senderLabel {
+    if (isAdmin) return 'Admin';
+    if (isSystem) return 'System';
+    return 'User';
   }
 
   String get severityEmoji {

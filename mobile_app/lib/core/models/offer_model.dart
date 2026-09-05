@@ -32,6 +32,7 @@ class OfferModel {
   final String label;
   final String? description;
   final String? terms;
+  final String? image;
   final String? startsAt;
   final String? endsAt;
   final int usageLimit;
@@ -47,6 +48,7 @@ class OfferModel {
     required this.label,
     this.description,
     this.terms,
+    this.image,
     this.startsAt,
     this.endsAt,
     this.usageLimit = 0,
@@ -64,6 +66,7 @@ class OfferModel {
       label: json['label'] ?? (json['title'] ?? ''),
       description: json['description'],
       terms: json['terms'],
+      image: json['image'],
       startsAt: json['starts_at'],
       endsAt: json['ends_at'],
       usageLimit: json['usage_limit'] ?? 0,

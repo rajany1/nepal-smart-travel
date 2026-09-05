@@ -205,11 +205,11 @@
 @section('scripts')
 <script>
     function openEdit(id) {
-        fetch(`/admin/achievements/${id}/edit`)
+        fetch(`/${window.adminPrefix}/achievements/${id}/edit`)
             .then(r => r.json())
             .then(data => {
                 document.getElementById('editTitle').textContent = `Edit ${data.display_name}`;
-                document.getElementById('editForm').action = `/admin/achievements/${id}`;
+                document.getElementById('editForm').action = `/${window.adminPrefix}/achievements/${id}`;
                 document.getElementById('editName').value = data.name;
                 document.getElementById('editDisplayName').value = data.display_name;
                 document.getElementById('editDescription').value = data.description || '';

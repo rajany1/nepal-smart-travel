@@ -33,7 +33,13 @@ class ReportAnalysisService
 
     public function process(Report $report, bool $force = false): array
     {
-        if (!$force && ($report->status !== 'pending' || $report->ai_analyzed_at !== null)) {
+        // Human review takes priority: once an admin/moderator has approved or
+        // rejected a report (verified_by set / non-pending status), the AI agent
+        // must never touch it — manual decisions are final.
+        if ($report->verified_by !== null || $report->status !== 'pending') {
+            return ['report_id' => $report->id, 'skipped' => true];
+        }
+        if (!$force && $report->ai_analyzed_at !== null) {
             return ['report_id' => $report->id, 'skipped' => true];
         }
 

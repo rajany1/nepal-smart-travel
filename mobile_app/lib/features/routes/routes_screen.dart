@@ -32,7 +32,22 @@ class _RoutesScreenState extends State<RoutesScreen> {
     final routes = provider.routes;
 
     return Scaffold(
-      appBar: AppBar(title: Text(context.t('Routes & Treks'))),
+      appBar: AppBar(
+        title: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: const Color(0xFF059669).withOpacity(0.1),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: const Icon(Icons.route, color: Color(0xFF059669), size: 22),
+            ),
+            const SizedBox(width: 12),
+            Text(context.t('Routes & Treks')),
+          ],
+        ),
+      ),
       body: Column(
         children: [
           _buildFilterBar(),

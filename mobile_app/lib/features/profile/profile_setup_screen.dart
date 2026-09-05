@@ -156,7 +156,8 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
             duration: Duration(seconds: 2),
           ),
         );
-        Navigator.of(context).pop();
+        await Future.delayed(const Duration(milliseconds: 1500));
+        if (mounted) Navigator.of(context).pop();
       }
     } catch (e) {
       if (mounted) {
@@ -178,8 +179,8 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
       backgroundColor: AppTheme.backgroundColor,
       appBar: AppBar(
         title: Text(_editMode ? 'Edit Profile' : 'Complete Your Profile'),
-        backgroundColor: AppTheme.primaryColor,
-        foregroundColor: Colors.white,
+        backgroundColor: Colors.white,
+        foregroundColor: AppTheme.textPrimary,
         elevation: 0,
         leading: IconButton(
           icon: const Icon(Icons.arrow_back),

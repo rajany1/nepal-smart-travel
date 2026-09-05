@@ -21,6 +21,9 @@ IconData getCategoryIcon(String? category) {
       return Icons.local_hospital;
     case 'pharmacy':
       return Icons.medication;
+    case 'blood_bank':
+    case 'blood bank':
+      return Icons.bloodtype;
     case 'transport':
     case 'bus':
     case 'airport':
@@ -74,6 +77,8 @@ Color getCategoryColor(String? category) {
     case 'hospital':
     case 'clinic':
     case 'pharmacy':
+    case 'blood_bank':
+    case 'blood bank':
       return AppTheme.markerEmergency;
     case 'transport':
     case 'bus':

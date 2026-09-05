@@ -11,9 +11,11 @@ class AdCampaign extends Model
     protected $fillable = [
         'name', 'business_id', 'ad_type', 'content', 'image',
         'target_url', 'target_district', 'target_category',
-        'contexts', 'budget', 'paid_amount', 'spent_amount', 'payment_status', 'paused_by', 'gateway', 'gateway_ref',
+        'contexts', 'budget', 'cost_per_view', 'cost_per_click',
+        'paid_amount', 'spent_amount', 'payment_status', 'paused_by', 'gateway', 'gateway_ref',
         'max_impressions', 'current_impressions', 'current_clicks',
         'status', 'rejection_reason', 'starts_at', 'ends_at',
+        'fraud_score', 'fraud_flags',
     ];
 
     protected function casts(): array
@@ -25,9 +27,11 @@ class AdCampaign extends Model
             'cost_per_view' => 'decimal:2',
             'cost_per_click' => 'decimal:2',
             'contexts' => 'array',
+            'fraud_flags' => 'array',
             'max_impressions' => 'integer',
             'current_impressions' => 'integer',
             'current_clicks' => 'integer',
+            'fraud_score' => 'integer',
             'starts_at' => 'datetime',
             'ends_at' => 'datetime',
         ];
@@ -48,10 +52,17 @@ class AdCampaign extends Model
         return $this->hasMany(AdClick::class);
     }
 
+    public function revenueLedger(): HasMany
+    {
+        return $this->hasMany(AdRevenueLedger::class);
+    }
+
     public function scopeActive($query)
     {
         return $query->where('status', 'active')
-            ->where('starts_at', '<=', now())
+            ->where(function ($q) {
+                $q->whereNull('starts_at')->orWhere('starts_at', '<=', now());
+            })
             ->where(function ($q) {
                 $q->whereNull('ends_at')->orWhere('ends_at', '>', now());
             });
@@ -70,8 +81,13 @@ class AdCampaign extends Model
 
     public function calculateSpend(): float
     {
-        $cpm = (float) GameSetting::getValue('ad_cpm', 50);
-        $cpc = (float) GameSetting::getValue('ad_cpc', 10);
+        // Use per-campaign pricing if set, otherwise fall back to global settings
+        $cpm = (float) $this->cost_per_view > 0
+            ? (float) $this->cost_per_view
+            : (float) GameSetting::getValue('ad_cpm', 50);
+        $cpc = (float) $this->cost_per_click > 0
+            ? (float) $this->cost_per_click
+            : (float) GameSetting::getValue('ad_cpc', 10);
         return round(($this->current_impressions / 1000) * $cpm + $this->current_clicks * $cpc, 2);
     }
 
@@ -89,6 +105,11 @@ class AdCampaign extends Model
     public function payments(): HasMany
     {
         return $this->hasMany(AdPayment::class, 'ad_campaign_id');
+    }
+
+    public function fraudLogs(): HasMany
+    {
+        return $this->hasMany(\App\Models\AdFraudLog::class);
     }
 
     public function matchesContext(?string $context): bool

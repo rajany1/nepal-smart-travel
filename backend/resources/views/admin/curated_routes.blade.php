@@ -188,7 +188,7 @@ function openCreate() {
     document.getElementById('routeModal').classList.remove('hidden');
 }
 function openEdit(r) {
-    document.getElementById('routeForm').action = '/admin/routes/' + r.id;
+    document.getElementById('routeForm').action = '/' + window.adminPrefix + '/routes/' + r.id;
     document.getElementById('routeForm').method = 'POST';
     let methodInput = document.getElementById('methodInput');
     if (!methodInput) {

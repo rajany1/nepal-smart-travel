@@ -40,7 +40,7 @@ class ProfileCompletionProvider extends ChangeNotifier {
 
   /// Complete the user profile
   Future<bool> completeProfile({
-    required String bio,
+    String? bio,
     String? avatar,
     String? phone,
   }) async {
@@ -49,16 +49,9 @@ class ProfileCompletionProvider extends ChangeNotifier {
     notifyListeners();
 
     try {
-      // ✅ Validate bio length
-      if (bio.trim().isEmpty) {
-        _errorMessage = 'Bio cannot be empty';
-        _isLoading = false;
-        notifyListeners();
-        return false;
-      }
-
-      if (bio.trim().length < 10) {
-        _errorMessage = 'Bio must be at least 10 characters';
+      // Bio is optional but if provided must be at least 10 chars
+      if (bio != null && bio.trim().isNotEmpty && bio.trim().length < 10) {
+        _errorMessage = 'Bio must be at least 10 characters if provided';
         _isLoading = false;
         notifyListeners();
         return false;
@@ -66,7 +59,7 @@ class ProfileCompletionProvider extends ChangeNotifier {
 
       // Call API to complete profile
       final response = await _api.completeProfile(
-        bio: bio.trim(),
+        bio: bio?.trim(),
         avatar: avatar,
         phone: phone,
       );

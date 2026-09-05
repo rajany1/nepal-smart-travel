@@ -49,7 +49,7 @@ class OsmImportService
     ];
 
     private const CATEGORY_PATTERNS = [
-        'amenity' => 'restaurant|cafe|fast_food|pub|bar|hotel|motel|hostel|guest_house|hospital|clinic|pharmacy|doctors|bank|atm|fuel|taxi|police|fire_station|embassy|marketplace|theatre|cinema|community_centre|bus_station|ferry_terminal|parking|post_office|library|place_of_worship|school|university|college',
+        'amenity' => 'restaurant|cafe|fast_food|pub|bar|hotel|motel|hostel|guest_house|hospital|clinic|pharmacy|doctors|blood_bank|bank|atm|fuel|taxi|police|fire_station|embassy|marketplace|theatre|cinema|community_centre|bus_station|ferry_terminal|parking|post_office|library|place_of_worship|school|university|college',
         'tourism' => 'attraction|hotel|motel|hostel|guest_house|information|museum|viewpoint|picnic_site|camp_site|caravan_site|wilderness_hut|alpine_hut|artwork|gallery|theme_park|zoo',
         'shop' => 'supermarket|convenience|mall|department_store|clothes|electronics|gift|souvenir',
         'leisure' => '',
@@ -369,7 +369,7 @@ class OsmImportService
                 'restaurant' => 'Restaurant', 'cafe' => 'Cafe', 'fast_food' => 'Food',
                 'pub' => 'Pub', 'bar' => 'Bar',
                 'hotel' => 'Hotel', 'motel' => 'Hotel', 'hostel' => 'Hotel', 'guest_house' => 'Hotel',
-                'hospital' => 'Hospital', 'clinic' => 'Clinic', 'pharmacy' => 'Pharmacy', 'doctors' => 'Clinic',
+                'hospital' => 'Hospital', 'clinic' => 'Clinic', 'pharmacy' => 'Pharmacy', 'doctors' => 'Clinic', 'blood_bank' => 'Blood Bank',
                 'bank' => 'Bank', 'atm' => 'ATM',
                 'fuel' => 'Fuel Station', 'taxi' => 'Transport',
                 'police' => 'Emergency', 'fire_station' => 'Emergency',

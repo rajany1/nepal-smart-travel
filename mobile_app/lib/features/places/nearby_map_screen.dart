@@ -1,6 +1,7 @@
 ﻿import 'dart:async';
 import "../../core/services/localization_service.dart";
 import 'dart:math' as math;
+import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
@@ -9,6 +10,7 @@ import 'package:latlong2/latlong.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:flutter_compass/flutter_compass.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../../config/constants/app_constants.dart';
 import '../../config/themes/app_theme.dart';
 import '../../core/services/location_service.dart';
@@ -22,7 +24,9 @@ import '../../core/api/api_client.dart';
 import '../../providers/place_provider.dart';
 import '../../providers/map_view_provider.dart';
 import '../../providers/auth_provider.dart';
+import '../../providers/sos_provider.dart';
 import '../auth/login_screen.dart';
+import '../emergency/widgets/sos_marker_painter.dart';
 import '../routes/routes_screen.dart';
 import '../routes/route_detail_screen.dart';
 import 'place_details_screen.dart';
@@ -44,11 +48,19 @@ class NearbyMapScreen extends StatefulWidget {
     this.destinationLat,
     this.destinationLng,
     this.destinationName,
+    this.focusLat,
+    this.focusLng,
+    this.focusLabel,
   });
 
   final double? destinationLat;
   final double? destinationLng;
   final String? destinationName;
+  // When set, the map opens centered here (e.g. an SOS location from the
+  // emergency inbox) instead of the user's live GPS position.
+  final double? focusLat;
+  final double? focusLng;
+  final String? focusLabel;
 
   @override
   State<NearbyMapScreen> createState() => _NearbyMapScreenState();
@@ -95,6 +107,7 @@ class _NearbyMapScreenState extends State<NearbyMapScreen>
   bool _hasArrived = false;
   StreamSubscription? _compassSub;
   DateTime _lastCompassUi = DateTime.now().subtract(const Duration(milliseconds: 100));
+  double? _smoothedCompassHeading;
 
   double? get _heading => _useGpsHeading ? _gpsHeading : _compassHeading;
 
@@ -148,6 +161,10 @@ class _NearbyMapScreenState extends State<NearbyMapScreen>
     duration: const Duration(milliseconds: 700),
   );
   VoidCallback? _cameraAnimListener;
+
+  // Location button cycling state: 0=default recenter, 1=compass follow + tilt
+  int _locationTapState = 0;
+  StreamSubscription? _compassFollowSub;
 
   // OSM submission tracking
 
@@ -224,6 +241,7 @@ class _NearbyMapScreenState extends State<NearbyMapScreen>
     _autoDownloadTimer?.cancel();
     _positionStream?.cancel();
     _compassSub?.cancel();
+    _compassFollowSub?.cancel();
     _syncStreamController?.close();
     _weatherDebounceTimer?.cancel();
     _rotationNotifier.dispose();
@@ -244,18 +262,36 @@ class _NearbyMapScreenState extends State<NearbyMapScreen>
     unawaited(provider.setNepalCachedPlaces());
     unawaited(provider.fetchNepalPlaces());
 
-    // 1) Last-known location straight away — the map opens on a real spot
-    //    with zero "waiting for location" state.
-    final lastKnown = await _locationService.getLastKnownPosition();
-    if (lastKnown != null && mounted) {
+    if (widget.focusLat != null && widget.focusLng != null) {
+      // Focus mode: open centered on a given point (e.g. an SOS location from
+      // the emergency inbox) instead of the user's live GPS position.
       setState(() {
-        _lat = lastKnown.latitude;
-        _lng = lastKnown.longitude;
-        _currentLocation = LatLng(lastKnown.latitude, lastKnown.longitude);
+        _lat = widget.focusLat;
+        _lng = widget.focusLng;
+        _currentLocation = LatLng(widget.focusLat!, widget.focusLng!);
       });
       WidgetsBinding.instance.addPostFrameCallback((_) {
         _recenterMap();
       });
+      // Load the SOS alert around the focused point immediately so the marker
+      // is visible even before the camera-move debounce fires.
+      context
+          .read<SosProvider>()
+          .fetchNearbySos(widget.focusLat!, widget.focusLng!, radiusKm: 5);
+    } else {
+      // 1) Last-known location straight away — the map opens on a real spot
+      //    with zero "waiting for location" state.
+      final lastKnown = await _locationService.getLastKnownPosition();
+      if (lastKnown != null && mounted) {
+        setState(() {
+          _lat = lastKnown.latitude;
+          _lng = lastKnown.longitude;
+          _currentLocation = LatLng(lastKnown.latitude, lastKnown.longitude);
+        });
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          _recenterMap();
+        });
+      }
     }
 
     if (mounted && _lat != null && _lng != null) {
@@ -269,22 +305,24 @@ class _NearbyMapScreenState extends State<NearbyMapScreen>
       _fetchWeatherForViewport();
     }
 
-    // 2) Fresh GPS fix in the background. If it moved from the last-known
-    //    spot, glide the map smoothly to the live position.
-    final loc = await _locationService.getCurrentLocation();
-    if (loc != null && mounted) {
-      final distM = _currentLocation == null
-          ? double.infinity
-          : const Distance()
-              .as(LengthUnit.Meter, _currentLocation!, LatLng(loc.latitude, loc.longitude));
-      setState(() {
-        _lat = loc.latitude;
-        _lng = loc.longitude;
-        _currentLocation = LatLng(loc.latitude, loc.longitude);
-      });
-      _startPositionTracking();
-      if (distM > 50 && _mapReady) {
-        _smoothMoveTo(_currentLocation!);
+    if (widget.focusLat == null && widget.focusLng == null) {
+      // 2) Fresh GPS fix in the background. If it moved from the last-known
+      //    spot, glide the map smoothly to the live position.
+      final loc = await _locationService.getCurrentLocation();
+      if (loc != null && mounted) {
+        final distM = _currentLocation == null
+            ? double.infinity
+            : const Distance()
+                .as(LengthUnit.Meter, _currentLocation!, LatLng(loc.latitude, loc.longitude));
+        setState(() {
+          _lat = loc.latitude;
+          _lng = loc.longitude;
+          _currentLocation = LatLng(loc.latitude, loc.longitude);
+        });
+        _startPositionTracking();
+        if (distM > 50 && _mapReady) {
+          _smoothMoveTo(_currentLocation!);
+        }
       }
     }
 
@@ -497,6 +535,9 @@ class _NearbyMapScreenState extends State<NearbyMapScreen>
     _debounceTimer?.cancel();
     _debounceTimer = Timer(const Duration(milliseconds: 300), () {
       _fetchPlacesForViewport();
+      if (_lat != null && _lng != null) {
+        context.read<SosProvider>().fetchNearbySos(_lat!, _lng!, radiusKm: 5);
+      }
     });
 
     // Throttle weather fetch on map move
@@ -965,8 +1006,14 @@ class _NearbyMapScreenState extends State<NearbyMapScreen>
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      body: Stack(
+    return AnnotatedRegion<SystemUiOverlayStyle>(
+      value: const SystemUiOverlayStyle(
+        statusBarColor: Colors.transparent,
+        statusBarIconBrightness: Brightness.dark,
+        statusBarBrightness: Brightness.light,
+      ),
+      child: Scaffold(
+        body: Stack(
         children: [
           // Map with tile mode switch (single map, single controller)
           Consumer<MapViewProvider>(
@@ -1000,6 +1047,48 @@ class _NearbyMapScreenState extends State<NearbyMapScreen>
             right: 16,
             child: _buildCompass(),
           ),
+
+          // Focus banner (e.g. viewing an SOS location from the emergency inbox)
+          if (widget.focusLat != null && widget.focusLng != null && widget.focusLabel != null)
+            Positioned(
+              top: MediaQuery.of(context).padding.top + 62,
+              left: 16,
+              right: 74,
+              child: Center(
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withOpacity(0.95),
+                    borderRadius: BorderRadius.circular(20),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withOpacity(0.12),
+                        blurRadius: 8,
+                        offset: const Offset(0, 2),
+                      ),
+                    ],
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(Icons.sos, size: 16, color: AppTheme.errorColor),
+                      const SizedBox(width: 6),
+                      Flexible(
+                        child: Text(
+                          widget.focusLabel!,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w700,
+                            color: AppTheme.textPrimary,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
 
           // Search bar
           Positioned(
@@ -1103,6 +1192,7 @@ class _NearbyMapScreenState extends State<NearbyMapScreen>
           _buildBottomSheet(),
         ],
       ),
+      ),
     );
   }
 
@@ -1160,23 +1250,24 @@ class _NearbyMapScreenState extends State<NearbyMapScreen>
               -1.0/3.0, -1.0/3.0, -1.0/3.0, 1, 0,
             ]),
             child: TileLayer(
-              urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+              urlTemplate:
+                  'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
               userAgentPackageName: 'np.com.nepalsmarttravel',
+              minZoom: 6.0,
               maxZoom: 20,
-              tileProvider: _offlineTiles,
+              // tileProvider: _offlineTiles,
             ),
           ),
         ] else
           TileLayer(
-            // OSM raster for the standard (non-satellite) layer. A Carto
-            // (OSM-based) fallback is provided so the map still renders real
-            // tiles if tile.openstreetmap.org is slow/blocked/rate-limited.
-            urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-            fallbackUrl:
-                'https://a.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png',
+            // OpenStreetMap - reliable, no API key needed
+            // Labels will show but most reliable tile source
+            urlTemplate:
+                'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
             userAgentPackageName: 'np.com.nepalsmarttravel',
+            minZoom: 6.0,
             maxZoom: 19,
-            tileProvider: _offlineTiles,
+            // tileProvider: _offlineTiles,
           ),
         if (showWeather && _weatherGrid.isNotEmpty)
           PolygonLayer(polygons: _buildWeatherPolygons()),
@@ -1276,6 +1367,31 @@ class _NearbyMapScreenState extends State<NearbyMapScreen>
               ),
             ],
           ),
+        // SOS markers from nearby users
+        Consumer<SosProvider>(
+          builder: (context, sosProvider, _) {
+            if (sosProvider.nearbySos.isEmpty) return const SizedBox.shrink();
+            return MarkerLayer(
+              markers: [
+                for (final sos in sosProvider.nearbySos)
+                  Marker(
+                    point: LatLng(sos.latitude, sos.longitude),
+                    width: 70,
+                    height: 70,
+                    alignment: Alignment.center,
+                    child: SosMarker(
+                      latitude: sos.latitude,
+                      longitude: sos.longitude,
+                      distanceKm: sos.distanceKm,
+                      durationSeconds: sos.durationSeconds,
+                      emergencyType: sos.emergencyType,
+                      onTap: () => _showSosInfoSheet(context, sos),
+                    ),
+                  ),
+              ],
+            );
+          },
+        ),
         if (placesVisible)
           Consumer<PlaceProvider>(
             builder: (context, provider, _) {
@@ -1484,9 +1600,19 @@ class _NearbyMapScreenState extends State<NearbyMapScreen>
       mainAxisSize: MainAxisSize.min,
       children: [
         _mapFAB(
-          icon: Icons.my_location,
-          color: _isTracking ? AppTheme.primaryColor : Colors.white,
-          iconColor: _isTracking ? Colors.white : AppTheme.primaryColor,
+          icon: _locationTapState == 1
+              ? Icons.navigation
+              : Icons.my_location,
+          color: _locationTapState == 1
+              ? Colors.teal
+              : _isTracking
+                  ? AppTheme.primaryColor
+                  : Colors.white,
+          iconColor: _locationTapState == 1
+              ? Colors.white
+              : _isTracking
+                  ? Colors.white
+                  : AppTheme.primaryColor,
           onTap: _onMyLocationTap,
         ),
         const SizedBox(height: 8),
@@ -1515,37 +1641,102 @@ class _NearbyMapScreenState extends State<NearbyMapScreen>
     Color? color,
     Color? iconColor,
   }) {
-    return Material(
-      elevation: 3,
-      color: color ?? Colors.white,
-      borderRadius: BorderRadius.circular(12),
-      shadowColor: Colors.black26,
-      child: InkWell(
+    final isCompassMode = icon == Icons.navigation;
+    return Container(
+      decoration: isCompassMode
+          ? BoxDecoration(
+              shape: BoxShape.rectangle,
+              borderRadius: BorderRadius.circular(12),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.teal.withOpacity(0.5),
+                  blurRadius: 12,
+                  spreadRadius: 2,
+                ),
+              ],
+            )
+          : null,
+      child: Material(
+        elevation: 3,
+        color: color ?? Colors.white,
         borderRadius: BorderRadius.circular(12),
-        onTap: onTap,
-        child: Container(
-          width: 44,
-          height: 44,
-          alignment: Alignment.center,
-          child: Icon(icon, size: 22, color: iconColor ?? AppTheme.textPrimary),
+        shadowColor: Colors.black26,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(12),
+          onTap: onTap,
+          child: Container(
+            width: 44,
+            height: 44,
+            alignment: Alignment.center,
+            child: Icon(icon, size: 22, color: iconColor ?? AppTheme.textPrimary),
+          ),
         ),
       ),
     );
   }
 
   void _onMyLocationTap() {
-    // Always recenter to the user's exact location, no toggle confusion.
-    if (_currentLocation != null) {
-      setState(() => _isTracking = true);
-      _mapController.move(_currentLocation!, 15.0);
+    final loc = _currentLocation ?? ((_lat != null && _lng != null) ? LatLng(_lat!, _lng!) : null);
+
+    if (loc == null) {
+      _requestLocationAndRecenter();
       return;
     }
-    if (_lat != null && _lng != null) {
-      setState(() => _isTracking = true);
-      _mapController.move(LatLng(_lat!, _lng!), 15.0);
-      return;
+
+    // Cycle: 0 -> 1 -> 0 (only two states)
+    if (_locationTapState == 0) {
+      // State 1: Recenter + compass follow + slight zoom-out for tilt feel
+      setState(() {
+        _locationTapState = 1;
+        _isTracking = true;
+      });
+      _mapController.move(loc, 15.0);
+      _startCompassFollow();
+    } else {
+      // State 0: Default — recenter, no rotation
+      setState(() {
+        _locationTapState = 0;
+        _isTracking = true;
+      });
+      _stopCompassFollow();
+      _mapController.rotate(0);
+      _mapController.move(loc, _currentZoom);
     }
-    _requestLocationAndRecenter();
+  }
+
+  void _showModeSnackbar(String msg) {
+    ScaffoldMessenger.of(context).hideCurrentSnackBar();
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(msg, style: const TextStyle(fontSize: 13)),
+        behavior: SnackBarBehavior.floating,
+        duration: const Duration(seconds: 2),
+        margin: const EdgeInsets.symmetric(horizontal: 80, vertical: 80),
+      ),
+    );
+  }
+
+  void _startCompassFollow() {
+    _compassFollowSub?.cancel();
+    _smoothedCompassHeading = null;
+    _compassFollowSub = FlutterCompass.events?.listen((event) {
+      if (_locationTapState != 1 || !mounted) return;
+      final h = event.heading;
+      if (h == null) return;
+      if (_smoothedCompassHeading == null) {
+        _smoothedCompassHeading = h;
+      } else {
+        final arc = _shortestArc(_smoothedCompassHeading!, h);
+        _smoothedCompassHeading = _smoothedCompassHeading! + arc * 0.15;
+      }
+      _mapController.rotate(-_smoothedCompassHeading!);
+    });
+  }
+
+  void _stopCompassFollow() {
+    _compassFollowSub?.cancel();
+    _compassFollowSub = null;
+    _smoothedCompassHeading = null;
   }
 
   Future<void> _requestLocationAndRecenter() async {
@@ -1975,7 +2166,7 @@ class _NearbyMapScreenState extends State<NearbyMapScreen>
                           ],
                         ),
                       ),
-                      AdInlineBanner(adContext: 'explore'),
+                      AdInlineBanner(adContext: 'explore', persistent: true),
                     ],
                   ),
                 ),
@@ -2739,8 +2930,9 @@ class _NearbyMapScreenState extends State<NearbyMapScreen>
         markers.add(Marker(
           point: LatLng(p.latitude, p.longitude),
           width: 32,
-          height: 32,
-          alignment: Alignment.center,
+          height: 32 * 1.4,
+          alignment: const Alignment(0, 0.7),
+          rotate: true,
           child: _buildPinChild(p, 32.0, false),
         ));
         return;
@@ -2799,43 +2991,76 @@ class _NearbyMapScreenState extends State<NearbyMapScreen>
   /// high-zoom paths.
   Widget _buildPinChild(PlaceModel place, double markerSize, bool isSelected) {
     final markerColor = _getCategoryColor(place.category);
+    final pinHeight = markerSize * 1.4;
     return GestureDetector(
       onTap: () => _onPlaceTap(place),
       onDoubleTap: () => _navigateToDetails(place),
-      child: Stack(
-        clipBehavior: Clip.none,
-        children: [
-          AnimatedContainer(
-            duration: const Duration(milliseconds: 250),
-            width: markerSize, height: markerSize,
-            decoration: BoxDecoration(
-              color: markerColor, shape: BoxShape.circle,
-              border: Border.all(color: Colors.white, width: isSelected ? 3 : 1.5),
-              boxShadow: [
-                BoxShadow(
-                  color: markerColor.withOpacity(isSelected ? 0.6 : 0.25),
-                  blurRadius: isSelected ? 10 : 3,
-                  spreadRadius: isSelected ? 3 : 0.5,
-                ),
-              ],
-            ),
-            child: Stack(
-              alignment: Alignment.center,
-              children: [
-                Icon(_getCategoryIcon(place.category), color: Colors.white, size: isSelected ? 22 : 16),
-                if (isSelected)
-                  Positioned(
-                    top: 0, right: 0,
-                    child: Container(
-                      width: 14, height: 14,
-                      decoration: const BoxDecoration(color: Colors.white, shape: BoxShape.circle),
-                      child: const Icon(Icons.check_circle, size: 9, color: AppTheme.successColor),
+      child: SizedBox(
+        width: markerSize,
+        height: pinHeight,
+        child: Stack(
+          clipBehavior: Clip.none,
+          alignment: Alignment.topCenter,
+          children: [
+            // Pin body (circle with icon)
+            Positioned(
+              top: 0,
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 250),
+                width: markerSize,
+                height: markerSize,
+                decoration: BoxDecoration(
+                  color: markerColor,
+                  shape: BoxShape.circle,
+                  border: Border.all(color: Colors.white, width: isSelected ? 3 : 1.5),
+                  boxShadow: [
+                    BoxShadow(
+                      color: markerColor.withOpacity(isSelected ? 0.6 : 0.3),
+                      blurRadius: isSelected ? 10 : 4,
+                      spreadRadius: isSelected ? 3 : 1,
+                      offset: const Offset(0, 2),
                     ),
-                  ),
-              ],
+                  ],
+                ),
+                child: Stack(
+                  alignment: Alignment.center,
+                  children: [
+                    Icon(_getCategoryIcon(place.category), color: Colors.white, size: isSelected ? 20 : 14),
+                    if (isSelected)
+                      Positioned(
+                        top: -2, right: -2,
+                        child: Container(
+                          width: 12, height: 12,
+                          decoration: const BoxDecoration(color: Colors.white, shape: BoxShape.circle),
+                          child: const Icon(Icons.check_circle, size: 9, color: AppTheme.successColor),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
             ),
-          ),
-        ],
+            // Pin point (triangle poking into map)
+            Positioned(
+              top: markerSize - 4,
+              child: CustomPaint(
+                size: Size(12, 10),
+                painter: _PinPointPainter(color: markerColor),
+              ),
+            ),
+            // Shadow dot on the ground
+            Positioned(
+              bottom: 0,
+              child: Container(
+                width: 10,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: Colors.black.withOpacity(0.15),
+                  shape: BoxShape.circle,
+                ),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -2892,8 +3117,9 @@ class _NearbyMapScreenState extends State<NearbyMapScreen>
       markers.add(Marker(
         point: LatLng(place.latitude, place.longitude),
         width: markerSize,
-        height: markerSize,
-        alignment: Alignment.center,
+        height: markerSize * 1.4,
+        alignment: const Alignment(0, 0.7),
+        rotate: true,
         child: markerChild,
       ));
     }
@@ -3151,6 +3377,9 @@ class _NearbyMapScreenState extends State<NearbyMapScreen>
         return Icons.local_hospital;
       case 'pharmacy':
         return Icons.medication;
+      case 'blood_bank':
+      case 'blood bank':
+        return Icons.bloodtype;
       case 'transport':
       case 'bus':
       case 'airport':
@@ -3203,6 +3432,8 @@ class _NearbyMapScreenState extends State<NearbyMapScreen>
       case 'hospital':
       case 'clinic':
       case 'pharmacy':
+      case 'blood_bank':
+      case 'blood bank':
         return const Color(0xFF27AE60);
       case 'transport':
       case 'bus_station':
@@ -3289,7 +3520,101 @@ class _NearbyMapScreenState extends State<NearbyMapScreen>
     if (code >= 95 && code <= 99) return Colors.purple;
     return Colors.transparent;
   }
+
+  void _showSosInfoSheet(BuildContext context, dynamic sos) {
+    final emergencyLabels = {
+      'medical': 'Medical Emergency',
+      'accident': 'Accident',
+      'flood': 'Flood',
+      'other': 'Emergency',
+    };
+    final duration = sos.durationSeconds ?? 0;
+    final mins = duration ~/ 60;
+    final secs = duration % 60;
+    final durationText = '${mins.toString().padLeft(2, '0')}:${secs.toString().padLeft(2, '0')}';
+
+    showModalBottomSheet(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (_) => Container(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 40,
+              height: 4,
+              decoration: BoxDecoration(
+                color: Colors.grey.shade300,
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+            const SizedBox(height: 16),
+            Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: AppTheme.errorColor.withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: const Icon(Icons.sos, color: AppTheme.errorColor, size: 24),
+                ),
+                const SizedBox(width: 12),
+                const Expanded(
+                  child: Text(
+                    'SOS Nearby',
+                    style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            _infoTile(Icons.location_on, 'Approx. ${sos.distanceKm?.toStringAsFixed(0) ?? '?'} km away'),
+            const SizedBox(height: 8),
+            _infoTile(Icons.timer, 'Active for $durationText'),
+            const SizedBox(height: 8),
+            _infoTile(Icons.warning, emergencyLabels[sos.emergencyType] ?? 'Emergency'),
+            const SizedBox(height: 20),
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton.icon(
+                onPressed: () {
+                  Navigator.pop(context);
+                  final url = Uri.parse(
+                    'https://www.google.com/maps/dir/?api=1&destination=${sos.latitude},${sos.longitude}',
+                  );
+                  launchUrl(url);
+                },
+                icon: const Icon(Icons.directions, color: Colors.white),
+                label: const Text('Get Directions'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppTheme.primaryColor,
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _infoTile(IconData icon, String text) {
+    return Row(
+      children: [
+        Icon(icon, size: 18, color: Colors.grey.shade600),
+        const SizedBox(width: 10),
+        Text(text, style: TextStyle(color: Colors.grey.shade700, fontSize: 14)),
+      ],
+    );
+  }
 }
+
 enum _LabelSide { right, left, top, bottom }
 
 class _LabelAssignment {
@@ -3352,4 +3677,27 @@ class _WeatherGridPoint {
       precip: (json['precip'] is num ? (json['precip'] as num).toDouble() : double.tryParse(json['precip']?.toString() ?? '')),
     );
   }
+}
+
+/// Draws the small triangle/point at the bottom of a pin marker,
+/// making it look like it's poked into the map surface.
+class _PinPointPainter extends CustomPainter {
+  final Color color;
+  const _PinPointPainter({required this.color});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..color = color
+      ..style = PaintingStyle.fill;
+    final path = ui.Path()
+      ..moveTo(0, 0)
+      ..lineTo(size.width, 0)
+      ..lineTo(size.width / 2, size.height)
+      ..close();
+    canvas.drawPath(path, paint);
+  }
+
+  @override
+  bool shouldRepaint(covariant _PinPointPainter old) => old.color != color;
 }

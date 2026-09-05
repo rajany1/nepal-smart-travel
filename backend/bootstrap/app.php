@@ -23,6 +23,7 @@ return Application::configure(basePath: dirname(__DIR__))
 'profile.completed' => \App\Http\Middleware\ProfileCompleted::class,
 'status' => \App\Http\Middleware\CheckUserStatus::class,
 'business' => \App\Http\Middleware\EnsureBusiness::class,
+'role' => \App\Http\Middleware\RoleMiddleware::class,
         ]);
     })
     ->withSchedule(function (\Illuminate\Console\Scheduling\Schedule $schedule) {

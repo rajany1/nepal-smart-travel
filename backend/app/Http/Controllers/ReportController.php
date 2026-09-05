@@ -6,6 +6,7 @@ use Illuminate\Http\Request;
 use App\Models\Report;
 use App\Models\ReportCategorie;
 use App\Models\ReportComment;
+use App\Models\ReportConfirmation;
 use App\Models\ReportReaction;
 use App\Models\Place;
 use App\Models\GameSetting;
@@ -17,6 +18,7 @@ use App\Services\AchievementService;
 use App\Services\Ai\AgentOrchestrator;
 use App\Services\ExifGpsVerificationService;
 use App\Services\ModeratorService;
+use App\Services\ReportAutoClassifyService;
 use App\Services\TranslationService;
 use App\Helpers\GeoHelper;
 use Illuminate\Support\Facades\Storage;
@@ -308,6 +310,17 @@ class ReportController extends Controller
             ], 422);
         }
 
+        // Layer 2: Fraud detection
+        $fraud = app(\App\Services\FraudDetectionService::class);
+        $fraudResult = $fraud->checkReport($request, $request->user());
+        if ($fraudResult['blocked']) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Report blocked due to suspicious activity.',
+                'reasons' => $fraudResult['reasons'],
+            ], 422);
+        }
+
         $validated['user_id'] = $request->user()->id;
         $validated['status'] = 'pending';
         // Auto-inferred fields (merged into the request before validate()).
@@ -360,6 +373,17 @@ class ReportController extends Controller
         if ($request->hasFile('image')) {
             $file = $request->file('image');
 
+            // Content validation - verify actual file type
+            $finfo = new \finfo(FILEINFO_MIME_TYPE);
+            $mimeType = $finfo->buffer(file_get_contents($file->getRealPath()));
+            $allowedTypes = ['image/jpeg', 'image/png', 'image/webp'];
+            if (!in_array($mimeType, $allowedTypes)) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Invalid image type. Only JPEG, PNG, and WebP are allowed.',
+                ], 422);
+            }
+
             // Layer 2: EXIF GPS verification
             $gpsService = app(ExifGpsVerificationService::class);
             $gpsVerificationResult = $gpsService->verifyPhotoLocation(
@@ -401,6 +425,8 @@ class ReportController extends Controller
 
         // If photo has no GPS data or GPS mismatched, still allow submission
         // but flag it for admin review. Moderators can reject based on this.
+        $validated['ip_address'] = $request->ip();
+        $validated['user_agent'] = $request->userAgent();
         $report = Report::create($validated);
 
         // Review AI agent - real-time safety guard
@@ -957,5 +983,76 @@ class ReportController extends Controller
     private function haversineDistanceMeters(float $lat1, float $lng1, float $lat2, float $lng2): float
     {
         return GeoHelper::haversineMeters($lat1, $lng1, $lat2, $lng2);
+    }
+
+    public function confirm(Request $request, string $id)
+    {
+        $validated = $request->validate([
+            'latitude' => 'nullable|numeric|between:-90,90',
+            'longitude' => 'nullable|numeric|between:-180,180',
+            'note' => 'nullable|string|max:255',
+        ]);
+
+        $user = $request->user();
+        $report = Report::findOrFail($id);
+
+        if ($report->user_id === $user->id) {
+            return response()->json(['success' => false, 'message' => 'Cannot confirm your own report'], 422);
+        }
+
+        $existing = ReportConfirmation::where('report_id', $report->id)
+            ->where('user_id', $user->id)
+            ->first();
+
+        if ($existing) {
+            return response()->json(['success' => false, 'message' => 'Already confirmed'], 422);
+        }
+
+        ReportConfirmation::create([
+            'report_id' => $report->id,
+            'user_id' => $user->id,
+            'latitude' => $validated['latitude'] ?? null,
+            'longitude' => $validated['longitude'] ?? null,
+            'note' => $validated['note'] ?? null,
+        ]);
+
+        $report->increment('confirmed_by_count');
+        $report->update(['last_confirmed_at' => now()]);
+        $report->refresh();
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Report confirmed',
+            'data' => [
+                'confirmed_by_count' => $report->confirmed_by_count,
+                'confidence_score' => $report->confidence_score,
+            ],
+        ]);
+    }
+
+    public function confirmers(Request $request, string $id)
+    {
+        $report = Report::findOrFail($id);
+        $confirmers = $report->confirmations()
+            ->with('user:id,name,avatar')
+            ->latest()
+            ->limit(50)
+            ->get()
+            ->map(fn($c) => [
+                'id' => $c->id,
+                'user_name' => $c->user->name ?? 'Anonymous',
+                'user_avatar' => $c->user->avatar ?? null,
+                'note' => $c->note,
+                'created_at' => $c->created_at,
+            ]);
+
+        return response()->json([
+            'success' => true,
+            'data' => [
+                'confirmers' => $confirmers,
+                'total_count' => $report->confirmed_by_count,
+                'confidence_score' => $report->confidence_score,
+            ],
+        ]);
     }
 }

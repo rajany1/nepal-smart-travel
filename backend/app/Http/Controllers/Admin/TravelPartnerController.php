@@ -59,7 +59,60 @@ class TravelPartnerController extends Controller
             'rejected_reason' => $request->input('reason'),
         ]);
         $this->moderatorService->log(Auth::user(), 'business.rejected', 'travel_partner', $travelPartner->id, 'Rejected business: ' . $travelPartner->name . ' — ' . $request->input('reason'));
-        return back()->with('success', 'Business rejected.');
+
+        // Clean up user so they can re-register with same email/phone
+        $user = $travelPartner->user;
+        if ($user) {
+            $travelPartner->update(['user_id' => null]);
+            $user->delete();
+        }
+
+        return back()->with('success', 'Business rejected and account removed. Partner can re-register.');
+    }
+
+    public function suspendPartner(Request $request, TravelPartner $travelPartner)
+    {
+        $this->requireAdmin($request);
+
+        $travelPartner->update([
+            'is_active' => false,
+            'suspended_reason' => $request->input('reason', 'Rule violation'),
+        ]);
+
+        // Suspend the user account via existing status system
+        $user = $travelPartner->user;
+        if ($user) {
+            $user->update([
+                'status' => 'suspended',
+                'suspended_until' => $request->input('suspended_until'),
+            ]);
+        }
+
+        $this->moderatorService->log(Auth::user(), 'business.suspended', 'travel_partner', $travelPartner->id, 'Suspended: ' . $travelPartner->name . ' — ' . $request->input('reason'));
+
+        return back()->with('success', 'Partner suspended. They can no longer access the portal.');
+    }
+
+    public function reinstatePartner(Request $request, TravelPartner $travelPartner)
+    {
+        $this->requireAdmin($request);
+
+        $travelPartner->update([
+            'is_active' => true,
+            'suspended_reason' => null,
+        ]);
+
+        $user = $travelPartner->user;
+        if ($user) {
+            $user->update([
+                'status' => 'active',
+                'suspended_until' => null,
+            ]);
+        }
+
+        $this->moderatorService->log(Auth::user(), 'business.reinstated', 'travel_partner', $travelPartner->id, 'Reinstated: ' . $travelPartner->name);
+
+        return back()->with('success', 'Partner reinstated.');
     }
 
     private const BUSINESS_TYPES = 'hotel,restaurant,cafe,shop,vehicle_rental,guide,adventure,other';

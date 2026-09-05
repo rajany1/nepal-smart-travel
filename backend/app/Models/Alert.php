@@ -20,7 +20,17 @@ class Alert extends Model
         'created_by',
         'source_type',
         'source_id',
+        'is_broadcast',
+        'target_user_id',
+        'sender_type',
+        'link_type',
+        'link_value',
     ];
+
+    public function targetUser()
+    {
+        return $this->belongsTo(User::class, 'target_user_id');
+    }
 
     protected function casts(): array
     {
@@ -28,6 +38,7 @@ class Alert extends Model
             'latitude' => 'decimal:7',
             'longitude' => 'decimal:7',
             'expires_at' => 'datetime',
+            'is_broadcast' => 'boolean',
         ];
     }
 

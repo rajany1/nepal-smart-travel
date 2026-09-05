@@ -169,11 +169,11 @@
 @section('scripts')
 <script>
     function openEditPerm(id) {
-        fetch(`/admin/permissions/${id}/edit`)
+        fetch(`/${window.adminPrefix}/permissions/${id}/edit`)
             .then(r => r.json())
             .then(data => {
                 document.getElementById('editPermTitle').textContent = `Edit ${data.display_name}`;
-                document.getElementById('editPermForm').action = `/admin/permissions/${data.id}`;
+                document.getElementById('editPermForm').action = `/${window.adminPrefix}/permissions/${data.id}`;
                 document.getElementById('editPermDisplayName').value = data.display_name;
                 document.getElementById('editPermGroup').value = data.group;
                 document.getElementById('editPermDescription').value = data.description || '';

@@ -147,5 +147,19 @@ class AppServiceProvider extends ServiceProvider
         RateLimiter::for('partner-register', function (Request $request) {
             return Limit::perHour(5)->by('partner-register:' . $request->ip());
         });
+
+        // Phone/Email change OTP — 3 requests per hour per user
+        RateLimiter::for('phone-change', function (Request $request) {
+            return Limit::perHour(3)->by('phone-change:' . $request->user()?->id);
+        });
+
+        RateLimiter::for('email-change', function (Request $request) {
+            return Limit::perHour(3)->by('email-change:' . $request->user()?->id);
+        });
+
+        // SOS activation — max 5 per hour per user
+        RateLimiter::for('sos', function (Request $request) {
+            return Limit::perHour(5)->by('sos:' . $request->user()?->id);
+        });
     }
 }

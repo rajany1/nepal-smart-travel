@@ -96,7 +96,7 @@ class ReportCard extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(report.title, style: TextStyle(fontSize: dense ? AppTheme.textSm : AppTheme.textBase, fontWeight: FontWeight.w500), maxLines: 1, overflow: TextOverflow.ellipsis),
+                    Text(report.title, style: TextStyle(fontSize: dense ? AppTheme.textSm : AppTheme.textBase, fontWeight: FontWeight.w600), maxLines: 1, overflow: TextOverflow.ellipsis),
                     const SizedBox(height: 2),
                     Row(
                       children: [

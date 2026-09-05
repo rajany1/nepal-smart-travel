@@ -155,7 +155,20 @@ class _PlaceCorrectionScreenState extends State<PlaceCorrectionScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Report a Problem'),
+        title: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: AppTheme.warningColor.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Icon(Icons.report_problem, color: AppTheme.warningColor, size: 22),
+            ),
+            const SizedBox(width: 12),
+            const Text('Report a Problem'),
+          ],
+        ),
         elevation: 0,
         backgroundColor: Colors.white,
         foregroundColor: AppTheme.textPrimary,

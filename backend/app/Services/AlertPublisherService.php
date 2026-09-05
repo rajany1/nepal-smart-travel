@@ -42,6 +42,9 @@ class AlertPublisherService
                 'latitude' => $report->latitude,
                 'longitude' => $report->longitude,
                 'expires_at' => $this->expiry(),
+                'sender_type' => 'system',
+                'link_type' => 'report',
+                'link_value' => (string) $report->id,
             ]);
 
             return $existing;
@@ -60,6 +63,9 @@ class AlertPublisherService
                 'expires_at' => $this->expiry(),
                 'source_type' => 'report',
                 'source_id' => $report->id,
+                'sender_type' => 'system',
+                'link_type' => 'report',
+                'link_value' => (string) $report->id,
             ]);
         } catch (\Throwable $e) {
             // Unique (source_type, source_id) race: another worker won it.
@@ -85,6 +91,17 @@ class AlertPublisherService
      */
     public function dispatchForAlert(Alert $alert): void
     {
+        // Broadcast alerts reach ALL subscribers regardless of location.
+        if ($alert->is_broadcast) {
+            $this->dispatchAll(
+                title: (string) $alert->title,
+                message: str((string) $alert->description)->limit(100),
+                data: ['type' => 'alert', 'id' => $alert->id],
+                settingsKey: 'notifications_enabled',
+            );
+            return;
+        }
+
         if (!$alert->latitude || !$alert->longitude) {
             return;
         }
@@ -97,6 +114,24 @@ class AlertPublisherService
             data: ['type' => 'alert', 'id' => $alert->id],
             settingsKey: 'notifications_enabled',
         );
+    }
+
+    private function dispatchAll(
+        string $title,
+        string $message,
+        array $data = [],
+        string $settingsKey = 'push_notifications',
+    ): void {
+        try {
+            \App\Jobs\SendAllUsersPushNotification::dispatch(
+                title: $title,
+                message: $message,
+                data: $data,
+                settingsKey: $settingsKey,
+            );
+        } catch (\Throwable $e) {
+            Log::warning('Alert broadcast push dispatch failed: ' . $e->getMessage());
+        }
     }
 
     private function dispatchNearbyPush(

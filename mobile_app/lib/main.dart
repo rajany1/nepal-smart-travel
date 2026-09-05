@@ -21,6 +21,10 @@ import 'providers/ad_provider.dart';
 import 'providers/offer_provider.dart';
 import 'providers/route_provider.dart';
 import 'providers/theme_provider.dart';
+import 'providers/wallet_provider.dart';
+import 'providers/partner_payment_provider.dart';
+import 'providers/around_me_provider.dart';
+import 'providers/sos_provider.dart';
 import 'core/services/app_settings_service.dart';
 
 import 'features/auth/login_screen.dart';
@@ -33,6 +37,7 @@ import 'features/profile/profile_edit_screen.dart';
 import 'features/profile/profile_completion_screen.dart';
 import 'features/profile/settings_screen.dart';
 import 'features/profile/policies_screen.dart';
+import 'features/profile/legal_document_screen.dart';
 
 import 'features/auth/splash_screen.dart';
 
@@ -49,6 +54,7 @@ import 'features/leaderboard/leaderboard_screen.dart';
 // Consumer feature screens
 import 'features/subscriptions/subscription_plans_screen.dart';
 import 'features/store/store_screen.dart';
+import 'features/wallet/wallet_screen.dart';
 
 import 'services/push_notification_service.dart';
 import 'core/services/local_notification_service.dart';
@@ -154,6 +160,10 @@ class NepalSmartTravelApp extends StatelessWidget {
         ChangeNotifierProvider(create: (_) => OfferProvider()),
         ChangeNotifierProvider(create: (_) => RouteProvider()),
         ChangeNotifierProvider(create: (_) => ThemeProvider()),
+        ChangeNotifierProvider(create: (_) => WalletProvider()),
+        ChangeNotifierProvider(create: (_) => PartnerPaymentProvider()),
+        ChangeNotifierProvider(create: (_) => AroundMeProvider()),
+        ChangeNotifierProvider(create: (_) => SosProvider()),
         ChangeNotifierProvider<LocalizationService>.value(value: localizationService),
       ],
       child: Consumer<ThemeProvider>(
@@ -228,6 +238,11 @@ class NepalSmartTravelApp extends StatelessWidget {
                     return MaterialPageRoute(builder: (_) => const SubscriptionPlansScreen(), settings: settings);
                   case '/store':
                     return MaterialPageRoute(builder: (_) => const StoreScreen(), settings: settings);
+                  case '/wallet':
+                    return MaterialPageRoute(builder: (_) => const WalletScreen(), settings: settings);
+                  case '/legal':
+                    final type = settings.arguments as String? ?? 'privacy_policy';
+                    return MaterialPageRoute(builder: (_) => LegalDocumentScreen(type: type), settings: settings);
                   default:
                     return null;
                 }

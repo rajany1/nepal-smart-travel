@@ -260,7 +260,20 @@ class _AddPlaceScreenState extends State<AddPlaceScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Add New Place'),
+        title: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: const Color(0xFF059669).withOpacity(0.1),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: const Icon(Icons.add_location_alt, color: Color(0xFF059669), size: 22),
+            ),
+            const SizedBox(width: 12),
+            const Text('Add New Place'),
+          ],
+        ),
         elevation: 0,
       ),
       body: SingleChildScrollView(

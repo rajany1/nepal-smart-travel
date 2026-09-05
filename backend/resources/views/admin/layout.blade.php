@@ -66,6 +66,7 @@
             ->whereNotNull('menu_icon')
             ->orderBy('menu_order')
             ->get();
+        $adminPrefix = \App\Models\GameSetting::getValue('admin_route_prefix', 'admin') ?? 'admin';
     @endphp
     <div class="flex min-h-screen">
         <!-- Sidebar -->
@@ -85,7 +86,7 @@
                 $menuGroups = [
                     'main' => ['label' => null, 'admin_only' => false],
                     'monetization' => ['label' => 'Monetization', 'admin_only' => false],
-                    'store' => ['label' => 'Sponsors & Store', 'admin_only' => false],
+                    'ai' => ['label' => 'AI', 'admin_only' => false],
                     'access' => ['label' => 'Access Control', 'admin_only' => true],
                 ];
             @endphp
@@ -127,6 +128,24 @@
                 <a href="{{ route('admin.translator') }}" class="group flex items-center gap-3 rounded-3xl px-4 py-3 transition {{ request()->routeIs('admin.translator*') ? 'bg-accent-500 text-white shadow-lg' : 'text-teal-200 hover:bg-primary-800 hover:text-white' }}">
                     <i class="fas fa-language w-5 text-center"></i>
                     <span class="font-medium">Translator</span>
+                </a>
+
+                <!-- Legal Documents - hardcoded link -->
+                <div class="pt-3 border-t border-primary-800">
+                    <p class="px-4 text-xs font-semibold text-teal-400 uppercase tracking-wider mb-2">Legal</p>
+                </div>
+                <a href="{{ route('admin.legal-documents.index') }}" class="group flex items-center gap-3 rounded-3xl px-4 py-3 transition {{ request()->routeIs('admin.legal-documents*') ? 'bg-accent-500 text-white shadow-lg' : 'text-teal-200 hover:bg-primary-800 hover:text-white' }}">
+                    <i class="fas fa-file-contract w-5 text-center"></i>
+                    <span class="font-medium">Legal Documents</span>
+                </a>
+
+                <!-- SOS Emergency -->
+                <div class="pt-3 border-t border-primary-800">
+                    <p class="px-4 text-xs font-semibold text-teal-400 uppercase tracking-wider mb-2">Emergency</p>
+                </div>
+                <a href="{{ route('admin.sos') }}" class="group flex items-center gap-3 rounded-3xl px-4 py-3 transition {{ request()->routeIs('admin.sos*') ? 'bg-accent-500 text-white shadow-lg' : 'text-teal-200 hover:bg-primary-800 hover:text-white' }}">
+                    <i class="fas fa-exclamation-triangle w-5 text-center"></i>
+                    <span class="font-medium">SOS Alerts</span>
                 </a>
             </nav>
             <div class="border-t border-primary-800 px-6 py-4">
@@ -174,6 +193,10 @@
                 <a href="{{ route('admin.ai.agents') }}" class="block px-3 py-2 rounded {{ request()->routeIs('admin.ai.agents*') ? 'bg-primary-700' : '' }}"><i class="fas fa-robot w-5"></i> AI Employees</a>
                 <a href="{{ route('admin.ai.tasks') }}" class="block px-3 py-2 rounded {{ request()->routeIs('admin.ai.tasks*') ? 'bg-primary-700' : '' }}"><i class="fas fa-tasks w-5"></i> AI Tasks</a>
                 <a href="{{ route('admin.translator') }}" class="block px-3 py-2 rounded {{ request()->routeIs('admin.translator*') ? 'bg-primary-700' : '' }}"><i class="fas fa-language w-5"></i> Translator</a>
+                <div class="border-t border-primary-700 my-2 pt-2">
+                    <p class="px-3 text-xs font-semibold text-accent-300 uppercase tracking-wider mb-1">Legal</p>
+                </div>
+                <a href="{{ route('admin.legal-documents.index') }}" class="block px-3 py-2 rounded {{ request()->routeIs('admin.legal-documents*') ? 'bg-primary-700' : '' }}"><i class="fas fa-file-contract w-5"></i> Legal Documents</a>
                 <hr class="border-primary-700 my-2">
                 <a href="/" class="block px-3 py-2"><i class="fas fa-arrow-left w-5"></i> Back to Site</a>
                 <form method="POST" action="{{ route('logout') }}">
@@ -241,6 +264,7 @@
         </div>
     </div>
     @yield('scripts')
+<script>window.adminPrefix = '{{ $adminPrefix }}';</script>
 <script>
 (function () {
     'use strict';
@@ -378,7 +402,7 @@
     function applyDashboardStats() {
         if (applying) return;
         applying = true;
-        fetch('/admin/live-feed/stats', { headers: { 'X-Requested-With': 'XMLHttpRequest' } })
+        fetch('/{{ $adminPrefix }}/live-feed/stats', { headers: { 'X-Requested-With': 'XMLHttpRequest' } })
             .then(function (r) { return r.json(); })
             .then(function (res) {
                 if (!res.success) return;
@@ -419,7 +443,7 @@
         var since = baseSince();
         var dels = storedDels();
         var q = 'since=' + encodeURIComponent(JSON.stringify(since)) + '&dels_seen=' + encodeURIComponent(JSON.stringify(dels));
-        fetch('/admin/live-feed/changes?' + q, { headers: { 'X-Requested-With': 'XMLHttpRequest' } })
+        fetch('/{{ $adminPrefix }}/live-feed/changes?' + q, { headers: { 'X-Requested-With': 'XMLHttpRequest' } })
             .then(function (r) { return r.json(); })
             .then(function (res) {
                 if (!res.success) return;
@@ -481,7 +505,9 @@
         return a.hasAttribute('data-spa');
     }
     function isExempt(url) {
-        return /\/admin\/live-map/.test(url);
+        var p = window.adminPrefix || 'admin';
+        var re = new RegExp('\\/' + p + '\\/live-map');
+        return re.test(url);
     }
     function runScripts(root) {
         if (!root) return;

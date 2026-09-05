@@ -8,8 +8,10 @@ import '../core/models/ad_campaign.dart';
 
 class AdPlaceCard extends StatefulWidget {
   final AdCampaignModel ad;
+  final dynamic reportId;
+  final String? adContext;
 
-  const AdPlaceCard({super.key, required this.ad});
+  const AdPlaceCard({super.key, required this.ad, this.reportId, this.adContext});
 
   @override
   State<AdPlaceCard> createState() => _AdPlaceCardState();
@@ -19,7 +21,7 @@ class _AdPlaceCardState extends State<AdPlaceCard> {
   @override
   void initState() {
     super.initState();
-    ApiClient.instance.trackAdImpression(widget.ad.id).then((_) {}).catchError((_) {});
+    ApiClient.instance.trackAdImpression(widget.ad.id, reportId: widget.reportId, context: widget.adContext ?? 'unknown').then((_) {}).catchError((_) {});
   }
 
   @override
@@ -165,7 +167,7 @@ class _AdPlaceCardState extends State<AdPlaceCard> {
                   children: [
                     const Icon(Icons.store, size: 12, color: AppTheme.textSecondary),
                     const SizedBox(width: 3),
-                    Text(ad.businessName!, style: const TextStyle(fontSize: AppTheme.textXs, color: AppTheme.textSecondary)),
+              Text(ad.businessName!, style: const TextStyle(fontSize: AppTheme.textXs, color: AppTheme.textSecondary, fontWeight: FontWeight.w500)),
                   ],
                 ),
               ],
@@ -195,7 +197,7 @@ class _AdPlaceCardState extends State<AdPlaceCard> {
   }
 
   void _onTap(BuildContext context) {
-    ApiClient.instance.trackAdClick(widget.ad.id).then((_) {}).catchError((_) {});
+    ApiClient.instance.trackAdClick(widget.ad.id, reportId: widget.reportId, context: widget.adContext ?? 'unknown').then((_) {}).catchError((_) {});
     if (widget.ad.targetUrl != null && widget.ad.targetUrl!.isNotEmpty) {
       launchUrl(Uri.parse(widget.ad.targetUrl!), mode: LaunchMode.externalApplication);
     }
@@ -204,8 +206,10 @@ class _AdPlaceCardState extends State<AdPlaceCard> {
 
 class AdReportCard extends StatefulWidget {
   final AdCampaignModel ad;
+  final dynamic reportId;
+  final String? adContext;
 
-  const AdReportCard({super.key, required this.ad});
+  const AdReportCard({super.key, required this.ad, this.reportId, this.adContext});
 
   @override
   State<AdReportCard> createState() => _AdReportCardState();
@@ -215,7 +219,7 @@ class _AdReportCardState extends State<AdReportCard> {
   @override
   void initState() {
     super.initState();
-    ApiClient.instance.trackAdImpression(widget.ad.id).then((_) {}).catchError((_) {});
+    ApiClient.instance.trackAdImpression(widget.ad.id, reportId: widget.reportId, context: widget.adContext ?? 'unknown').then((_) {}).catchError((_) {});
   }
 
   @override
@@ -287,7 +291,7 @@ class _AdReportCardState extends State<AdReportCard> {
   }
 
   void _onTap(BuildContext context) {
-    ApiClient.instance.trackAdClick(widget.ad.id).then((_) {}).catchError((_) {});
+    ApiClient.instance.trackAdClick(widget.ad.id, reportId: widget.reportId, context: widget.adContext ?? 'unknown').then((_) {}).catchError((_) {});
     if (widget.ad.targetUrl != null && widget.ad.targetUrl!.isNotEmpty) {
       launchUrl(Uri.parse(widget.ad.targetUrl!), mode: LaunchMode.externalApplication);
     }

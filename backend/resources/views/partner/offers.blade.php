@@ -26,7 +26,7 @@
     <div class="flex items-center gap-3">
         <div class="flex rounded-xl border border-slate-200 bg-white overflow-hidden text-sm">
             <a href="{{ route('partner.offers') }}" class="px-4 py-2 {{ !$status ? 'bg-primary-600 text-white' : 'text-slate-600 hover:bg-slate-50' }}">All</a>
-            @foreach(['pending', 'approved', 'paused', 'rejected'] as $s)
+            @foreach(['approved', 'paused'] as $s)
                 <a href="{{ route('partner.offers', ['status' => $s]) }}" class="px-4 py-2 {{ $status === $s ? 'bg-primary-600 text-white' : 'text-slate-600 hover:bg-slate-50' }}">{{ ucfirst($s) }}</a>
             @endforeach
         </div>
@@ -75,12 +75,17 @@
                 @forelse($offers as $offer)
                     <tr class="hover:bg-slate-50/60">
                         <td class="px-6 py-4">
-                            <div class="font-medium text-slate-800">{{ $offer->title }}</div>
-                            @if($offer->trashed() && $offer->admin_removed_reason)
-                                <div class="text-xs text-red-600 mt-0.5"><i class="fas fa-exclamation-triangle"></i> Removed by admin — {{ $offer->admin_removed_reason }}</div>
-                            @elseif($offer->status === 'rejected' && $offer->rejection_reason)
-                                <div class="text-xs text-red-500 mt-0.5"><i class="fas fa-times-circle"></i> {{ $offer->rejection_reason }}</div>
-                            @endif
+                            <div class="flex items-center gap-3">
+                                @if($offer->image)
+                                    <img src="{{ asset('storage/' . $offer->image) }}" alt="" class="w-10 h-10 rounded-lg object-cover flex-shrink-0">
+                                @endif
+                                <div>
+                                    <div class="font-medium text-slate-800">{{ $offer->title }}</div>
+                                    @if($offer->trashed() && $offer->admin_removed_reason)
+                                        <div class="text-xs text-red-600 mt-0.5"><i class="fas fa-exclamation-triangle"></i> Removed by admin — {{ $offer->admin_removed_reason }}</div>
+                                    @endif
+                                </div>
+                            </div>
                         </td>
                         <td class="px-4 py-4 text-slate-600">{{ $typeLabels[$offer->offer_type] ?? $offer->offer_type }}</td>
                         <td class="px-4 py-4 font-semibold text-primary-600">{{ $offer->price_xp }} XP</td>
@@ -109,7 +114,7 @@
                                 <a href="{{ route('partner.offers.redemptions', $offer) }}" title="View redemptions"
                                    class="w-8 h-8 grid place-items-center rounded-lg text-slate-500 hover:bg-primary-50 hover:text-primary-600"><i class="fas fa-ticket-alt"></i></a>
                                 @if(!$offer->trashed())
-                                    @if(!in_array($offer->status, ['approved', 'rejected']) && !$offer->isSystemLocked())
+                                    @if($offer->status !== 'approved' && !$offer->isSystemLocked())
                                         <a href="{{ route('partner.offers.edit', $offer) }}" title="Edit"
                                            class="w-8 h-8 grid place-items-center rounded-lg text-slate-500 hover:bg-primary-50 hover:text-primary-600"><i class="fas fa-edit"></i></a>
                                     @endif

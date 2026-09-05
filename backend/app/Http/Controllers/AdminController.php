@@ -22,9 +22,11 @@ use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Str;
 use Carbon\Carbon;
 use App\Models\GameSetting;
+use App\Models\AdRevenueLedger;
 
 class AdminController extends Controller
 {
@@ -245,7 +247,7 @@ class AdminController extends Controller
             'total_points' => User::sum('total_xp'),
             'operations_efficiency' => $opsEfficiency,
             'analytics_score' => $analyticsScore,
-            'ads_income' => GameSetting::getValue('ads_income_monthly', 2150),
+            'ads_income' => AdRevenueLedger::whereMonth('created_at', now()->month)->whereYear('created_at', now()->year)->sum('admin_share'),
             'system_health_score' => $healthScore,
             'system_health_status' => $healthStatus,
             'users_change_pct' => $usersChangePct,
@@ -480,7 +482,7 @@ class AdminController extends Controller
         } else {
             $south = 26.0; $west = 79.5; $north = 31.0; $east = 89.0;
 
-            $amenityPatt = 'restaurant|cafe|fast_food|pub|bar|hotel|motel|hostel|guest_house|hospital|clinic|pharmacy|doctors|bank|atm|fuel|taxi|police|fire_station|embassy|marketplace|theatre|cinema|community_centre|bus_station|ferry_terminal|parking|post_office|library|place_of_worship|school|university|college';
+            $amenityPatt = 'restaurant|cafe|fast_food|pub|bar|hotel|motel|hostel|guest_house|hospital|clinic|pharmacy|doctors|blood_bank|bank|atm|fuel|taxi|police|fire_station|embassy|marketplace|theatre|cinema|community_centre|bus_station|ferry_terminal|parking|post_office|library|place_of_worship|school|university|college';
             $tourismPatt = 'attraction|hotel|motel|hostel|guest_house|information|museum|viewpoint|picnic_site|camp_site|caravan_site|wilderness_hut|alpine_hut|artwork|gallery|theme_park|zoo';
             $shopPatt = 'supermarket|convenience|mall|department_store|clothes|electronics|gift|souvenir';
             $naturalPatt = 'peak|volcano|bay|cape|beach';
@@ -515,8 +517,8 @@ class AdminController extends Controller
                         'ignore_errors' => true,
                     ],
                     'ssl' => [
-                        'verify_peer' => false,
-                        'verify_peer_name' => false,
+                        'verify_peer' => true,
+                        'verify_peer_name' => true,
                     ],
                 ];
                 $context = stream_context_create($opts);
@@ -721,11 +723,10 @@ class AdminController extends Controller
         $this->requirePermission('manage_users');
 
         $user = User::findOrFail($id);
-        if ($user->id === Auth::id()) {
-            return back()->with('error', 'You cannot change your own status.');
-        }
-        if ($user->isAdmin()) {
-            return back()->with('error', 'Cannot change status of an admin user.');
+        $currentUser = Auth::user();
+
+        if (!$currentUser->canManageUser($user)) {
+            return back()->with('error', 'You cannot change the status of this user.');
         }
 
         $newStatus = match ($user->status) {
@@ -734,7 +735,8 @@ class AdminController extends Controller
             'banned' => 'active',
             default => 'active',
         };
-        $user->update(['status' => $newStatus]);
+        $user->status = $newStatus;
+        $user->save();
         $user->tokens()->delete();
 
         $this->logAction('user.toggle-status', 'user', $user->id, "Changed user #{$user->id} ({$user->name}) status from previous to {$newStatus}");
@@ -748,6 +750,11 @@ class AdminController extends Controller
         $this->requirePermission('assign_moderator');
 
         $user = User::findOrFail($id);
+        $currentUser = Auth::user();
+
+        if (!$currentUser->canManageUser($user)) {
+            return back()->with('error', 'You cannot promote this user.');
+        }
         if ($user->isAdmin()) {
             return back()->with('error', 'User is already an admin.');
         }
@@ -767,8 +774,10 @@ class AdminController extends Controller
         $this->requirePermission('assign_moderator');
 
         $user = User::findOrFail($id);
-        if ($user->id === Auth::id()) {
-            return back()->with('error', 'Cannot remove your own admin status.');
+        $currentUser = Auth::user();
+
+        if (!$currentUser->canManageUser($user)) {
+            return back()->with('error', 'You cannot demote this user.');
         }
         if (!$user->isAdmin()) {
             return back()->with('error', 'User is not an admin.');
@@ -786,6 +795,11 @@ class AdminController extends Controller
         $this->requirePermission('assign_moderator');
 
         $user = User::findOrFail($id);
+        $currentUser = Auth::user();
+
+        if (!$currentUser->canManageUser($user)) {
+            return back()->with('error', 'You cannot promote this user.');
+        }
         if ($user->isAdmin()) {
             return back()->with('error', 'Cannot promote an admin user to moderator.');
         }
@@ -815,8 +829,10 @@ class AdminController extends Controller
         $this->requirePermission('assign_moderator');
 
         $user = User::findOrFail($id);
-        if ($user->id === Auth::id()) {
-            return back()->with('error', 'You cannot remove your own moderator status.');
+        $currentUser = Auth::user();
+
+        if (!$currentUser->canManageUser($user)) {
+            return back()->with('error', 'You cannot demote this user.');
         }
         if (!$user->isModerator()) {
             return back()->with('error', 'User is not a moderator.');
@@ -834,11 +850,10 @@ class AdminController extends Controller
         $this->requirePermission('assign_moderator');
 
         $user = User::findOrFail($id);
-        if ($user->id === Auth::id()) {
-            return back()->with('error', 'Cannot change your own role.');
-        }
-        if ($user->isAdmin()) {
-            return back()->with('error', 'Cannot change the role of an admin user.');
+        $currentUser = Auth::user();
+
+        if (!$currentUser->canManageUser($user)) {
+            return back()->with('error', 'You cannot change the role of this user.');
         }
 
         $roleId = $request->input('role_id');
@@ -872,6 +887,52 @@ class AdminController extends Controller
         return back()->with('success', 'Alert deleted');
     }
 
+    public function sosAlerts(Request $request)
+    {
+        $this->requireAdmin($request);
+
+        $alerts = \App\Models\SosAlert::with('user:id,name,avatar,phone,sos_false_count,sos_restricted_until')
+            ->orderByDesc('started_at')
+            ->paginate(20);
+
+        return view('admin.sos', compact('alerts'));
+    }
+
+    public function restrictSosUser(Request $request, $id)
+    {
+        $this->requireAdmin($request);
+
+        $sos = \App\Models\SosAlert::findOrFail($id);
+        $user = $sos->user;
+        $hours = (int) ($request->input('hours', 24));
+
+        $user->update([
+            'sos_restricted_until' => now()->addHours($hours),
+            'sos_false_count' => 0,
+        ]);
+
+        $this->logAction('user.sos_restricted', 'user', $user->id, "Restricted SOS for {$hours}h. Admin action.");
+
+        return back()->with('success', "User {$user->name} SOS restricted for {$hours} hours");
+    }
+
+    public function unrestrictSosUser(Request $request, $id)
+    {
+        $this->requireAdmin($request);
+
+        $sos = \App\Models\SosAlert::findOrFail($id);
+        $user = $sos->user;
+
+        $user->update([
+            'sos_restricted_until' => null,
+            'sos_false_count' => 0,
+        ]);
+
+        $this->logAction('user.sos_unrestricted', 'user', $user->id, "Unrestricted SOS. Admin action.");
+
+        return back()->with('success', "User {$user->name} SOS restriction lifted");
+    }
+
     // ============ PLACE ACTIONS ============
 
     public function deletePlace(Request $request, $id)
@@ -880,6 +941,7 @@ class AdminController extends Controller
         $this->requirePermission('manage_places');
 
         $place = Place::findOrFail($id);
+
         $place->delete();
 
         \App\Support\LiveFeed::bump('places', $id);
@@ -1167,9 +1229,21 @@ class AdminController extends Controller
             'alert_type' => 'required|string',
             'severity' => 'required|in:info,low,medium,high,critical',
             'affected_district' => 'required|string',
+            'latitude' => 'nullable|numeric|between:-90,90',
+            'longitude' => 'nullable|numeric|between:-180,180',
+            'is_broadcast' => 'nullable|boolean',
         ]);
+
+        // Broadcast alerts target everyone — location is not needed.
+        $validated['is_broadcast'] = (bool) $request->boolean('is_broadcast');
+        if ($validated['is_broadcast']) {
+            $validated['latitude'] = null;
+            $validated['longitude'] = null;
+        }
+
         $validated['uuid'] = (string) Str::uuid();
         $validated['created_by'] = Auth::id();
+        $validated['sender_type'] = 'admin';
         $alert = Alert::create($validated);
 
         app(\App\Services\AlertPublisherService::class)->dispatchForAlert($alert);
@@ -1187,6 +1261,7 @@ class AdminController extends Controller
         }
 
         $settings = [
+            'admin_route_prefix' => GameSetting::getValue('admin_route_prefix', 'admin'),
             'report_approval_xp' => GameSetting::getValue('report_approval_xp', 10),
             'alert_post_xp' => GameSetting::getValue('alert_post_xp', 5),
             'review_xp' => GameSetting::getValue('review_xp', 3),
@@ -1200,9 +1275,10 @@ class AdminController extends Controller
             'payout_min_khalti' => GameSetting::getValue('payout_min_khalti', 100),
             'payout_min_bank' => GameSetting::getValue('payout_min_bank', 500),
             'gateway_esewa_merchant_code' => GameSetting::getValue('gateway_esewa_merchant_code', config('payments.esewa.merchant_code')),
-            'gateway_esewa_secret_key' => GameSetting::getValue('gateway_esewa_secret_key', config('payments.esewa.secret_key')),
+            // Mask secret keys - never send to frontend
+            'gateway_esewa_secret_key' => '********',
             'gateway_esewa_sandbox' => (int) GameSetting::getValue('gateway_esewa_sandbox', config('payments.esewa.sandbox')),
-            'gateway_khalti_secret_key' => GameSetting::getValue('gateway_khalti_secret_key', config('payments.khalti.secret_key')),
+            'gateway_khalti_secret_key' => '********',
             'gateway_khalti_public_key' => GameSetting::getValue('gateway_khalti_public_key', config('payments.khalti.public_key')),
             'gateway_khalti_sandbox' => (int) GameSetting::getValue('gateway_khalti_sandbox', config('payments.khalti.sandbox')),
             'safety_warn_at_strikes' => GameSetting::getValue('safety_warn_at_strikes', 1),
@@ -1211,6 +1287,12 @@ class AdminController extends Controller
             'safety_suspend_hours' => GameSetting::getValue('safety_suspend_hours', 24),
             'safety_strike_window_days' => GameSetting::getValue('safety_strike_window_days', 30),
             'safety_ai_enabled' => (int) GameSetting::getValue('safety_ai_enabled', 1),
+            // SMS Settings
+            'sms_enabled' => (int) GameSetting::getValue('sms_enabled', 0),
+            'sms_provider' => GameSetting::getValue('sms_provider', 'http_api'),
+            'sms_api_url' => GameSetting::getValue('sms_api_url', ''),
+            'sms_api_key' => '********',
+            'sms_from' => GameSetting::getValue('sms_from', ''),
         ];
 
         return view('admin.settings', compact('settings'));
@@ -1224,6 +1306,7 @@ class AdminController extends Controller
         }
 
         $validated = $request->validate([
+            'admin_route_prefix' => 'required|string|min:3|max:50|regex:/^[a-z][a-z0-9\-]*$/',
             'report_approval_xp' => 'required|integer|min:0|max:1000',
             'alert_post_xp' => 'required|integer|min:0|max:1000',
             'review_xp' => 'required|integer|min:0|max:1000',
@@ -1248,7 +1331,21 @@ class AdminController extends Controller
             'safety_suspend_hours' => 'required|integer|min:1|max:720',
             'safety_strike_window_days' => 'required|integer|min:7|max:365',
             'safety_ai_enabled' => 'required|in:0,1',
+            // SMS Settings
+            'sms_enabled' => 'required|in:0,1',
+            'sms_provider' => 'required|string|in:twilio,http_api',
+            'sms_api_url' => 'nullable|string|max:500',
+            'sms_api_key' => 'nullable|string|max:255',
+            'sms_from' => 'nullable|string|max:20',
         ]);
+
+        // Admin Route Prefix
+        $oldPrefix = GameSetting::getValue('admin_route_prefix', 'admin');
+        $newPrefix = $validated['admin_route_prefix'];
+        GameSetting::setValue('admin_route_prefix', $newPrefix);
+        if ($oldPrefix !== $newPrefix) {
+            try { Artisan::call('route:clear'); } catch (\Throwable $e) { /* ignore */ }
+        }
 
         GameSetting::setValue('report_approval_xp', $validated['report_approval_xp']);
         GameSetting::setValue('alert_post_xp', $validated['alert_post_xp']);
@@ -1263,9 +1360,14 @@ class AdminController extends Controller
         GameSetting::setValue('payout_min_khalti', $validated['payout_min_khalti']);
         GameSetting::setValue('payout_min_bank', $validated['payout_min_bank']);
         GameSetting::setValue('gateway_esewa_merchant_code', $validated['gateway_esewa_merchant_code']);
-        GameSetting::setValue('gateway_esewa_secret_key', $validated['gateway_esewa_secret_key']);
+        // Only update secret keys if they're not masked
+        if (!empty($validated['gateway_esewa_secret_key']) && $validated['gateway_esewa_secret_key'] !== '********') {
+            GameSetting::setValue('gateway_esewa_secret_key', $validated['gateway_esewa_secret_key']);
+        }
         GameSetting::setValue('gateway_esewa_sandbox', $validated['gateway_esewa_sandbox']);
-        GameSetting::setValue('gateway_khalti_secret_key', $validated['gateway_khalti_secret_key']);
+        if (!empty($validated['gateway_khalti_secret_key']) && $validated['gateway_khalti_secret_key'] !== '********') {
+            GameSetting::setValue('gateway_khalti_secret_key', $validated['gateway_khalti_secret_key']);
+        }
         GameSetting::setValue('gateway_khalti_public_key', $validated['gateway_khalti_public_key']);
         GameSetting::setValue('gateway_khalti_sandbox', $validated['gateway_khalti_sandbox']);
         GameSetting::setValue('safety_warn_at_strikes', $validated['safety_warn_at_strikes']);
@@ -1275,7 +1377,16 @@ class AdminController extends Controller
         GameSetting::setValue('safety_strike_window_days', $validated['safety_strike_window_days']);
         GameSetting::setValue('safety_ai_enabled', $validated['safety_ai_enabled']);
 
-        $this->logAction('settings.updated', 'settings', null, 'Updated XP, payout, payment gateway & content safety settings');
+        // SMS Settings
+        GameSetting::setValue('sms_enabled', $validated['sms_enabled']);
+        GameSetting::setValue('sms_provider', $validated['sms_provider']);
+        GameSetting::setValue('sms_api_url', $validated['sms_api_url']);
+        if (!empty($validated['sms_api_key']) && $validated['sms_api_key'] !== '********') {
+            GameSetting::setValue('sms_api_key', $validated['sms_api_key']);
+        }
+        GameSetting::setValue('sms_from', $validated['sms_from']);
+
+        $this->logAction('settings.updated', 'settings', null, 'Updated XP, payout, payment gateway, content safety & SMS settings');
 
         return back()->with('success', 'Settings updated successfully');
     }

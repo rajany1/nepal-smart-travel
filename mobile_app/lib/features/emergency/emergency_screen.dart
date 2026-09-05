@@ -1,12 +1,34 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import "../../core/services/localization_service.dart";
+import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../config/constants/app_constants.dart';
 import '../../config/themes/app_theme.dart';
+import '../../providers/sos_provider.dart';
 import '../places/explore_search_screen.dart';
+import '../places/nearby_map_screen.dart';
+import 'sos_activation_screen.dart';
+import 'emergency_contacts_screen.dart';
 
-class EmergencyScreen extends StatelessWidget {
+class EmergencyScreen extends StatefulWidget {
   const EmergencyScreen({super.key});
+
+  @override
+  State<EmergencyScreen> createState() => _EmergencyScreenState();
+}
+
+class _EmergencyScreenState extends State<EmergencyScreen> {
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final provider = context.read<SosProvider>();
+      provider.checkActiveSos();
+      provider.fetchContacts();
+      provider.fetchSosForMe();
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -15,103 +37,153 @@ class EmergencyScreen extends StatelessWidget {
         title: Text(context.t('Emergency Support')),
         backgroundColor: AppTheme.errorColor,
         foregroundColor: Colors.white,
-      ),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // SOS Button (pulsing)
-            _SOSPulseButton(onTap: () => _showSOSDialog(context)),
-            const SizedBox(height: 8),
-            Center(
-              child: Text(
-                context.t('Tap SOS for immediate emergency assistance'),
-                style: const TextStyle(color: AppTheme.textSecondary, fontSize: AppTheme.textSm),
-              ),
+        systemOverlayStyle: const SystemUiOverlayStyle(
+          statusBarColor: AppTheme.errorColor,
+          statusBarIconBrightness: Brightness.light,
+          statusBarBrightness: Brightness.dark,
+        ),
+        actions: [
+          IconButton(
+            onPressed: () => Navigator.push(
+              context,
+              MaterialPageRoute(builder: (_) => const EmergencyContactsScreen()),
             ),
-            const SizedBox(height: 24),
-
-            // Quick Dial Grid
-            _SectionHeader(icon: Icons.phone_in_talk, title: context.t('Quick Emergency Contacts')),
-            const SizedBox(height: 12),
-            GridView.count(
-              crossAxisCount: 2,
-              shrinkWrap: true,
-              physics: const NeverScrollableScrollPhysics(),
-              mainAxisSpacing: 12,
-              crossAxisSpacing: 12,
-              childAspectRatio: 1.1,
+            icon: const Icon(Icons.contact_phone),
+            tooltip: context.t('Emergency Contacts'),
+          ),
+        ],
+      ),
+      body: Consumer<SosProvider>(
+        builder: (context, provider, _) {
+          return SingleChildScrollView(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                _EmergencyButton(
-                  icon: Icons.local_hospital,
-                  label: context.t('Ambulance'),
-                  number: AppConstants.ambulanceNumber,
-                  color: AppTheme.ambulanceColor,
-                  onTap: () => _makeCall(AppConstants.ambulanceNumber),
+                // Active SOS banner
+                if (provider.hasActiveSos) ...[
+                  _ActiveSosBanner(sos: provider.activeSos!),
+                  const SizedBox(height: 20),
+                ],
+
+                // SOS Button
+                if (!provider.hasActiveSos) ...[
+                  _SOSPulseButton(
+                    onTap: () => _showSOSCountdown(context),
+                  ),
+                  const SizedBox(height: 8),
+                  Center(
+                    child: Text(
+                      context.t('Tap SOS for immediate emergency assistance'),
+                      style: const TextStyle(color: AppTheme.textSecondary, fontSize: AppTheme.textSm),
+                    ),
+                  ),
+                  const SizedBox(height: 24),
+                ],
+
+                // SOS alerts sent by contacts listing you — so you see any you missed while offline
+                if (provider.inboxSos.isNotEmpty) ...[
+                  _SectionHeader(
+                    icon: Icons.notification_important,
+                    title: context.t('SOS Alerts from Contacts'),
+                  ),
+                  const SizedBox(height: 12),
+                  _InboxSosList(alerts: provider.inboxSos),
+                  const SizedBox(height: 24),
+                ],
+
+                // Emergency Contacts
+                _SectionHeader(icon: Icons.contact_phone, title: context.t('Emergency Contacts')),
+                const SizedBox(height: 12),
+                _EmergencyContactsPreview(
+                  onViewAll: () => Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (_) => const EmergencyContactsScreen()),
+                  ),
                 ),
-                _EmergencyButton(
-                  icon: Icons.local_police,
-                  label: context.t('Police'),
-                  number: AppConstants.policeNumber,
-                  color: AppTheme.policeColor,
-                  onTap: () => _makeCall(AppConstants.policeNumber),
+                const SizedBox(height: 24),
+
+                // Quick Dial Grid
+                _SectionHeader(icon: Icons.phone_in_talk, title: context.t('Quick Emergency Contacts')),
+                const SizedBox(height: 12),
+                GridView.count(
+                  crossAxisCount: 2,
+                  shrinkWrap: true,
+                  physics: const NeverScrollableScrollPhysics(),
+                  mainAxisSpacing: 12,
+                  crossAxisSpacing: 12,
+                  childAspectRatio: 1.1,
+                  children: [
+                    _EmergencyButton(
+                      icon: Icons.local_hospital,
+                      label: context.t('Ambulance'),
+                      number: AppConstants.ambulanceNumber,
+                      color: AppTheme.ambulanceColor,
+                      onTap: () => _makeCall(AppConstants.ambulanceNumber),
+                    ),
+                    _EmergencyButton(
+                      icon: Icons.local_police,
+                      label: context.t('Police'),
+                      number: AppConstants.policeNumber,
+                      color: AppTheme.policeColor,
+                      onTap: () => _makeCall(AppConstants.policeNumber),
+                    ),
+                    _EmergencyButton(
+                      icon: Icons.fire_extinguisher,
+                      label: context.t('Fire'),
+                      number: AppConstants.fireNumber,
+                      color: AppTheme.warningColor,
+                      onTap: () => _makeCall(AppConstants.fireNumber),
+                    ),
+                    _EmergencyButton(
+                      icon: Icons.local_hospital,
+                      label: context.t('Hospital'),
+                      number: context.t('Search'),
+                      color: AppTheme.hospitalColor,
+                      onTap: () => _openPlacesSearch(context),
+                    ),
+                  ],
                 ),
-                _EmergencyButton(
-                  icon: Icons.fire_extinguisher,
-                  label: context.t('Fire'),
-                  number: AppConstants.fireNumber,
-                  color: AppTheme.warningColor,
-                  onTap: () => _makeCall(AppConstants.fireNumber),
+                const SizedBox(height: 24),
+
+                // Medical & Rescue
+                _SectionHeader(icon: Icons.medical_services_outlined, title: context.t('Medical & Rescue Services')),
+                const SizedBox(height: 12),
+                _ServiceCard(
+                  icon: Icons.bloodtype,
+                  title: context.t('Blood Bank'),
+                  subtitle: context.t('Find nearest blood bank'),
+                  color: AppTheme.errorColor,
+                  onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const ExploreSearchScreen(category: 'Blood Bank'))),
                 ),
-                _EmergencyButton(
-                  icon: Icons.local_hospital,
-                  label: context.t('Hospital'),
-                  number: context.t('Search'),
-                  color: AppTheme.hospitalColor,
+                _ServiceCard(
+                  icon: Icons.medication,
+                  title: context.t('24/7 Pharmacy'),
+                  subtitle: context.t('Nearby pharmacies open now'),
+                  color: AppTheme.infoColor,
                   onTap: () => _openPlacesSearch(context),
                 ),
+                _ServiceCard(
+                  icon: Icons.airline_seat_individual_suite,
+                  title: context.t('Mountain Rescue'),
+                  subtitle: context.t('Emergency mountain rescue services'),
+                  color: AppTheme.severityCritical,
+                  onTap: () => _openPlacesSearch(context),
+                ),
+                _ServiceCard(
+                  icon: Icons.contact_phone,
+                  title: context.t('Tourist Police'),
+                  subtitle: context.t('Helpline for tourists: 1144'),
+                  color: AppTheme.policeColor,
+                  onTap: () => _makeCall('1144'),
+                ),
+
+                const SizedBox(height: 24),
+                const _TipsBox(),
               ],
             ),
-            const SizedBox(height: 24),
-
-            // Medical & Rescue
-            _SectionHeader(icon: Icons.medical_services_outlined, title: context.t('Medical & Rescue Services')),
-            const SizedBox(height: 12),
-            _ServiceCard(
-              icon: Icons.bloodtype,
-              title: context.t('Blood Bank'),
-              subtitle: context.t('Find nearest blood bank'),
-              color: AppTheme.errorColor,
-              onTap: () => _openPlacesSearch(context),
-            ),
-            _ServiceCard(
-              icon: Icons.medication,
-              title: context.t('24/7 Pharmacy'),
-              subtitle: context.t('Nearby pharmacies open now'),
-              color: AppTheme.infoColor,
-              onTap: () => _openPlacesSearch(context),
-            ),
-            _ServiceCard(
-              icon: Icons.airline_seat_individual_suite,
-              title: context.t('Mountain Rescue'),
-              subtitle: context.t('Emergency mountain rescue services'),
-              color: AppTheme.severityCritical,
-              onTap: () => _openPlacesSearch(context),
-            ),
-            _ServiceCard(
-              icon: Icons.contact_phone,
-              title: context.t('Tourist Police'),
-              subtitle: context.t('Helpline for tourists: 1144'),
-              color: AppTheme.policeColor,
-              onTap: () => _makeCall('1144'),
-            ),
-
-            const SizedBox(height: 24),
-            // Emergency Tips
-            const _TipsBox(),
-          ],
-        ),
+          );
+        },
       ),
     );
   }
@@ -130,60 +202,118 @@ class EmergencyScreen extends StatelessWidget {
     }
   }
 
-  void _showSOSDialog(BuildContext context) {
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: Row(
+  void _showSOSCountdown(BuildContext context) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => const SosActivationScreen()),
+    );
+  }
+}
+
+// ============ ACTIVE SOS BANNER ============
+class _ActiveSosBanner extends StatelessWidget {
+  final dynamic sos;
+  const _ActiveSosBanner({required this.sos});
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: () => Navigator.push(
+        context,
+        MaterialPageRoute(builder: (_) => const SosActiveScreen()),
+      ),
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: AppTheme.errorColor,
+          borderRadius: BorderRadius.circular(16),
+          boxShadow: [
+            BoxShadow(
+              color: AppTheme.errorColor.withOpacity(0.3),
+              blurRadius: 12,
+              offset: const Offset(0, 4),
+            ),
+          ],
+        ),
+        child: Row(
           children: [
             Container(
-              padding: const EdgeInsets.all(8),
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: Colors.white.withOpacity(0.2),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: const Icon(Icons.sos, color: Colors.white, size: 28),
+            ),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'SOS ACTIVE',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 18,
+                      fontWeight: FontWeight.w700,
+                      letterSpacing: 1,
+                    ),
+                  ),
+                  Text(
+                    'Your emergency alert is active',
+                    style: TextStyle(color: Colors.white70, fontSize: 13, fontWeight: FontWeight.normal),
+                  ),
+                ],
+              ),
+            ),
+            const Icon(Icons.chevron_right, color: Colors.white),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ============ EMERGENCY CONTACTS PREVIEW ============
+class _EmergencyContactsPreview extends StatelessWidget {
+  final VoidCallback onViewAll;
+  const _EmergencyContactsPreview({required this.onViewAll});
+
+  @override
+  Widget build(BuildContext context) {
+    return Consumer<SosProvider>(
+      builder: (context, provider, _) {
+        final contacts = provider.contacts;
+        return Card(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+          child: ListTile(
+            onTap: onViewAll,
+            leading: Container(
+              width: 44,
+              height: 44,
               decoration: BoxDecoration(
                 color: AppTheme.errorColor.withOpacity(0.1),
-                borderRadius: BorderRadius.circular(10),
+                borderRadius: BorderRadius.circular(12),
               ),
-              child: const Icon(Icons.sos, color: AppTheme.errorColor, size: 28),
+              child: const Icon(Icons.contact_phone, color: AppTheme.errorColor),
             ),
-            const SizedBox(width: 10),
-            Text(context.t('SOS Emergency')),
-          ],
-        ),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(
-              context.t('Your emergency alert will be sent to your emergency contacts with your current location.'),
-              style: const TextStyle(fontSize: AppTheme.textBase),
-            ),
-            const SizedBox(height: 16),
-            Text(
-              context.t('Emergency contacts will be notified immediately.'),
+            title: Text(
+              contacts.isEmpty
+                  ? context.t('No emergency contacts')
+                  : '${contacts.length} ${context.t('emergency contacts configured')}',
               style: const TextStyle(fontWeight: FontWeight.w600),
             ),
-          ],
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: Text(context.t('Cancel'))),
-          ElevatedButton.icon(
-            onPressed: () {
-              Navigator.pop(ctx);
-              ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(
-                  content: Text(context.t('SOS Alert Sent! Emergency contacts notified with your location.')),
-                ),
-              );
-              _makeCall(AppConstants.policeNumber);
-            },
-            icon: const Icon(Icons.sos, color: Colors.white),
-            label: Text(context.t('Send SOS')),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: AppTheme.errorColor,
-              foregroundColor: Colors.white,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            subtitle: Text(
+              contacts.isEmpty
+                  ? context.t('Add contacts to notify during SOS')
+                  : context.t('Tap to manage'),
+              style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
             ),
+            trailing: const Icon(Icons.chevron_right),
           ),
-        ],
-      ),
+        );
+      },
     );
   }
 }
@@ -260,7 +390,7 @@ class _SOSPulseButtonState extends State<_SOSPulseButton>
                             context.t('SOS EMERGENCY'),
                             style: const TextStyle(
                               fontSize: 22,
-                              fontWeight: FontWeight.w800,
+                              fontWeight: FontWeight.w700,
                               color: Colors.white,
                               letterSpacing: 0.5,
                             ),
@@ -381,7 +511,7 @@ class _EmergencyButton extends StatelessWidget {
                     const SizedBox(width: 3),
                     Text(
                       number,
-                      style: TextStyle(color: color, fontSize: AppTheme.textLg, fontWeight: FontWeight.w800),
+                      style: TextStyle(color: color, fontSize: AppTheme.textLg, fontWeight: FontWeight.w700),
                     ),
                   ],
                 ),
@@ -448,6 +578,158 @@ class _ServiceCard extends StatelessWidget {
           child: Icon(Icons.chevron_right, color: color, size: 18),
         ),
       ),
+    );
+  }
+}
+
+// ============ SOS INBOX (alerts from your contacts) ============
+class _InboxSosList extends StatelessWidget {
+  final List<SosAlert> alerts;
+
+  const _InboxSosList({required this.alerts});
+
+  static String _typeLabel(String type, BuildContext context) {
+    switch (type) {
+      case 'medical':
+        return context.t('Medical Emergency');
+      case 'accident':
+        return context.t('Accident');
+      case 'flood':
+        return context.t('Flood');
+      default:
+        return context.t('Emergency');
+    }
+  }
+
+  static String _relative(DateTime? time) {
+    if (time == null) return '';
+    final diff = DateTime.now().difference(time);
+    if (diff.inSeconds < 60) return 'just now';
+    if (diff.inMinutes < 60) return '${diff.inMinutes}m ago';
+    if (diff.inHours < 24) return '${diff.inHours}h ago';
+    return '${diff.inDays}d ago';
+  }
+
+  void _openLocation(SosAlert sos, BuildContext context) {
+    // Show the SOS location in the in-app Nearby Map screen (centered on the
+    // alert) instead of opening external Google Maps.
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => NearbyMapScreen(
+          focusLat: sos.latitude,
+          focusLng: sos.longitude,
+          focusLabel: sos.userName ?? context.t('SOS location'),
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final active = alerts.where((s) => s.status == 'active').toList();
+    return Column(
+      children: [
+        for (final sos in alerts)
+          Container(
+            margin: const EdgeInsets.only(bottom: 10),
+            padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 14),
+            decoration: BoxDecoration(
+              color: sos.isActive
+                  ? AppTheme.errorColor.withOpacity(0.12)
+                  : AppTheme.surfaceColor.withOpacity(0.6),
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(
+                color: sos.isActive
+                    ? AppTheme.errorColor.withOpacity(0.5)
+                    : AppTheme.textSecondary.withOpacity(0.25),
+              ),
+            ),
+            child: InkWell(
+              onTap: () => _openLocation(sos, context),
+              borderRadius: BorderRadius.circular(14),
+              child: Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(9),
+                    decoration: BoxDecoration(
+                      color: (sos.isActive ? AppTheme.errorColor : AppTheme.warningColor)
+                          .withOpacity(0.15),
+                      shape: BoxShape.circle,
+                    ),
+                    child: Icon(
+                      sos.isActive ? Icons.sos : Icons.sos_outlined,
+                      color: sos.isActive ? AppTheme.errorColor : AppTheme.warningColor,
+                      size: 20,
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          sos.userName ?? context.t('Emergency contact'),
+                          style: const TextStyle(fontWeight: FontWeight.w700, fontSize: AppTheme.textBase),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          '${_typeLabel(sos.emergencyType, context)} • ${_relative(sos.startedAt)}',
+                          style: const TextStyle(fontSize: AppTheme.textSm, color: AppTheme.textSecondary),
+                        ),
+                        if (sos.message != null && sos.message!.isNotEmpty)
+                          Padding(
+                            padding: const EdgeInsets.only(top: 4),
+                            child: Text(
+                              sos.message!,
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(fontSize: AppTheme.textSm, height: 1.3),
+                            ),
+                          ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: (sos.isActive ? AppTheme.errorColor : AppTheme.successColor)
+                          .withOpacity(0.15),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Text(
+                      sos.isActive
+                          ? context.t('ACTIVE')
+                          : (sos.status == 'cancelled' ? context.t('CANCELLED') : context.t('RESOLVED')),
+                      style: TextStyle(
+                        fontSize: 10,
+                        fontWeight: FontWeight.w800,
+                        color: sos.isActive ? AppTheme.errorColor : AppTheme.successColor,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        if (active.isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.only(top: 2),
+            child: Row(
+              children: [
+                const Icon(Icons.info_outline, size: 14, color: AppTheme.warningColor),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    context.t('Tap an alert to open its live location on the map.'),
+                    style: const TextStyle(fontSize: AppTheme.textSm, color: AppTheme.textSecondary),
+                  ),
+                ),
+              ],
+            ),
+          ),
+      ],
     );
   }
 }

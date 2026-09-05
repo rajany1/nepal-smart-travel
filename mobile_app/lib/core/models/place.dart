@@ -19,6 +19,9 @@ class Place {
   final bool isVerified;
   final bool isFeatured;
   final String source;
+  final bool? isOpen;
+  final String? todayOffer;
+  final String? liveEvent;
 
   Place({
     required this.id,
@@ -41,6 +44,9 @@ class Place {
     this.isVerified = false,
     this.isFeatured = false,
     this.source = 'admin',
+    this.isOpen,
+    this.todayOffer,
+    this.liveEvent,
   });
 
   factory Place.fromJson(Map<String, dynamic> json) {
@@ -66,6 +72,9 @@ class Place {
       isVerified: json['is_verified'] ?? false,
       isFeatured: json['is_featured'] ?? false,
       source: json['source'] ?? 'admin',
+      isOpen: json['is_open'],
+      todayOffer: json['today_offer'],
+      liveEvent: json['live_event'],
     );
   }
 
@@ -89,6 +98,9 @@ class Place {
     'is_verified': isVerified,
     'is_featured': isFeatured,
     'source': source,
+    'is_open': isOpen,
+    'today_offer': todayOffer,
+    'live_event': liveEvent,
   };
 }
 

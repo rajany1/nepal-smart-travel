@@ -52,7 +52,7 @@
 
 <div class="flex gap-2 flex-wrap mb-6">
     <a href="{{ route('partner.ads') }}" class="px-3 py-1.5 text-xs font-medium rounded-lg {{ !$status ? 'bg-primary-600 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200' }}">All</a>
-    @foreach(['pending', 'active', 'paused', 'rejected'] as $s)
+    @foreach(['pending', 'active', 'paused'] as $s)
         <a href="{{ route('partner.ads', ['status' => $s]) }}" class="px-3 py-1.5 text-xs font-medium rounded-lg {{ $status === $s ? 'bg-primary-600 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200' }}">{{ ucfirst($s) }}</a>
     @endforeach
 </div>
@@ -78,9 +78,6 @@
                 <tr class="hover:bg-slate-50/60">
                     <td class="px-6 py-4">
                         <div class="font-medium text-slate-800">{{ $ad->name }}</div>
-                        @if($ad->status === 'rejected' && $ad->rejection_reason)
-                            <div class="text-xs text-red-500 mt-0.5"><i class="fas fa-times-circle"></i> {{ $ad->rejection_reason }}</div>
-                        @endif
                         <div class="text-xs text-slate-400 mt-0.5">
                             @if($ad->contexts)
                                 <i class="fas fa-crosshairs"></i> {{ implode(', ', array_map('ucfirst', $ad->contexts)) }}
@@ -114,7 +111,7 @@
                             @if($ad->payment_status !== 'paid' && (float) $ad->budget > 0)
                                 <a href="{{ route('partner.ads.pay', $ad) }}" class="px-2.5 py-1.5 text-xs font-bold bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition" title="Pay now"><i class="fas fa-credit-card"></i> Pay</a>
                             @endif
-                            @if($ad->payment_status !== 'paid' && !in_array($ad->status, ['active', 'rejected']))
+                            @if($ad->payment_status !== 'paid' && $ad->status !== 'active')
                                 <a href="{{ route('partner.ads.edit', $ad) }}" class="px-2.5 py-1.5 text-xs font-medium bg-slate-50 text-slate-600 rounded-lg hover:bg-slate-100 transition" title="Edit"><i class="fas fa-edit"></i></a>
                             @endif
                             @if($ad->status === 'active')
