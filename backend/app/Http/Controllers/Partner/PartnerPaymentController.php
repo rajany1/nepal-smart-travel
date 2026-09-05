@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Partner;
 
 use App\Http\Controllers\Controller;
+use App\Models\OfferRedemption;
 use App\Models\PartnerPayment;
 use App\Models\PartnerWallet;
 use App\Models\PartnerWithdrawal;
@@ -19,6 +20,9 @@ class PartnerPaymentController extends Controller
         if (!$partner) abort(403);
 
         $wallet = PartnerWallet::getForPartner($partner->id);
+
+        $this->backfillOfferEarnings($partner, $wallet);
+
         $payments = PartnerPayment::where('partner_id', $partner->id)
             ->where('status', 'completed')
             ->with('user')
@@ -32,6 +36,27 @@ class PartnerPaymentController extends Controller
         $totalPending = PartnerWithdrawal::where('partner_id', $partner->id)->pending()->sum('amount');
 
         return view('partner.wallet', compact('wallet', 'payments', 'withdrawals', 'totalPending'));
+    }
+
+    private function backfillOfferEarnings($partner, $wallet): void
+    {
+        $totalUsedEarnings = (float) OfferRedemption::whereIn('offer_id', $partner->offers()->pluck('id'))
+            ->where('status', 'used')
+            ->sum('partner_earnings');
+
+        $totalFromQrPayments = (float) PartnerPayment::where('partner_id', $partner->id)
+            ->where('status', 'completed')
+            ->sum('partner_amount');
+
+        $expectedBalance = $totalUsedEarnings + $totalFromQrPayments;
+        $currentBalance = (float) $wallet->balance;
+
+        if (abs($expectedBalance - $currentBalance) > 0.01) {
+            $wallet->update([
+                'balance' => round($expectedBalance, 2),
+                'total_earned' => round($expectedBalance, 2),
+            ]);
+        }
     }
 
     public function scanPage()

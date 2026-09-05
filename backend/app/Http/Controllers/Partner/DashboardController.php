@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Partner;
 
 use App\Http\Controllers\Controller;
 use App\Models\OfferRedemption;
+use App\Models\PartnerWallet;
 
 class DashboardController extends Controller
 {
@@ -11,13 +12,14 @@ class DashboardController extends Controller
     {
         $user = auth()->user();
 
-        // Enforce email + phone verification
         if (!$user->email_verified_at) {
             return redirect()->route('partner.wizard');
         }
 
         $partner = $user->business;
         $offers = $partner->offers()->orderBy('created_at', 'desc')->limit(5)->get();
+
+        $wallet = PartnerWallet::getForPartner($partner->id);
 
         $stats = [
             'total_offers' => $partner->offers()->count(),
@@ -33,6 +35,7 @@ class DashboardController extends Controller
             'offer_used' => OfferRedemption::whereIn('offer_id', $partner->offers()->pluck('id'))->where('status', 'used')->count(),
             'offer_earned' => (float) OfferRedemption::whereIn('offer_id', $partner->offers()->pluck('id'))->where('status', 'used')->sum('partner_earnings'),
             'offer_commission' => (float) OfferRedemption::whereIn('offer_id', $partner->offers()->pluck('id'))->where('status', 'used')->sum('admin_commission'),
+            'wallet_balance' => (float) $wallet->balance,
             'payout_balance' => $partner->payoutBalance(),
             'payout_paid' => (float) $partner->payouts()->where('status', 'paid')->sum('amount'),
             'payout_pending' => (float) $partner->payouts()->where('status', 'pending')->sum('amount'),
@@ -41,6 +44,7 @@ class DashboardController extends Controller
         $stats['ads_paid'] = round($stats['ads_paid'], 2);
         $stats['offer_earned'] = round($stats['offer_earned'], 2);
         $stats['offer_commission'] = round($stats['offer_commission'], 2);
+        $stats['wallet_balance'] = round($stats['wallet_balance'], 2);
         $stats['payout_balance'] = round($stats['payout_balance'], 2);
         $stats['payout_paid'] = round($stats['payout_paid'], 2);
         $stats['payout_pending'] = round($stats['payout_pending'], 2);
