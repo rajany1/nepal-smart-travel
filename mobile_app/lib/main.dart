@@ -26,6 +26,7 @@ import 'providers/wallet_provider.dart';
 import 'providers/partner_payment_provider.dart';
 import 'providers/around_me_provider.dart';
 import 'providers/sos_provider.dart';
+import 'providers/support_provider.dart';
 import 'core/services/app_settings_service.dart';
 
 import 'features/auth/login_screen.dart';
@@ -33,6 +34,7 @@ import 'features/auth/register_screen.dart';
 import 'features/auth/email_verification_screen.dart';
 import 'features/auth/forgot_password_screen.dart';
 import 'features/auth/reset_password_screen.dart';
+import 'features/auth/legal_re_acceptance_screen.dart';
 
 import 'features/profile/profile_edit_screen.dart';
 import 'features/profile/profile_completion_screen.dart';
@@ -41,6 +43,7 @@ import 'features/profile/policies_screen.dart';
 import 'features/profile/legal_document_screen.dart';
 
 import 'features/auth/splash_screen.dart';
+import 'core/api/api_client.dart';
 
 import 'features/map/home_screen.dart';
 import 'features/places/nearby_map_screen.dart';
@@ -107,6 +110,9 @@ void main() async {
   final navigatorKey = GlobalKey<NavigatorState>();
   pushService.setNavigatorKey(navigatorKey);
 
+  // Give the API interceptor access to the navigator for legal re-acceptance.
+  ApiClient.navigatorKey = navigatorKey;
+
   // FL-32: give push taps a navigator so FCM deep links can open screens.
   // Render the very first frame immediately — see the comment below.
   runApp(NepalSmartTravelApp(
@@ -126,10 +132,16 @@ void main() async {
   // heavy bootstrapping runs in the background. Auth routing is driven by the
   // splash screen itself (AuthInitializationWrapper), so these do not delay the
   // first frame:
-  //   * pushService.initialize() — FCM permission dialog + token network call
   //   * localizationService.init() — fetches the translation dictionary
-  unawaited(pushService.initialize());
+  //
+  // pushService.initialize() is delayed by 5s so the native permission dialog
+  // does NOT pop up during the splash GIF animation (it blocks the UI thread
+  // and freezes the GIF). By the time the dialog appears the user is already
+  // on the home screen.
   unawaited(localizationService.init());
+  unawaited(Future.delayed(const Duration(seconds: 5), () {
+    pushService.initialize();
+  }));
   DeepLinkService().init(navigatorKey);
 }
 
@@ -166,6 +178,7 @@ class NepalSmartTravelApp extends StatelessWidget {
         ChangeNotifierProvider(create: (_) => PartnerPaymentProvider()),
         ChangeNotifierProvider(create: (_) => AroundMeProvider()),
         ChangeNotifierProvider(create: (_) => SosProvider()),
+        ChangeNotifierProvider(create: (_) => SupportProvider()),
         ChangeNotifierProvider<LocalizationService>.value(value: localizationService),
       ],
       child: Consumer<ThemeProvider>(
@@ -245,6 +258,8 @@ class NepalSmartTravelApp extends StatelessWidget {
                   case '/legal':
                     final type = settings.arguments as String? ?? 'privacy_policy';
                     return MaterialPageRoute(builder: (_) => LegalDocumentScreen(type: type), settings: settings);
+                  case '/legal-re-acceptance':
+                    return MaterialPageRoute(builder: (_) => const LegalReAcceptanceScreen(), settings: settings);
                   default:
                     return null;
                 }

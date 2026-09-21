@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import "../../core/services/localization_service.dart";
 import 'package:provider/provider.dart';
 import '../../config/themes/app_theme.dart';
@@ -15,6 +16,7 @@ import '../../widgets/report_card.dart';
 import '../store/store_screen.dart';
 import '../wallet/wallet_screen.dart';
 import '../reporting/reports_list_screen.dart';
+import '../support/support_list_screen.dart';
 
 class ProfileScreen extends StatefulWidget {
   const ProfileScreen({super.key});
@@ -200,6 +202,21 @@ class _ProfileScreenState extends State<ProfileScreen> {
                         },
                       ),
 
+                      // Support
+                      _buildMenuTile(
+                        icon: Icons.support_agent_rounded,
+                        iconColor: const Color(0xFF009688),
+                        title: context.t('Support'),
+                        subtitle: 'Chat with our team',
+                        onTap: () {
+                          Navigator.pop(ctx);
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(builder: (_) => const SupportListScreen()),
+                          );
+                        },
+                      ),
+
                       // Divider
                       Padding(
                         padding: const EdgeInsets.symmetric(vertical: 8),
@@ -369,6 +386,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
       appBar: AppBar(
         backgroundColor: Colors.white,
         elevation: 0,
+        systemOverlayStyle: const SystemUiOverlayStyle(
+          statusBarColor: Colors.transparent,
+          statusBarIconBrightness: Brightness.dark,
+          statusBarBrightness: Brightness.light,
+        ),
         title: Row(
           children: [
             Container(

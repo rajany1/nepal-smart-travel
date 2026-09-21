@@ -7,6 +7,9 @@ use App\Models\Place;
 use App\Models\Alert;
 use App\Models\PlaceCategories;
 use App\Models\AssistantChat;
+use App\Models\SupportConversation;
+use App\Models\SupportMessage;
+use App\Services\SupportService;
 use Illuminate\Support\Facades\Log;
 
 class CustomerSupportHandler extends BaseHandler
@@ -37,6 +40,7 @@ class CustomerSupportHandler extends BaseHandler
         $lat = $input['lat'] ?? null;
         $lng = $input['lng'] ?? null;
         $userId = $input['user_id'] ?? null;
+        $supportConversationId = $input['support_conversation_id'] ?? null;
 
         if (empty($message)) {
             return $this->markFailed($task, 'No message provided');
@@ -46,8 +50,6 @@ class CustomerSupportHandler extends BaseHandler
 
         $nearby = $this->getNearbyPlaces($lat, $lng);
         $alerts = $this->getLiveAlerts();
-        // 100+ categories as full JSON is ~6KB and blows Groq free-tier TPM;
-        // a compact id/name slice keeps the model oriented without the bloat.
         $categories = PlaceCategories::select('id', 'name')->take(25)->get()->toArray();
 
         $nearbyJson = json_encode($nearby, JSON_UNESCAPED_UNICODE);
@@ -113,6 +115,7 @@ PROMPT;
             $screen = $result['screen'] ?? null;
             $deepLink = $result['deep_link'] ?? null;
 
+            // Log to legacy assistant_chats table (backward compatibility)
             if ($userId) {
                 try {
                     AssistantChat::create([
@@ -122,6 +125,57 @@ PROMPT;
                     ]);
                 } catch (\Throwable $e) {
                     Log::warning('Failed to log assistant chat: ' . $e->getMessage());
+                }
+            }
+
+            // Store AI response in a support conversation
+            if ($userId) {
+                try {
+                    $supportService = app(SupportService::class);
+
+                    if ($supportConversationId) {
+                        // UNIFIED PATH: Use the explicitly provided support conversation
+                        $conversation = SupportConversation::find($supportConversationId);
+
+                        if ($conversation
+                            && $conversation->user_id === $userId
+                            && $supportService->isAiEligible($conversation)
+                        ) {
+                            // Store the AI response in the existing conversation
+                            // (user message was already stored by SupportController before dispatching AI)
+                            $supportService->aiReply(
+                                $conversation,
+                                $reply,
+                                $task->aiAgent->model ?? null,
+                                null,
+                                count($actions) > 0 ? $actions : null,
+                                $userId
+                            );
+                        }
+                        // If conversation not found, not owned, or not AI-eligible, silently skip
+                    } else {
+                        // BACKWARD COMPAT PATH: ReportController::assistantChat flow
+                        // User message is stored here because the old flow doesn't go through SupportController
+                        $conversation = $this->findOrCreateSupportConversation($userId, $supportService);
+
+                        $supportService->addMessage(
+                            $conversation,
+                            $userId,
+                            SupportMessage::SENDER_USER,
+                            $message
+                        );
+
+                        $supportService->aiReply(
+                            $conversation,
+                            $reply,
+                            $task->aiAgent->model ?? null,
+                            null,
+                            count($actions) > 0 ? $actions : null,
+                            $userId
+                        );
+                    }
+                } catch (\Throwable $e) {
+                    Log::warning('Failed to log support conversation: ' . $e->getMessage());
                 }
             }
 
@@ -164,5 +218,40 @@ PROMPT;
                 $q->whereNull('expires_at')->orWhere('expires_at', '>', now());
             })
             ->latest()->take(3)->get()->toArray();
+    }
+
+    /**
+     * Find or create a support conversation for the AI chat session.
+     * Uses a "AI Travel Assistant" subject per user to group all AI chat messages.
+     */
+    protected function findOrCreateSupportConversation(int $userId, SupportService $supportService): SupportConversation
+    {
+        // Find existing AI assistant conversation for this user
+        $conversation = SupportConversation::where('user_id', $userId)
+            ->where('category', SupportConversation::CATEGORY_GENERAL)
+            ->where('subject', 'AI Travel Assistant')
+            ->whereIn('status', [
+                SupportConversation::STATUS_OPEN,
+                SupportConversation::STATUS_AI_HANDLING,
+            ])
+            ->latest()
+            ->first();
+
+        if ($conversation) {
+            return $conversation;
+        }
+
+        // Create new conversation
+        return SupportConversation::create([
+            'user_id' => $userId,
+            'subject' => 'AI Travel Assistant',
+            'category' => SupportConversation::CATEGORY_GENERAL,
+            'priority' => SupportConversation::PRIORITY_LOW,
+            'status' => SupportConversation::STATUS_AI_HANDLING,
+            'ai_handled' => true,
+            'message_count' => 0,
+            'last_reply_at' => now(),
+            'last_reply_by' => $userId,
+        ]);
     }
 }

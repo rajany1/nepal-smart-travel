@@ -9,6 +9,8 @@ use App\Http\Controllers\AlertController;
 use App\Http\Controllers\PlaceController;
 use App\Http\Controllers\ReportController;
 use App\Http\Controllers\Api\BookingPaymentController;
+use App\Http\Controllers\Api\SubscriptionPaymentController;
+use App\Http\Controllers\Api\PaymentWebhookController;
 use App\Http\Controllers\UserProfileController;
 use App\Http\Controllers\LeaderboardController;
 use App\Http\Controllers\PushTokenController;
@@ -22,6 +24,7 @@ use App\Http\Controllers\AroundMeController;
 use App\Http\Controllers\MapLayersController;
 use App\Http\Controllers\SosController;
 use App\Http\Controllers\EmergencyContactController;
+use App\Http\Controllers\SupportController;
 
 Route::prefix('v1')->group(function () {
 
@@ -30,6 +33,7 @@ Route::prefix('v1')->group(function () {
     Route::post('/auth/forgot-password', [AuthController::class, 'forgotPassword'])->middleware('throttle:3,60');
     Route::post('/auth/reset-password', [AuthController::class, 'resetPassword'])->middleware('throttle:3,60');
     Route::post('/auth/social-login', [AuthController::class, 'socialLogin'])->middleware('throttle:social-login');
+    Route::post('/auth/google-pre-check', [AuthController::class, 'googlePreCheck'])->middleware('throttle:10,1');
     // Token rotation - public: validates the refresh token itself (not the access token)
     Route::post('/auth/refresh', [AuthController::class, 'refreshToken'])->middleware('throttle:10,1');
 
@@ -78,9 +82,9 @@ Route::prefix('v1')->group(function () {
     Route::get('/ads/active', [AdController::class, 'active']);
     Route::get('/ads/report/{reportId}', [AdController::class, 'forReport'])->whereNumber('reportId');
 
-    // Ad tracking - public (guest impressions/clicks counted, deduped by IP)
-    Route::post('/ads/track-impression', [AdController::class, 'trackImpression'])->middleware('throttle:60,1');
-    Route::post('/ads/track-click', [AdController::class, 'trackClick'])->middleware('throttle:60,1');
+    // Ad tracking - requires authentication (coins awarded to report owner)
+    Route::post('/ads/track-impression', [AdController::class, 'trackImpression'])->middleware(['throttle:60,1', 'auth:sanctum']);
+    Route::post('/ads/track-click', [AdController::class, 'trackClick'])->middleware(['throttle:60,1', 'auth:sanctum']);
 
     // âœ… Partners - public read
     Route::get('/partners', [ConsumerController::class, 'partners']);
@@ -95,6 +99,7 @@ Route::prefix('v1')->group(function () {
     // Curated routes (trekking + itineraries) - public read
     Route::get('/routes', [\App\Http\Controllers\Api\RouteController::class, 'index']);
     Route::get('/routes/{id}', [\App\Http\Controllers\Api\RouteController::class, 'show'])->whereNumber('id');
+    Route::get('/routes/{id}/geometry', [\App\Http\Controllers\Api\RouteGeometryController::class, 'show'])->whereNumber('id');
 
     // Legal documents - public read
     Route::get('/legal', [\App\Http\Controllers\Api\LegalDocumentController::class, 'index']);
@@ -108,6 +113,12 @@ Route::prefix('v1')->group(function () {
 
     // Map layers - category-filtered map data (public)
     Route::get('/map/layers', [MapLayersController::class, 'index']);
+
+    // Map boundary data (Redis cached, public read)
+    Route::get('/map/boundary', [\App\Http\Controllers\MapDataController::class, 'boundary']);
+    Route::get('/map/provinces', [\App\Http\Controllers\MapDataController::class, 'provinces']);
+    Route::get('/map/districts', [\App\Http\Controllers\MapDataController::class, 'districts']);
+    Route::get('/map/all', [\App\Http\Controllers\MapDataController::class, 'all']);
 
     // SOS Emergency - nearby is public (no login required)
     Route::get('/sos/nearby', [SosController::class, 'nearby']);
@@ -123,7 +134,7 @@ Route::prefix('v1')->group(function () {
 
         Route::get('/users/me', [AuthController::class, 'me']);
         Route::put('/users/me', [AuthController::class, 'update']);
-        Route::delete('/users/me', [AuthController::class, 'destroy']);
+        Route::delete('/users/me', [AuthController::class, 'destroy'])->middleware('throttle:account-delete');
         Route::post('/auth/logout', [AuthController::class, 'logout']);
 
         // Phone/Email change with OTP
@@ -137,6 +148,10 @@ Route::prefix('v1')->group(function () {
         Route::post('/auth/resend-verification', [AuthController::class, 'resendVerification'])->middleware('throttle:resend-verification');
         Route::post('/auth/complete-profile', [AuthController::class, 'completeProfile']);
         Route::get('/auth/check-profile-status', [AuthController::class, 'checkProfileStatus']);
+
+        // Legal acceptance status + submission (must be accessible even when blocked by legal.acceptance)
+        Route::get('/auth/legal-acceptance-status', [AuthController::class, 'legalAcceptanceStatus']);
+        Route::post('/auth/legal-acceptance', [AuthController::class, 'acceptLegal']);
 
         // Phone verification
         Route::post('/auth/send-phone-otp', [AuthController::class, 'sendPhoneOtp'])->middleware('throttle:phone-otp');
@@ -156,6 +171,9 @@ Route::prefix('v1')->group(function () {
 
         Route::get('/achievements', [ApiAchievementController::class, 'index']);
         Route::get('/xp-history', [ApiAchievementController::class, 'xpHistory']);
+
+        // Routes that require current legal acceptance
+        Route::middleware('legal.acceptance')->group(function () {
 
         // âœ… Places - auth required for write operations
         Route::post('/places', [PlaceController::class, 'store'])->middleware('throttle:places-store');
@@ -204,11 +222,16 @@ Route::prefix('v1')->group(function () {
         Route::post('/bookings/{booking}/payment/initiate', [BookingPaymentController::class, 'initiate'])->middleware('throttle:bookings');
         Route::post('/bookings/{booking}/payment/verify', [BookingPaymentController::class, 'verify'])->middleware('throttle:bookings');
 
+        // Subscription payments
+        Route::post('/subscriptions/{plan}/purchase', [SubscriptionPaymentController::class, 'purchase'])->middleware('throttle:bookings');
+        Route::post('/subscriptions/{plan}/verify', [SubscriptionPaymentController::class, 'verify'])->middleware('throttle:bookings');
+
         // Oripori Coins - User wallet & withdrawal
         Route::get('/wallet', [WithdrawalController::class, 'wallet']);
         Route::get('/wallet/transactions', [WithdrawalController::class, 'transactions']);
         Route::post('/wallet/withdraw', [WithdrawalController::class, 'requestWithdrawal'])->middleware('throttle:withdrawal');
         Route::post('/wallet/withdraw/{id}/cancel', [WithdrawalController::class, 'cancel']);
+        Route::get('/wallet/withdraw/{id}', [WithdrawalController::class, 'show']);
 
         // Partner Payments - User pays partner via QR
         Route::get('/partner-payments/partners', [\App\Http\Controllers\Api\PartnerPaymentApiController::class, 'partners']);
@@ -233,10 +256,32 @@ Route::prefix('v1')->group(function () {
         Route::patch('/emergency-contacts/{id}', [EmergencyContactController::class, 'update'])->whereNumber('id');
         Route::delete('/emergency-contacts/{id}', [EmergencyContactController::class, 'destroy'])->whereNumber('id');
 
+        // Support Conversations
+        Route::get('/support/options', [SupportController::class, 'options']);
+        Route::get('/support', [SupportController::class, 'index']);
+        Route::post('/support', [SupportController::class, 'store'])->middleware('throttle:10,1');
+        Route::get('/support/{id}', [SupportController::class, 'show'])->whereNumber('id');
+        Route::post('/support/{id}/reply', [SupportController::class, 'reply'])->whereNumber('id')->middleware('throttle:30,1');
+        Route::get('/support/{id}/satisfaction', [SupportController::class, 'satisfaction'])->whereNumber('id');
+        Route::post('/support/{id}/satisfaction', [SupportController::class, 'submitSatisfaction'])->whereNumber('id')->middleware('throttle:5,1');
+
+        // Admin: force map boundary cache refresh (admin role required)
+        Route::post('/map/refresh', [\App\Http\Controllers\MapDataController::class, 'refresh']);
+
+        }); // end legal.acceptance group
+
     });
 
     // Gateway callbacks (hit by eSewa / Khalti redirects — no auth)
     Route::get('/payments/esewa/callback', [BookingPaymentController::class, 'esewaCallback'])->name('api.payments.esewa.callback');
     Route::get('/payments/khalti/callback', [BookingPaymentController::class, 'khaltiCallback'])->name('api.payments.khalti.callback');
+    Route::get('/payments/subscription/esewa/callback', [SubscriptionPaymentController::class, 'esewaCallback'])->name('api.payments.subscription.esewa.callback');
+    Route::get('/payments/subscription/khalti/callback', [SubscriptionPaymentController::class, 'khaltiCallback'])->name('api.payments.subscription.khalti.callback');
+
+    // Payment webhooks (for server-to-server notifications)
+    Route::post('/payments/webhook/esewa', [PaymentWebhookController::class, 'esewa']);
+    Route::post('/payments/webhook/khalti', [PaymentWebhookController::class, 'khalti']);
+    Route::post('/payments/webhook/bank', [PaymentWebhookController::class, 'bank']);
+    Route::post('/payments/webhook/{gateway}', [PaymentWebhookController::class, 'handle'])->where('gateway', 'esewa|khalti|bank');
 
 });

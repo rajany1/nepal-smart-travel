@@ -14,6 +14,7 @@ use App\Http\Controllers\Admin\AiAgentController;
 use App\Http\Controllers\Admin\AiAgentTaskController;
 use App\Http\Controllers\Admin\TranslatorController;
 use App\Http\Controllers\Admin\WithdrawalController;
+use App\Http\Controllers\Admin\AdminSupportController;
 
 $adminPrefix = \App\Models\GameSetting::getValue('admin_route_prefix', 'admin') ?? 'admin';
 
@@ -27,6 +28,31 @@ Route::prefix('/')->name('web.')->group(function () {
     Route::get('/offers', [\App\Http\Controllers\Web\PublicController::class, 'offers'])->name('offers');
     Route::get('/{type}', [\App\Http\Controllers\Web\PublicController::class, 'categoryPage'])->whereIn('type', ['hotels', 'restaurants', 'attractions', 'cafes', 'activities'])->name('category');
 });
+
+// ============ PUBLIC LEGAL / ACCOUNT DELETION ============
+Route::get('/delete-account', function () {
+    return view('web.delete-account');
+})->name('web.delete-account');
+
+Route::get('/privacy-policy', function () {
+    $doc = \App\Models\LegalDocument::where('type', 'privacy_policy')->where('is_published', true)->orderByDesc('published_at')->first();
+    return view('web.legal-page', ['document' => $doc, 'title' => 'Privacy Policy']);
+})->name('web.privacy-policy');
+
+Route::get('/terms', function () {
+    $doc = \App\Models\LegalDocument::where('type', 'terms_conditions')->where('is_published', true)->orderByDesc('published_at')->first();
+    return view('web.legal-page', ['document' => $doc, 'title' => 'Terms of Use']);
+})->name('web.terms');
+
+Route::get('/legal/{type}', function (string $type) {
+    $validTypes = array_keys(\App\Models\LegalDocument::types());
+    if (!in_array($type, $validTypes)) {
+        abort(404);
+    }
+    $doc = \App\Models\LegalDocument::where('type', $type)->where('is_published', true)->orderByDesc('published_at')->first();
+    $label = \App\Models\LegalDocument::types()[$type] ?? $type;
+    return view('web.legal-page', ['document' => $doc, 'title' => $label]);
+})->name('web.legal');
 
 // ============ ADMIN LOGIN (no auth) ============
 Route::get('/login', function () use ($adminPrefix) {
@@ -166,6 +192,7 @@ Route::prefix($adminPrefix)->name('admin.')->middleware(['auth', 'status', 'role
     // Live Map
     Route::get('/live-map', [AdminController::class, 'liveMap'])->name('live-map');
     Route::get('/live-map/places', [AdminController::class, 'liveMapPlaces'])->name('live-map.places');
+    Route::get('/live-map/landmarks', [AdminController::class, 'liveMapLandmarks'])->name('live-map.landmarks');
 
     // Realtime feed
     Route::get('/live-feed/changes', [LiveFeedController::class, 'changes'])->name('live-feed.changes');
@@ -215,6 +242,14 @@ Route::prefix($adminPrefix)->name('admin.')->middleware(['auth', 'status', 'role
     Route::post('/legal-documents/{id}/unpublish', [\App\Http\Controllers\LegalDocumentController::class, 'unpublish'])->name('legal-documents.unpublish');
     Route::post('/legal-documents/{id}/delete', [\App\Http\Controllers\LegalDocumentController::class, 'destroy'])->name('legal-documents.delete');
 
+    // Legal Document Types
+    Route::get('/legal-document-types', [\App\Http\Controllers\LegalDocumentTypeController::class, 'index'])->name('legal-document-types.index');
+    Route::get('/legal-document-types/create', [\App\Http\Controllers\LegalDocumentTypeController::class, 'create'])->name('legal-document-types.create');
+    Route::post('/legal-document-types', [\App\Http\Controllers\LegalDocumentTypeController::class, 'store'])->name('legal-document-types.store');
+    Route::get('/legal-document-types/{id}/edit', [\App\Http\Controllers\LegalDocumentTypeController::class, 'edit'])->name('legal-document-types.edit');
+    Route::put('/legal-document-types/{id}', [\App\Http\Controllers\LegalDocumentTypeController::class, 'update'])->name('legal-document-types.update');
+    Route::post('/legal-document-types/{id}/delete', [\App\Http\Controllers\LegalDocumentTypeController::class, 'destroy'])->name('legal-document-types.delete');
+
     // Travel Partners & Bookings
     Route::get('/travel-partners', [TravelPartnerController::class, 'partners'])->name('travel-partners');
     Route::post('/travel-partners', [TravelPartnerController::class, 'partnerStore'])->name('travel-partners.store');
@@ -260,6 +295,10 @@ Route::prefix($adminPrefix)->name('admin.')->middleware(['auth', 'status', 'role
 
     // Payouts
     Route::get('/payouts', [\App\Http\Controllers\Admin\PayoutController::class, 'index'])->name('payouts');
+    Route::get('/payouts/{payout}', [\App\Http\Controllers\Admin\PayoutController::class, 'show'])->name('payouts.show');
+    Route::post('/payouts/{payout}/approve', [\App\Http\Controllers\Admin\PayoutController::class, 'approve'])->name('payouts.approve');
+    Route::post('/payouts/{payout}/process', [\App\Http\Controllers\Admin\PayoutController::class, 'processPayment'])->name('payouts.process');
+    Route::post('/payouts/{payout}/retry', [\App\Http\Controllers\Admin\PayoutController::class, 'retryPayment'])->name('payouts.retry');
     Route::post('/payouts/{payout}/paid', [\App\Http\Controllers\Admin\PayoutController::class, 'markPaid'])->name('payouts.paid');
     Route::post('/payouts/{payout}/reject', [\App\Http\Controllers\Admin\PayoutController::class, 'reject'])->name('payouts.reject');
 
@@ -296,11 +335,15 @@ Route::prefix($adminPrefix)->name('admin.')->middleware(['auth', 'status', 'role
     Route::get('/withdrawals', [WithdrawalController::class, 'index'])->name('withdrawals');
     Route::get('/withdrawals/{id}', [WithdrawalController::class, 'show'])->name('withdrawals.show');
     Route::post('/withdrawals/{id}/approve', [WithdrawalController::class, 'approve'])->name('withdrawals.approve');
+    Route::post('/withdrawals/{id}/process', [WithdrawalController::class, 'processPayment'])->name('withdrawals.process');
+    Route::post('/withdrawals/{id}/retry', [WithdrawalController::class, 'retryPayment'])->name('withdrawals.retry');
     Route::post('/withdrawals/{id}/complete', [WithdrawalController::class, 'complete'])->name('withdrawals.complete');
     Route::post('/withdrawals/{id}/reject', [WithdrawalController::class, 'reject'])->name('withdrawals.reject');
     Route::get('/coin-settings', [WithdrawalController::class, 'coinSettings'])->name('coin-settings');
     Route::post('/coin-settings', [WithdrawalController::class, 'updateCoinSettings'])->name('coin-settings.update');
     Route::get('/earnings-report', [WithdrawalController::class, 'earningsReport'])->name('earnings-report');
+    Route::get('/financial-audit', [WithdrawalController::class, 'financialAuditStatement'])->name('financial-audit');
+    Route::get('/money-flow', [WithdrawalController::class, 'moneyFlowAudit'])->name('money-flow');
 
     // Platform Expenses
     Route::get('/expenses', [\App\Http\Controllers\Admin\PlatformExpenseController::class, 'index'])->name('expenses');
@@ -319,6 +362,41 @@ Route::prefix($adminPrefix)->name('admin.')->middleware(['auth', 'status', 'role
 
     // Financial Overview
     Route::get('/financial-overview', [\App\Http\Controllers\Admin\PlatformExpenseController::class, 'financialOverview'])->name('financial-overview');
+
+    // Support Inbox
+    Route::get('/support', [AdminSupportController::class, 'index'])->name('support');
+    Route::get('/support/{id}', [AdminSupportController::class, 'show'])->name('support.show')->whereNumber('id');
+    Route::post('/support/{id}/reply', [AdminSupportController::class, 'reply'])->name('support.reply')->whereNumber('id');
+    Route::post('/support/{id}/assign', [AdminSupportController::class, 'assign'])->name('support.assign')->whereNumber('id');
+    Route::post('/support/{id}/takeover', [AdminSupportController::class, 'takeOver'])->name('support.takeover')->whereNumber('id');
+    Route::post('/support/{id}/category', [AdminSupportController::class, 'changeCategory'])->name('support.category')->whereNumber('id');
+    Route::post('/support/{id}/priority', [AdminSupportController::class, 'changePriority'])->name('support.priority')->whereNumber('id');
+    Route::post('/support/{id}/resolve', [AdminSupportController::class, 'resolve'])->name('support.resolve')->whereNumber('id');
+    Route::post('/support/{id}/close', [AdminSupportController::class, 'close'])->name('support.close')->whereNumber('id');
+    Route::post('/support/{id}/reopen', [AdminSupportController::class, 'reopen'])->name('support.reopen')->whereNumber('id');
+    Route::post('/support/{id}/escalate', [AdminSupportController::class, 'escalate'])->name('support.escalate')->whereNumber('id');
+    Route::post('/support/{id}/stop-ai', [AdminSupportController::class, 'stopAi'])->name('support.stop-ai')->whereNumber('id');
+    Route::get('/support/poll/inbox', [AdminSupportController::class, 'pollInbox'])->name('support.poll-inbox');
+    Route::get('/support/{id}/poll', [AdminSupportController::class, 'pollMessages'])->name('support.poll-messages')->whereNumber('id');
+});
+
+// ============ ADMIN GEOJSON (auth only, Redis cached) ============
+Route::prefix($adminPrefix)->name('admin.')->middleware(['auth'])->group(function () {
+    Route::get('/nepal-boundary.geojson', function () {
+        $content = \App\Services\MapCacheService::getBoundary();
+        if ($content === null) abort(404);
+        return response($content, 200)->header('Content-Type', 'application/json');
+    })->name('nepal.boundary');
+    Route::get('/nepal-adm1.geojson', function () {
+        $content = \App\Services\MapCacheService::getProvinces();
+        if ($content === null) abort(404);
+        return response($content, 200)->header('Content-Type', 'application/json');
+    })->name('nepal.adm1');
+    Route::get('/nepal-adm2.geojson', function () {
+        $content = \App\Services\MapCacheService::getDistricts();
+        if ($content === null) abort(404);
+        return response($content, 200)->header('Content-Type', 'application/json');
+    })->name('nepal.adm2');
 });
 
 // ============ REDIRECT /admin to custom prefix ============

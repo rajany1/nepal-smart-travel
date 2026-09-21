@@ -1,5 +1,7 @@
+import 'dart:async';
 import 'package:dio/dio.dart';
 import "../../core/services/localization_service.dart";
+import 'package:flutter/material.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import '../../config/constants/app_constants.dart';
 import '../services/session_manager.dart';
@@ -9,6 +11,9 @@ class ApiClient {
   late final Dio _dio;
   final FlutterSecureStorage _storage = const FlutterSecureStorage();
   final SessionManager _session = SessionManager.instance;
+
+  /// Navigator key set from main.dart for interceptor navigation.
+  static GlobalKey<NavigatorState>? navigatorKey;
 
   ApiClient._() {
     _dio = Dio(BaseOptions(
@@ -62,8 +67,44 @@ class ApiClient {
   }
 
   // Auth endpoints
-  Future<Response> socialLogin({required String idToken}) async {
-    return _dio.post('/auth/social-login', data: {'id_token': idToken});
+  Future<Response> socialLogin({
+    required String idToken,
+    bool? termsAccepted,
+    bool? privacyAccepted,
+    bool? ageConfirmed,
+  }) async {
+    return _dio.post('/auth/social-login', data: {
+      'id_token': idToken,
+      if (termsAccepted != null) 'terms_accepted': termsAccepted,
+      if (privacyAccepted != null) 'privacy_accepted': privacyAccepted,
+      if (ageConfirmed != null) 'age_confirmed': ageConfirmed,
+    });
+  }
+
+  /// Pre-check: determine whether a Google token maps to a new or existing user
+  /// without creating anything.  Returns `{ success, is_new_user }`.
+  Future<Response> googlePreCheck({required String idToken}) async {
+    return _dio.post('/auth/google-pre-check', data: {
+      'id_token': idToken,
+    });
+  }
+
+  /// Check which legal documents the authenticated user still needs to accept.
+  Future<Response> getLegalAcceptanceStatus() async {
+    return _dio.get('/auth/legal-acceptance-status');
+  }
+
+  /// Record the user's acceptance of the specified legal documents.
+  Future<Response> acceptLegal({
+    required List<String> documents,
+    String? appVersion,
+    String? platform,
+  }) async {
+    return _dio.post('/auth/legal-acceptance', data: {
+      'documents': documents,
+      if (appVersion != null) 'app_version': appVersion,
+      if (platform != null) 'platform': platform,
+    });
   }
 
   Future<Response> register({
@@ -72,6 +113,9 @@ class ApiClient {
     String? phone,
     required String password,
     required String passwordConfirmation,
+    bool termsAccepted = false,
+    bool privacyAccepted = false,
+    bool ageConfirmed = false,
   }) async {
     return _dio.post('/auth/register', data: {
       'name': name,
@@ -79,6 +123,9 @@ class ApiClient {
       if (phone != null && phone.isNotEmpty) 'phone': phone,
       'password': password,
       'password_confirmation': passwordConfirmation,
+      'terms_accepted': termsAccepted,
+      'privacy_accepted': privacyAccepted,
+      'age_confirmed': ageConfirmed,
     });
   }
 
@@ -102,8 +149,8 @@ class ApiClient {
     return _dio.post('/auth/logout');
   }
 
-  Future<Response> deleteAccount() async {
-    return _dio.delete('/users/me');
+  Future<Response> deleteAccount({String? confirmation}) async {
+    return _dio.delete('/users/me', data: {'confirmation': confirmation});
   }
 
   Future<Response> verifyEmail(String otp) async {
@@ -223,14 +270,16 @@ class ApiClient {
     required double maxLat,
     required double minLng,
     required double maxLng,
+    int? zoom,
     String? category,
-    int limit = 200,
+    int limit = 500,
   }) async {
     return _dio.get('/places/bbox', queryParameters: {
       'min_lat': minLat,
       'max_lat': maxLat,
       'min_lng': minLng,
       'max_lng': maxLng,
+      if (zoom != null) 'zoom': zoom,
       if (category != null) 'category': category,
       'limit': limit,
     });
@@ -246,7 +295,7 @@ class ApiClient {
   /// Nepal-wide places (admin + OSM + user submitted) in one lightweight
   /// payload. The backend caches this for 10 minutes (Redis), so the map
   /// opens instantly without waiting for GPS or a viewport query.
-  Future<Response> getNepalPlaces({int limit = 1000}) async {
+  Future<Response> getNepalPlaces({int limit = 15000}) async {
     return _dio.get('/places/all', queryParameters: {'limit': limit});
   }
 
@@ -427,6 +476,38 @@ class ApiClient {
     return _dio.get('/assistant/quota');
   }
 
+  // ✅ Support Conversations
+  Future<Response> getSupportConversations({int page = 1}) =>
+      _dio.get('/support', queryParameters: {'page': page});
+
+  Future<Response> getSupportConversation(int id) =>
+      _dio.get('/support/$id');
+
+  Future<Response> createSupportConversation({
+    required String subject,
+    required String message,
+    String category = 'general',
+    String priority = 'normal',
+  }) =>
+      _dio.post('/support', data: {
+        'subject': subject,
+        'message': message,
+        'category': category,
+        'priority': priority,
+      });
+
+  Future<Response> replyToSupport(int conversationId, String message) =>
+      _dio.post('/support/$conversationId/reply', data: {'message': message});
+
+  Future<Response> getSupportSatisfaction(int conversationId) =>
+      _dio.get('/support/$conversationId/satisfaction');
+
+  Future<Response> submitSupportSatisfaction(int conversationId, {required int rating, String? comment}) =>
+      _dio.post('/support/$conversationId/satisfaction', data: {
+        'rating': rating,
+        if (comment != null && comment.isNotEmpty) 'comment': comment,
+      });
+
   // ✅ Profile Completion endpoints
 
   // Sponsors removed — replaced by ad campaigns (2026-08)
@@ -558,6 +639,16 @@ class ApiClient {
     return _dio.get('/subscription/my');
   }
 
+  Future<Response> purchaseSubscription(int planId, String gateway) async {
+    return _dio.post('/subscriptions/$planId/purchase', data: {'gateway': gateway});
+  }
+
+  Future<Response> verifySubscription(int planId, {String? reference}) async {
+    return _dio.post('/subscriptions/$planId/verify', data: {
+      if (reference != null) 'reference': reference,
+    });
+  }
+
   // ============ Reward Offers ============
 
   Future<Response> getOffers({String? district, String? type}) async {
@@ -598,6 +689,10 @@ class ApiClient {
 
   Future<Response> getRouteById(int id) async {
     return _dio.get('/routes/$id');
+  }
+
+  Future<Response> getRouteGeometry(int id) async {
+    return _dio.get('/routes/$id/geometry');
   }
 
   // ===== Oripori Coins / Wallet =====
@@ -662,6 +757,12 @@ class AuthInterceptor extends Interceptor {
   final Dio dio;
   final SessionManager session;
 
+  /// Mutex: only one refresh at a time. Concurrent 401s wait for the first refresh.
+  Completer<String?>? _refreshCompleter;
+
+  /// Prevents multiple concurrent redirects to the legal re-acceptance screen.
+  bool _legalRedirectInProgress = false;
+
   AuthInterceptor(this.dio, this.session);
 
   @override
@@ -680,45 +781,110 @@ class AuthInterceptor extends Interceptor {
   @override
   Future<void> onError(DioException err, ErrorInterceptorHandler handler) async {
     if (err.response?.statusCode == 401) {
+      // If the refresh endpoint itself returns 401 → refresh token is invalid
       if (err.requestOptions.path.contains('/auth/refresh')) {
+        _refreshCompleter = null;
         await session.clearSession();
         handler.next(err);
         return;
       }
 
-      final storedRefreshToken = await session.getRefreshToken();
-      if (storedRefreshToken != null) {
-        try {
-          final response = await dio.post('/auth/refresh',
-            data: {'refresh_token': storedRefreshToken},
-          );
-          final newToken = response.data['access_token'];
-          final newRefreshToken = response.data['refresh_token'];
-          if (newToken != null) {
-            await session.setAccessToken(newToken);
-            if (newRefreshToken != null) {
-              await session.setRefreshToken(newRefreshToken);
-            }
-
-            final retryOptions = err.requestOptions;
-            retryOptions.headers['Authorization'] = 'Bearer $newToken';
+      // If a refresh is already in progress, wait for it instead of starting another
+      if (_refreshCompleter != null) {
+        final newToken = await _refreshCompleter!.future;
+        if (newToken != null) {
+          final retryOptions = err.requestOptions;
+          retryOptions.headers['Authorization'] = 'Bearer $newToken';
+          try {
             final retryResponse = await dio.fetch(retryOptions);
             handler.resolve(retryResponse);
             return;
+          } catch (_) {
+            // Retry failed — fall through to original error
           }
-        } catch (e) {
-          // Token refresh failed silently
+        }
+        handler.next(err);
+        return;
+      }
+
+      // Start a single refresh attempt
+      _refreshCompleter = Completer<String?>();
+      String? refreshedToken;
+
+      try {
+        final storedRefreshToken = await session.getRefreshToken();
+        if (storedRefreshToken == null) {
+          _refreshCompleter?.complete(null);
+          _refreshCompleter = null;
+          await session.clearSession();
+          handler.next(err);
+          return;
+        }
+
+        final response = await dio.post('/auth/refresh',
+          data: {'refresh_token': storedRefreshToken},
+        );
+        final newToken = response.data['access_token'];
+        final newRefreshToken = response.data['refresh_token'];
+
+        if (newToken != null) {
+          await session.setAccessToken(newToken);
+          if (newRefreshToken != null) {
+            await session.setRefreshToken(newRefreshToken);
+          }
+          refreshedToken = newToken;
+          _refreshCompleter?.complete(newToken);
+
+          // Retry the original request
+          final retryOptions = err.requestOptions;
+          retryOptions.headers['Authorization'] = 'Bearer $newToken';
+          final retryResponse = await dio.fetch(retryOptions);
+          handler.resolve(retryResponse);
+          return;
+        }
+
+        _refreshCompleter?.complete(null);
+      } catch (e) {
+        // Refresh failed — only clear session if it's a 401 from refresh (token invalid)
+        // Don't clear on network errors or 429 rate limits
+        _refreshCompleter?.complete(null);
+      } finally {
+        _refreshCompleter = null;
+      }
+
+      // Only clear session if we didn't get a new token (confirming refresh is broken)
+      if (refreshedToken == null) {
+        // Double-check: is the refresh token actually invalid?
+        // Don't clear on transient errors (network, timeout, 429)
+        final isRefreshInvalid = err.response?.statusCode == 401 ||
+            (err.error?.toString().contains('SocketException') != true &&
+             err.error?.toString().contains('TimeoutException') != true &&
+             err.response?.statusCode != 429);
+        if (isRefreshInvalid) {
+          await session.clearSession();
         }
       }
-      await session.clearSession();
     }
 
     if (err.response?.statusCode == 403) {
       final data = err.response?.data;
       final code = data is Map ? data['code'] : null;
       final requiresLogout = data is Map && data['requires_logout'] == true;
-      final isAccountProblem = code == 'ACCOUNT_BANNED' || code == 'ACCOUNT_SUSPENDED';
-      if (isAccountProblem || requiresLogout) {
+      final isBanned = code == 'ACCOUNT_BANNED' || code == 'ACCOUNT_DELETED';
+
+      // Handle legal re-acceptance requirement
+      if (code == 'LEGAL_RE_ACCEPTANCE_REQUIRED') {
+        if (!_legalRedirectInProgress && ApiClient.navigatorKey?.currentContext != null) {
+          _legalRedirectInProgress = true;
+          Navigator.of(ApiClient.navigatorKey!.currentContext!)
+              .pushNamed('/legal-re-acceptance')
+              .then((_) => _legalRedirectInProgress = false);
+        }
+        handler.next(err);
+        return;
+      }
+
+      if (isBanned || requiresLogout) {
         await session.clearSession();
       }
       handler.next(err);
