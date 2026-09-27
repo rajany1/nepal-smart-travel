@@ -24,8 +24,33 @@ class _LegalDocumentScreenState extends State<LegalDocumentScreen> {
     super.initState();
     _webViewController = WebViewController()
       ..setJavaScriptMode(JavaScriptMode.unrestricted)
-      ..setBackgroundColor(Colors.white);
+      ..setBackgroundColor(Colors.white)
+      ..setNavigationDelegate(NavigationDelegate(
+        onNavigationRequest: (NavigationRequest request) {
+          final url = request.url;
+          final type = _extractDocType(url);
+          if (type != null && type != widget.type) {
+            Navigator.of(context).push(
+              MaterialPageRoute(
+                builder: (_) => LegalDocumentScreen(type: type),
+              ),
+            );
+            return NavigationDecision.prevent;
+          }
+          if (type != null) {
+            return NavigationDecision.prevent;
+          }
+          return NavigationDecision.navigate;
+        },
+      ));
     _loadDocument();
+  }
+
+  String? _extractDocType(String url) {
+    final match = RegExp(r'/legal/(\w+)').firstMatch(url);
+    if (match != null) return match.group(1);
+    final customMatch = RegExp(r'oripori://legal/(\w+)').firstMatch(url);
+    return customMatch?.group(1);
   }
 
   Future<void> _loadDocument() async {
@@ -88,6 +113,7 @@ class _LegalDocumentScreenState extends State<LegalDocumentScreen> {
       <html>
       <head>
         <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+        <base href="/">
         <style>
           * { box-sizing: border-box; }
           body {
@@ -148,6 +174,21 @@ class _LegalDocumentScreenState extends State<LegalDocumentScreen> {
       </head>
       <body>
         $body
+        <script>
+          document.addEventListener('click', function(e) {
+            var link = e.target.closest('a');
+            if (link && link.getAttribute('href')) {
+              var href = link.getAttribute('href');
+              if (href.indexOf('/legal/') !== -1) {
+                e.preventDefault();
+                var match = href.match(/\\/legal\\/(\\w+)/);
+                if (match) {
+                  window.location.href = 'oripori://legal/' + match[1];
+                }
+              }
+            }
+          });
+        </script>
       </body>
       </html>
     ''';

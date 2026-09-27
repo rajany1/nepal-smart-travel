@@ -1,61 +1,64 @@
 <?php
 
-use Illuminate\Support\Facades\Route;
-use App\Http\Controllers\AdminController;
-use App\Http\Controllers\Admin\LiveFeedController;
-use App\Http\Controllers\WebAuthController;
-use App\Http\Controllers\Admin\RoleController;
-use App\Http\Controllers\Admin\PermissionController;
 use App\Http\Controllers\Admin\AchievementController;
-use App\Http\Controllers\Admin\TravelPartnerController;
-use App\Http\Controllers\Admin\SubscriptionController;
 use App\Http\Controllers\Admin\AdCampaignController;
+use App\Http\Controllers\Admin\AdminSupportController;
 use App\Http\Controllers\Admin\AiAgentController;
 use App\Http\Controllers\Admin\AiAgentTaskController;
+use App\Http\Controllers\Admin\CuratedRouteController;
+use App\Http\Controllers\Admin\LiveFeedController;
+use App\Http\Controllers\Admin\PermissionController;
+use App\Http\Controllers\Admin\PlatformExpenseController;
+use App\Http\Controllers\Admin\RoleController;
+use App\Http\Controllers\Admin\SafetyController;
+use App\Http\Controllers\Admin\SubscriptionController;
 use App\Http\Controllers\Admin\TranslatorController;
+use App\Http\Controllers\Admin\TravelPartnerController;
 use App\Http\Controllers\Admin\WithdrawalController;
-use App\Http\Controllers\Admin\AdminSupportController;
+use App\Http\Controllers\AdminController;
+use App\Http\Controllers\LegalDocumentController;
+use App\Http\Controllers\LegalDocumentTypeController;
+use App\Http\Controllers\Partner\AdController;
+use App\Http\Controllers\Partner\DashboardController;
+use App\Http\Controllers\Partner\OfferController;
+use App\Http\Controllers\Partner\PartnerAuthController;
+use App\Http\Controllers\Partner\PartnerPaymentController;
+use App\Http\Controllers\Partner\PayoutController;
+use App\Http\Controllers\Web\LegalController;
+use App\Http\Controllers\Web\PublicController;
+use App\Http\Controllers\WebAuthController;
+use App\Models\GameSetting;
+use App\Services\MapCacheService;
+use Illuminate\Support\Facades\Route;
 
-$adminPrefix = \App\Models\GameSetting::getValue('admin_route_prefix', 'admin') ?? 'admin';
+$adminPrefix = GameSetting::getValue('admin_route_prefix', 'admin') ?? 'admin';
 
 // ============ PUBLIC TOURIST WEB ============
 Route::prefix('/')->name('web.')->group(function () {
-    Route::get('/', [\App\Http\Controllers\Web\PublicController::class, 'home'])->name('home');
-    Route::get('/places', [\App\Http\Controllers\Web\PublicController::class, 'places'])->name('places');
-    Route::get('/places/{id}', [\App\Http\Controllers\Web\PublicController::class, 'placeShow'])->where('id', '[0-9]+|[0-9a-fA-F\-]{36}')->name('place');
-    Route::get('/routes', [\App\Http\Controllers\Web\PublicController::class, 'routes'])->name('routes');
-    Route::get('/routes/{route:slug}', [\App\Http\Controllers\Web\PublicController::class, 'routeShow'])->name('route');
-    Route::get('/offers', [\App\Http\Controllers\Web\PublicController::class, 'offers'])->name('offers');
-    Route::get('/{type}', [\App\Http\Controllers\Web\PublicController::class, 'categoryPage'])->whereIn('type', ['hotels', 'restaurants', 'attractions', 'cafes', 'activities'])->name('category');
+    Route::get('/', [PublicController::class, 'home'])->name('home');
+    Route::get('/places', [PublicController::class, 'places'])->name('places');
+    Route::get('/places/{id}', [PublicController::class, 'placeShow'])->where('id', '[0-9]+|[0-9a-fA-F\-]{36}')->name('place');
+    Route::get('/routes', [PublicController::class, 'routes'])->name('routes');
+    Route::get('/routes/{route:slug}', [PublicController::class, 'routeShow'])->name('route');
+    Route::get('/offers', [PublicController::class, 'offers'])->name('offers');
+    Route::get('/{type}', [PublicController::class, 'categoryPage'])->whereIn('type', ['hotels', 'restaurants', 'attractions', 'cafes', 'activities'])->name('category');
 });
 
-// ============ PUBLIC LEGAL / ACCOUNT DELETION ============
+// ============ PUBLIC LEGAL CENTER / ACCOUNT DELETION ============
 Route::get('/delete-account', function () {
     return view('web.delete-account');
 })->name('web.delete-account');
 
-Route::get('/privacy-policy', function () {
-    $doc = \App\Models\LegalDocument::where('type', 'privacy_policy')->where('is_published', true)->orderByDesc('published_at')->first();
-    return view('web.legal-page', ['document' => $doc, 'title' => 'Privacy Policy']);
-})->name('web.privacy-policy');
+// Legacy aliases — kept working, render the canonical document pages.
+Route::get('/terms', [LegalController::class, 'legacyTerms'])->name('web.terms');
+Route::get('/privacy-policy', [LegalController::class, 'legacyPrivacy'])->name('web.privacy-policy');
 
-Route::get('/terms', function () {
-    $doc = \App\Models\LegalDocument::where('type', 'terms_conditions')->where('is_published', true)->orderByDesc('published_at')->first();
-    return view('web.legal-page', ['document' => $doc, 'title' => 'Terms of Use']);
-})->name('web.terms');
-
-Route::get('/legal/{type}', function (string $type) {
-    $validTypes = array_keys(\App\Models\LegalDocument::types());
-    if (!in_array($type, $validTypes)) {
-        abort(404);
-    }
-    $doc = \App\Models\LegalDocument::where('type', $type)->where('is_published', true)->orderByDesc('published_at')->first();
-    $label = \App\Models\LegalDocument::types()[$type] ?? $type;
-    return view('web.legal-page', ['document' => $doc, 'title' => $label]);
-})->name('web.legal');
+// Legal Center index + document pages (slug-based; legacy type slugs resolve too).
+Route::get('/legal', [LegalController::class, 'index'])->name('web.legal.index');
+Route::get('/legal/{slug}', [LegalController::class, 'show'])->where('slug', '[a-z0-9_-]+')->name('web.legal.show');
 
 // ============ ADMIN LOGIN (no auth) ============
-Route::get('/login', function () use ($adminPrefix) {
+Route::get('/login', function () {
     return redirect()->route('admin.login');
 })->name('login');
 Route::prefix($adminPrefix)->name('admin.')->group(function () {
@@ -68,67 +71,67 @@ Route::post('/logout', [WebAuthController::class, 'logout'])->name('logout');
 
 // ============ PARTNER PORTAL (BUSINESS) ============
 Route::prefix('partner')->name('partner.')->group(function () {
-    Route::get('/register', [\App\Http\Controllers\Partner\PartnerAuthController::class, 'showRegister'])->name('register');
-    Route::post('/register', [\App\Http\Controllers\Partner\PartnerAuthController::class, 'register'])->name('register.post')->middleware('throttle:partner-register');
-    Route::get('/login', [\App\Http\Controllers\Partner\PartnerAuthController::class, 'showLogin'])->name('login');
-    Route::post('/login', [\App\Http\Controllers\Partner\PartnerAuthController::class, 'login'])->name('login.post')->middleware('throttle:partner-login');
-    Route::post('/logout', [\App\Http\Controllers\Partner\PartnerAuthController::class, 'logout'])->name('logout');
+    Route::get('/register', [PartnerAuthController::class, 'showRegister'])->name('register');
+    Route::post('/register', [PartnerAuthController::class, 'register'])->name('register.post')->middleware('throttle:partner-register');
+    Route::get('/login', [PartnerAuthController::class, 'showLogin'])->name('login');
+    Route::post('/login', [PartnerAuthController::class, 'login'])->name('login.post')->middleware('throttle:partner-login');
+    Route::post('/logout', [PartnerAuthController::class, 'logout'])->name('logout');
 });
 
 Route::prefix('partner')->name('partner.')->middleware(['auth', 'status'])->group(function () {
-    Route::get('/pending', [\App\Http\Controllers\Partner\PartnerAuthController::class, 'pending'])->name('pending');
-    Route::get('/business-form', [\App\Http\Controllers\Partner\PartnerAuthController::class, 'businessForm'])->name('business-form');
-    Route::post('/business-form', [\App\Http\Controllers\Partner\PartnerAuthController::class, 'submitBusinessForm'])->name('business-form.post');
+    Route::get('/pending', [PartnerAuthController::class, 'pending'])->name('pending');
+    Route::get('/business-form', [PartnerAuthController::class, 'businessForm'])->name('business-form');
+    Route::post('/business-form', [PartnerAuthController::class, 'submitBusinessForm'])->name('business-form.post');
 
     // Registration wizard
-    Route::get('/wizard', [\App\Http\Controllers\Partner\PartnerAuthController::class, 'wizard'])->name('wizard');
-    Route::post('/send-email-otp', [\App\Http\Controllers\Partner\PartnerAuthController::class, 'sendEmailOtp'])->name('send-email-otp');
-    Route::post('/verify-email-otp', [\App\Http\Controllers\Partner\PartnerAuthController::class, 'verifyEmailOtp'])->name('verify-email-otp');
-    Route::post('/send-phone-otp', [\App\Http\Controllers\Partner\PartnerAuthController::class, 'sendPhoneOtp'])->name('send-phone-otp');
-    Route::post('/verify-phone', [\App\Http\Controllers\Partner\PartnerAuthController::class, 'verifyPhone'])->name('verify-phone');
+    Route::get('/wizard', [PartnerAuthController::class, 'wizard'])->name('wizard');
+    Route::post('/send-email-otp', [PartnerAuthController::class, 'sendEmailOtp'])->name('send-email-otp');
+    Route::post('/verify-email-otp', [PartnerAuthController::class, 'verifyEmailOtp'])->name('verify-email-otp');
+    Route::post('/send-phone-otp', [PartnerAuthController::class, 'sendPhoneOtp'])->name('send-phone-otp');
+    Route::post('/verify-phone', [PartnerAuthController::class, 'verifyPhone'])->name('verify-phone');
 });
 
 Route::prefix('partner')->name('partner.')->middleware(['auth', 'status', 'business'])->group(function () {
-    Route::get('/', [\App\Http\Controllers\Partner\DashboardController::class, 'index'])->name('dashboard');
+    Route::get('/', [DashboardController::class, 'index'])->name('dashboard');
 
-    Route::get('/offers', [\App\Http\Controllers\Partner\OfferController::class, 'index'])->name('offers');
-    Route::get('/offers/create', [\App\Http\Controllers\Partner\OfferController::class, 'create'])->name('offers.create');
-    Route::post('/offers', [\App\Http\Controllers\Partner\OfferController::class, 'store'])->name('offers.store');
-    Route::get('/offers/{offer}/edit', [\App\Http\Controllers\Partner\OfferController::class, 'edit'])->name('offers.edit');
-    Route::put('/offers/{offer}', [\App\Http\Controllers\Partner\OfferController::class, 'update'])->name('offers.update');
-    Route::post('/offers/{offer}/pause', [\App\Http\Controllers\Partner\OfferController::class, 'pause'])->name('offers.pause');
-    Route::post('/offers/{offer}/resume', [\App\Http\Controllers\Partner\OfferController::class, 'resume'])->name('offers.resume');
-    Route::delete('/offers/{offer}', [\App\Http\Controllers\Partner\OfferController::class, 'destroy'])->name('offers.destroy');
-    Route::get('/offers/{offer}/redemptions', [\App\Http\Controllers\Partner\OfferController::class, 'redemptions'])->name('offers.redemptions');
-    Route::post('/offers/{offer}/redemptions/{redemption}/used', [\App\Http\Controllers\Partner\OfferController::class, 'markUsed'])->name('offers.redemptions.used');
+    Route::get('/offers', [OfferController::class, 'index'])->name('offers');
+    Route::get('/offers/create', [OfferController::class, 'create'])->name('offers.create');
+    Route::post('/offers', [OfferController::class, 'store'])->name('offers.store');
+    Route::get('/offers/{offer}/edit', [OfferController::class, 'edit'])->name('offers.edit');
+    Route::put('/offers/{offer}', [OfferController::class, 'update'])->name('offers.update');
+    Route::post('/offers/{offer}/pause', [OfferController::class, 'pause'])->name('offers.pause');
+    Route::post('/offers/{offer}/resume', [OfferController::class, 'resume'])->name('offers.resume');
+    Route::delete('/offers/{offer}', [OfferController::class, 'destroy'])->name('offers.destroy');
+    Route::get('/offers/{offer}/redemptions', [OfferController::class, 'redemptions'])->name('offers.redemptions');
+    Route::post('/offers/{offer}/redemptions/{redemption}/used', [OfferController::class, 'markUsed'])->name('offers.redemptions.used');
 
-    Route::get('/ads', [\App\Http\Controllers\Partner\AdController::class, 'index'])->name('ads');
-    Route::get('/ads/create', [\App\Http\Controllers\Partner\AdController::class, 'create'])->name('ads.create');
-    Route::post('/ads', [\App\Http\Controllers\Partner\AdController::class, 'store'])->name('ads.store');
-    Route::get('/ads/{adCampaign}/edit', [\App\Http\Controllers\Partner\AdController::class, 'edit'])->name('ads.edit');
-    Route::put('/ads/{adCampaign}', [\App\Http\Controllers\Partner\AdController::class, 'update'])->name('ads.update');
-    Route::post('/ads/{adCampaign}/pause', [\App\Http\Controllers\Partner\AdController::class, 'pause'])->name('ads.pause');
-    Route::post('/ads/{adCampaign}/resume', [\App\Http\Controllers\Partner\AdController::class, 'resume'])->name('ads.resume');
-    Route::get('/ads/{adCampaign}/pay', [\App\Http\Controllers\Partner\AdController::class, 'pay'])->name('ads.pay');
-    Route::post('/ads/{adCampaign}/pay', [\App\Http\Controllers\Partner\AdController::class, 'initiatePayment'])->name('ads.pay.initiate');
-    Route::get('/payments/esewa/callback', [\App\Http\Controllers\Partner\AdController::class, 'esewaCallback'])->name('payments.esewa.callback');
-    Route::get('/payments/khalti/callback', [\App\Http\Controllers\Partner\AdController::class, 'khaltiCallback'])->name('payments.khalti.callback');
+    Route::get('/ads', [AdController::class, 'index'])->name('ads');
+    Route::get('/ads/create', [AdController::class, 'create'])->name('ads.create');
+    Route::post('/ads', [AdController::class, 'store'])->name('ads.store');
+    Route::get('/ads/{adCampaign}/edit', [AdController::class, 'edit'])->name('ads.edit');
+    Route::put('/ads/{adCampaign}', [AdController::class, 'update'])->name('ads.update');
+    Route::post('/ads/{adCampaign}/pause', [AdController::class, 'pause'])->name('ads.pause');
+    Route::post('/ads/{adCampaign}/resume', [AdController::class, 'resume'])->name('ads.resume');
+    Route::get('/ads/{adCampaign}/pay', [AdController::class, 'pay'])->name('ads.pay');
+    Route::post('/ads/{adCampaign}/pay', [AdController::class, 'initiatePayment'])->name('ads.pay.initiate');
+    Route::get('/payments/esewa/callback', [AdController::class, 'esewaCallback'])->name('payments.esewa.callback');
+    Route::get('/payments/khalti/callback', [AdController::class, 'khaltiCallback'])->name('payments.khalti.callback');
 
-    Route::get('/payouts', [\App\Http\Controllers\Partner\PayoutController::class, 'index'])->name('payouts');
-    Route::post('/payouts', [\App\Http\Controllers\Partner\PayoutController::class, 'store'])->name('payouts.store');
-    Route::delete('/payouts/{payout}', [\App\Http\Controllers\Partner\PayoutController::class, 'cancel'])->name('payouts.cancel');
-    Route::delete('/ads/{adCampaign}', [\App\Http\Controllers\Partner\AdController::class, 'destroy'])->name('ads.destroy');
+    Route::get('/payouts', [PayoutController::class, 'index'])->name('payouts');
+    Route::post('/payouts', [PayoutController::class, 'store'])->name('payouts.store');
+    Route::delete('/payouts/{payout}', [PayoutController::class, 'cancel'])->name('payouts.cancel');
+    Route::delete('/ads/{adCampaign}', [AdController::class, 'destroy'])->name('ads.destroy');
 
     // Partner Wallet & Payments
-    Route::get('/wallet', [\App\Http\Controllers\Partner\PartnerPaymentController::class, 'wallet'])->name('wallet');
-    Route::get('/wallet/topup', [\App\Http\Controllers\Partner\PartnerPaymentController::class, 'topUpPage'])->name('wallet.topup');
-    Route::post('/wallet/topup', [\App\Http\Controllers\Partner\PartnerPaymentController::class, 'initiateTopUp'])->name('wallet.topup.initiate');
-    Route::get('/wallet/topup/callback/{gateway}', [\App\Http\Controllers\Partner\PartnerPaymentController::class, 'topUpCallback'])->name('topup.callback');
-    Route::get('/payments/scan', [\App\Http\Controllers\Partner\PartnerPaymentController::class, 'scanPage'])->name('payments.scan');
-    Route::post('/payments/verify', [\App\Http\Controllers\Partner\PartnerPaymentController::class, 'verifyCode'])->name('payments.verify');
-    Route::get('/payments/history', [\App\Http\Controllers\Partner\PartnerPaymentController::class, 'paymentHistory'])->name('payments.history');
-    Route::post('/withdraw', [\App\Http\Controllers\Partner\PartnerPaymentController::class, 'requestWithdrawal'])->name('withdraw');
-    Route::post('/withdraw/{withdrawal}/cancel', [\App\Http\Controllers\Partner\PartnerPaymentController::class, 'cancelWithdrawal'])->name('withdraw.cancel');
+    Route::get('/wallet', [PartnerPaymentController::class, 'wallet'])->name('wallet');
+    Route::get('/wallet/topup', [PartnerPaymentController::class, 'topUpPage'])->name('wallet.topup');
+    Route::post('/wallet/topup', [PartnerPaymentController::class, 'initiateTopUp'])->name('wallet.topup.initiate');
+    Route::get('/wallet/topup/callback/{gateway}', [PartnerPaymentController::class, 'topUpCallback'])->name('topup.callback');
+    Route::get('/payments/scan', [PartnerPaymentController::class, 'scanPage'])->name('payments.scan');
+    Route::post('/payments/verify', [PartnerPaymentController::class, 'verifyCode'])->name('payments.verify');
+    Route::get('/payments/history', [PartnerPaymentController::class, 'paymentHistory'])->name('payments.history');
+    Route::post('/withdraw', [PartnerPaymentController::class, 'requestWithdrawal'])->name('withdraw');
+    Route::post('/withdraw/{withdrawal}/cancel', [PartnerPaymentController::class, 'cancelWithdrawal'])->name('withdraw.cancel');
 });
 
 // ============ ADMIN PROTECTED ROUTES ============
@@ -143,6 +146,7 @@ Route::prefix($adminPrefix)->name('admin.')->middleware(['auth', 'status', 'role
     Route::post('/reports/{id}/approve', [AdminController::class, 'approveReport'])->name('reports.approve');
     Route::post('/reports/{id}/reject', [AdminController::class, 'rejectReport'])->name('reports.reject');
     Route::post('/reports/{id}/delete', [AdminController::class, 'deleteReport'])->name('reports.delete');
+    Route::post('/reports/bulk-delete', [AdminController::class, 'bulkDeleteReports'])->name('reports.bulk-delete');
 
     // Users
     Route::get('/users', [AdminController::class, 'users'])->name('users');
@@ -157,6 +161,24 @@ Route::prefix($adminPrefix)->name('admin.')->middleware(['auth', 'status', 'role
     Route::get('/alerts', [AdminController::class, 'alerts'])->name('alerts');
     Route::post('/alerts', [AdminController::class, 'createAlert'])->name('alerts.create');
     Route::post('/alerts/{id}/delete', [AdminController::class, 'deleteAlert'])->name('alerts.delete');
+    Route::post('/alerts/translate', [AdminController::class, 'translateAlert'])->name('alerts.translate');
+    Route::post('/alerts/preview', [AdminController::class, 'previewAlert'])->name('alerts.preview');
+
+    // Report Categories
+    Route::get('/report-categories', [AdminController::class, 'reportCategories'])->name('report-categories');
+    Route::get('/report-categories/groups', [AdminController::class, 'reportCategoryGroups'])->name('report-category-groups');
+    Route::post('/report-categories/groups', [AdminController::class, 'createReportCategoryGroup'])->name('report-category-groups.create');
+    Route::post('/report-categories/groups/{id}/update', [AdminController::class, 'updateReportCategoryGroup'])->name('report-category-groups.update');
+    Route::post('/report-categories/groups/{id}/delete', [AdminController::class, 'deleteReportCategoryGroup'])->name('report-category-groups.delete');
+    Route::post('/report-categories', [AdminController::class, 'createReportCategory'])->name('report-categories.create');
+    Route::post('/report-categories/{id}/update', [AdminController::class, 'updateReportCategory'])->name('report-categories.update');
+    Route::post('/report-categories/{id}/delete', [AdminController::class, 'deleteReportCategory'])->name('report-categories.delete');
+    Route::post('/report-categories/{id}/options', [AdminController::class, 'createReportCategoryOption'])->name('report-categories.options.create');
+    Route::post('/report-categories/options/{id}/update', [AdminController::class, 'updateReportCategoryOption'])->name('report-categories.options.update');
+    Route::post('/report-categories/options/{id}/delete', [AdminController::class, 'deleteReportCategoryOption'])->name('report-categories.options.delete');
+    Route::post('/report-categories/{id}/fields', [AdminController::class, 'createReportCategoryField'])->name('report-categories.fields.create');
+    Route::post('/report-categories/fields/{id}/update', [AdminController::class, 'updateReportCategoryField'])->name('report-categories.fields.update');
+    Route::post('/report-categories/fields/{id}/delete', [AdminController::class, 'deleteReportCategoryField'])->name('report-categories.fields.delete');
 
     // SOS Emergency
     Route::get('/sos', [AdminController::class, 'sosAlerts'])->name('sos');
@@ -232,23 +254,26 @@ Route::prefix($adminPrefix)->name('admin.')->middleware(['auth', 'status', 'role
     Route::post('/user-achievements/{userAchievement}/flag', [AchievementController::class, 'flagAchievement'])->name('user-achievements.flag');
     Route::post('/user-achievements/{userAchievement}/clear', [AchievementController::class, 'clearSuspicious'])->name('user-achievements.clear');
 
-    // Legal Documents
-    Route::get('/legal-documents', [\App\Http\Controllers\LegalDocumentController::class, 'index'])->name('legal-documents.index');
-    Route::get('/legal-documents/create', [\App\Http\Controllers\LegalDocumentController::class, 'create'])->name('legal-documents.create');
-    Route::post('/legal-documents', [\App\Http\Controllers\LegalDocumentController::class, 'store'])->name('legal-documents.store');
-    Route::get('/legal-documents/{id}/edit', [\App\Http\Controllers\LegalDocumentController::class, 'edit'])->name('legal-documents.edit');
-    Route::put('/legal-documents/{id}', [\App\Http\Controllers\LegalDocumentController::class, 'update'])->name('legal-documents.update');
-    Route::post('/legal-documents/{id}/publish', [\App\Http\Controllers\LegalDocumentController::class, 'publish'])->name('legal-documents.publish');
-    Route::post('/legal-documents/{id}/unpublish', [\App\Http\Controllers\LegalDocumentController::class, 'unpublish'])->name('legal-documents.unpublish');
-    Route::post('/legal-documents/{id}/delete', [\App\Http\Controllers\LegalDocumentController::class, 'destroy'])->name('legal-documents.delete');
+    // Legal Documents (Legal & Policies)
+    Route::get('/legal-documents', [LegalDocumentController::class, 'index'])->name('legal-documents.index');
+    Route::get('/legal-documents/create', [LegalDocumentController::class, 'create'])->name('legal-documents.create');
+    Route::post('/legal-documents', [LegalDocumentController::class, 'store'])->name('legal-documents.store');
+    Route::get('/legal-documents/{id}/edit', [LegalDocumentController::class, 'edit'])->name('legal-documents.edit');
+    Route::put('/legal-documents/{id}', [LegalDocumentController::class, 'update'])->name('legal-documents.update');
+    Route::get('/legal-documents/{id}/preview', [LegalDocumentController::class, 'preview'])->name('legal-documents.preview');
+    Route::get('/legal-documents/{id}/versions', [LegalDocumentController::class, 'versions'])->name('legal-documents.versions');
+    Route::post('/legal-documents/{id}/publish', [LegalDocumentController::class, 'publish'])->name('legal-documents.publish');
+    Route::post('/legal-documents/{id}/unpublish', [LegalDocumentController::class, 'unpublish'])->name('legal-documents.unpublish');
+    Route::post('/legal-documents/{id}/archive', [LegalDocumentController::class, 'archive'])->name('legal-documents.archive');
+    Route::post('/legal-documents/{id}/delete', [LegalDocumentController::class, 'destroy'])->name('legal-documents.delete');
 
     // Legal Document Types
-    Route::get('/legal-document-types', [\App\Http\Controllers\LegalDocumentTypeController::class, 'index'])->name('legal-document-types.index');
-    Route::get('/legal-document-types/create', [\App\Http\Controllers\LegalDocumentTypeController::class, 'create'])->name('legal-document-types.create');
-    Route::post('/legal-document-types', [\App\Http\Controllers\LegalDocumentTypeController::class, 'store'])->name('legal-document-types.store');
-    Route::get('/legal-document-types/{id}/edit', [\App\Http\Controllers\LegalDocumentTypeController::class, 'edit'])->name('legal-document-types.edit');
-    Route::put('/legal-document-types/{id}', [\App\Http\Controllers\LegalDocumentTypeController::class, 'update'])->name('legal-document-types.update');
-    Route::post('/legal-document-types/{id}/delete', [\App\Http\Controllers\LegalDocumentTypeController::class, 'destroy'])->name('legal-document-types.delete');
+    Route::get('/legal-document-types', [LegalDocumentTypeController::class, 'index'])->name('legal-document-types.index');
+    Route::get('/legal-document-types/create', [LegalDocumentTypeController::class, 'create'])->name('legal-document-types.create');
+    Route::post('/legal-document-types', [LegalDocumentTypeController::class, 'store'])->name('legal-document-types.store');
+    Route::get('/legal-document-types/{id}/edit', [LegalDocumentTypeController::class, 'edit'])->name('legal-document-types.edit');
+    Route::put('/legal-document-types/{id}', [LegalDocumentTypeController::class, 'update'])->name('legal-document-types.update');
+    Route::post('/legal-document-types/{id}/delete', [LegalDocumentTypeController::class, 'destroy'])->name('legal-document-types.delete');
 
     // Travel Partners & Bookings
     Route::get('/travel-partners', [TravelPartnerController::class, 'partners'])->name('travel-partners');
@@ -280,33 +305,33 @@ Route::prefix($adminPrefix)->name('admin.')->middleware(['auth', 'status', 'role
     Route::post('/ad-campaigns/{adCampaign}/refund', [AdCampaignController::class, 'refund'])->name('ad-campaigns.refund');
 
     // Reward Offers
-    Route::get('/offers', [\App\Http\Controllers\Admin\OfferController::class, 'index'])->name('offers');
-    Route::post('/offers/{offer}/pause', [\App\Http\Controllers\Admin\OfferController::class, 'pause'])->name('offers.pause');
-    Route::post('/offers/{offer}/resume', [\App\Http\Controllers\Admin\OfferController::class, 'resume'])->name('offers.resume');
-    Route::post('/offers/{offer}/value', [\App\Http\Controllers\Admin\OfferController::class, 'updateValue'])->name('offers.value');
-    Route::post('/offers/{offer}/delete', [\App\Http\Controllers\Admin\OfferController::class, 'destroy'])->name('offers.delete');
-    Route::post('/offers/{offer}/restore', [\App\Http\Controllers\Admin\OfferController::class, 'restore'])->name('offers.restore')->withTrashed();
+    Route::get('/offers', [App\Http\Controllers\Admin\OfferController::class, 'index'])->name('offers');
+    Route::post('/offers/{offer}/pause', [App\Http\Controllers\Admin\OfferController::class, 'pause'])->name('offers.pause');
+    Route::post('/offers/{offer}/resume', [App\Http\Controllers\Admin\OfferController::class, 'resume'])->name('offers.resume');
+    Route::post('/offers/{offer}/value', [App\Http\Controllers\Admin\OfferController::class, 'updateValue'])->name('offers.value');
+    Route::post('/offers/{offer}/delete', [App\Http\Controllers\Admin\OfferController::class, 'destroy'])->name('offers.delete');
+    Route::post('/offers/{offer}/restore', [App\Http\Controllers\Admin\OfferController::class, 'restore'])->name('offers.restore')->withTrashed();
 
     // Content Safety (Review AI agent reports)
-    Route::get('/moderation', [\App\Http\Controllers\Admin\SafetyController::class, 'index'])->name('moderation');
-    Route::get('/moderation/users/{user}', [\App\Http\Controllers\Admin\SafetyController::class, 'showUser'])->name('moderation.users');
-    Route::post('/moderation/strike/{user}', [\App\Http\Controllers\Admin\SafetyController::class, 'strike'])->name('moderation.strike');
-    Route::post('/moderation/activate/{user}', [\App\Http\Controllers\Admin\SafetyController::class, 'activate'])->name('moderation.activate');
+    Route::get('/moderation', [SafetyController::class, 'index'])->name('moderation');
+    Route::get('/moderation/users/{user}', [SafetyController::class, 'showUser'])->name('moderation.users');
+    Route::post('/moderation/strike/{user}', [SafetyController::class, 'strike'])->name('moderation.strike');
+    Route::post('/moderation/activate/{user}', [SafetyController::class, 'activate'])->name('moderation.activate');
 
     // Payouts
-    Route::get('/payouts', [\App\Http\Controllers\Admin\PayoutController::class, 'index'])->name('payouts');
-    Route::get('/payouts/{payout}', [\App\Http\Controllers\Admin\PayoutController::class, 'show'])->name('payouts.show');
-    Route::post('/payouts/{payout}/approve', [\App\Http\Controllers\Admin\PayoutController::class, 'approve'])->name('payouts.approve');
-    Route::post('/payouts/{payout}/process', [\App\Http\Controllers\Admin\PayoutController::class, 'processPayment'])->name('payouts.process');
-    Route::post('/payouts/{payout}/retry', [\App\Http\Controllers\Admin\PayoutController::class, 'retryPayment'])->name('payouts.retry');
-    Route::post('/payouts/{payout}/paid', [\App\Http\Controllers\Admin\PayoutController::class, 'markPaid'])->name('payouts.paid');
-    Route::post('/payouts/{payout}/reject', [\App\Http\Controllers\Admin\PayoutController::class, 'reject'])->name('payouts.reject');
+    Route::get('/payouts', [App\Http\Controllers\Admin\PayoutController::class, 'index'])->name('payouts');
+    Route::get('/payouts/{payout}', [App\Http\Controllers\Admin\PayoutController::class, 'show'])->name('payouts.show');
+    Route::post('/payouts/{payout}/approve', [App\Http\Controllers\Admin\PayoutController::class, 'approve'])->name('payouts.approve');
+    Route::post('/payouts/{payout}/process', [App\Http\Controllers\Admin\PayoutController::class, 'processPayment'])->name('payouts.process');
+    Route::post('/payouts/{payout}/retry', [App\Http\Controllers\Admin\PayoutController::class, 'retryPayment'])->name('payouts.retry');
+    Route::post('/payouts/{payout}/paid', [App\Http\Controllers\Admin\PayoutController::class, 'markPaid'])->name('payouts.paid');
+    Route::post('/payouts/{payout}/reject', [App\Http\Controllers\Admin\PayoutController::class, 'reject'])->name('payouts.reject');
 
     // Curated Routes
-    Route::get('/routes', [\App\Http\Controllers\Admin\CuratedRouteController::class, 'index'])->name('routes');
-    Route::post('/routes', [\App\Http\Controllers\Admin\CuratedRouteController::class, 'store'])->name('routes.store');
-    Route::put('/routes/{route}', [\App\Http\Controllers\Admin\CuratedRouteController::class, 'update'])->name('routes.update');
-    Route::delete('/routes/{route}', [\App\Http\Controllers\Admin\CuratedRouteController::class, 'destroy'])->name('routes.destroy');
+    Route::get('/routes', [CuratedRouteController::class, 'index'])->name('routes');
+    Route::post('/routes', [CuratedRouteController::class, 'store'])->name('routes.store');
+    Route::put('/routes/{route}', [CuratedRouteController::class, 'update'])->name('routes.update');
+    Route::delete('/routes/{route}', [CuratedRouteController::class, 'destroy'])->name('routes.destroy');
 
     // Business verification
     Route::post('/travel-partners/{travelPartner}/verify', [TravelPartnerController::class, 'verifyPartner'])->name('travel-partners.verify');
@@ -346,22 +371,22 @@ Route::prefix($adminPrefix)->name('admin.')->middleware(['auth', 'status', 'role
     Route::get('/money-flow', [WithdrawalController::class, 'moneyFlowAudit'])->name('money-flow');
 
     // Platform Expenses
-    Route::get('/expenses', [\App\Http\Controllers\Admin\PlatformExpenseController::class, 'index'])->name('expenses');
-    Route::post('/expenses', [\App\Http\Controllers\Admin\PlatformExpenseController::class, 'store'])->name('expenses.store');
-    Route::put('/expenses/{expense}', [\App\Http\Controllers\Admin\PlatformExpenseController::class, 'update'])->name('expenses.update');
-    Route::delete('/expenses/{expense}', [\App\Http\Controllers\Admin\PlatformExpenseController::class, 'destroy'])->name('expenses.destroy');
-    Route::post('/expenses/{expense}/mark-paid', [\App\Http\Controllers\Admin\PlatformExpenseController::class, 'markPaid'])->name('expenses.mark-paid');
-    Route::get('/expenses/renewal-alerts', [\App\Http\Controllers\Admin\PlatformExpenseController::class, 'renewalAlerts'])->name('expenses.renewal-alerts');
+    Route::get('/expenses', [PlatformExpenseController::class, 'index'])->name('expenses');
+    Route::post('/expenses', [PlatformExpenseController::class, 'store'])->name('expenses.store');
+    Route::put('/expenses/{expense}', [PlatformExpenseController::class, 'update'])->name('expenses.update');
+    Route::delete('/expenses/{expense}', [PlatformExpenseController::class, 'destroy'])->name('expenses.destroy');
+    Route::post('/expenses/{expense}/mark-paid', [PlatformExpenseController::class, 'markPaid'])->name('expenses.mark-paid');
+    Route::get('/expenses/renewal-alerts', [PlatformExpenseController::class, 'renewalAlerts'])->name('expenses.renewal-alerts');
 
     // Employee Salaries
-    Route::get('/salaries', [\App\Http\Controllers\Admin\PlatformExpenseController::class, 'employees'])->name('salaries');
-    Route::post('/salaries', [\App\Http\Controllers\Admin\PlatformExpenseController::class, 'storeSalary'])->name('salaries.store');
-    Route::post('/salaries/{salary}/mark-paid', [\App\Http\Controllers\Admin\PlatformExpenseController::class, 'markSalaryPaid'])->name('salaries.mark-paid');
-    Route::put('/salaries/{salary}', [\App\Http\Controllers\Admin\PlatformExpenseController::class, 'updateSalary'])->name('salaries.update');
-    Route::delete('/salaries/{salary}', [\App\Http\Controllers\Admin\PlatformExpenseController::class, 'deleteSalary'])->name('salaries.delete');
+    Route::get('/salaries', [PlatformExpenseController::class, 'employees'])->name('salaries');
+    Route::post('/salaries', [PlatformExpenseController::class, 'storeSalary'])->name('salaries.store');
+    Route::post('/salaries/{salary}/mark-paid', [PlatformExpenseController::class, 'markSalaryPaid'])->name('salaries.mark-paid');
+    Route::put('/salaries/{salary}', [PlatformExpenseController::class, 'updateSalary'])->name('salaries.update');
+    Route::delete('/salaries/{salary}', [PlatformExpenseController::class, 'deleteSalary'])->name('salaries.delete');
 
     // Financial Overview
-    Route::get('/financial-overview', [\App\Http\Controllers\Admin\PlatformExpenseController::class, 'financialOverview'])->name('financial-overview');
+    Route::get('/financial-overview', [PlatformExpenseController::class, 'financialOverview'])->name('financial-overview');
 
     // Support Inbox
     Route::get('/support', [AdminSupportController::class, 'index'])->name('support');
@@ -383,18 +408,27 @@ Route::prefix($adminPrefix)->name('admin.')->middleware(['auth', 'status', 'role
 // ============ ADMIN GEOJSON (auth only, Redis cached) ============
 Route::prefix($adminPrefix)->name('admin.')->middleware(['auth'])->group(function () {
     Route::get('/nepal-boundary.geojson', function () {
-        $content = \App\Services\MapCacheService::getBoundary();
-        if ($content === null) abort(404);
+        $content = MapCacheService::getBoundary();
+        if ($content === null) {
+            abort(404);
+        }
+
         return response($content, 200)->header('Content-Type', 'application/json');
     })->name('nepal.boundary');
     Route::get('/nepal-adm1.geojson', function () {
-        $content = \App\Services\MapCacheService::getProvinces();
-        if ($content === null) abort(404);
+        $content = MapCacheService::getProvinces();
+        if ($content === null) {
+            abort(404);
+        }
+
         return response($content, 200)->header('Content-Type', 'application/json');
     })->name('nepal.adm1');
     Route::get('/nepal-adm2.geojson', function () {
-        $content = \App\Services\MapCacheService::getDistricts();
-        if ($content === null) abort(404);
+        $content = MapCacheService::getDistricts();
+        if ($content === null) {
+            abort(404);
+        }
+
         return response($content, 200)->header('Content-Type', 'application/json');
     })->name('nepal.adm2');
 });
@@ -402,10 +436,11 @@ Route::prefix($adminPrefix)->name('admin.')->middleware(['auth'])->group(functio
 // ============ REDIRECT /admin to custom prefix ============
 if ($adminPrefix !== 'admin') {
     Route::match(['get', 'post'], '/admin/{any?}', function ($any = null) use ($adminPrefix) {
-        $path = '/' . $adminPrefix;
+        $path = '/'.$adminPrefix;
         if ($any) {
-            $path .= '/' . $any;
+            $path .= '/'.$any;
         }
+
         return redirect($path, 301);
     })->where('any', '.*');
 }

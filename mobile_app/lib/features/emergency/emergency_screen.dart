@@ -34,13 +34,17 @@ class _EmergencyScreenState extends State<EmergencyScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Text(context.t('Emergency Support')),
-        backgroundColor: AppTheme.errorColor,
-        foregroundColor: Colors.white,
+        title: Text(
+          context.t('Emergency Support'),
+          style: const TextStyle(color: AppTheme.errorColor),
+        ),
+        backgroundColor: Colors.white,
+        elevation: 0,
+        iconTheme: const IconThemeData(color: Colors.black87),
         systemOverlayStyle: const SystemUiOverlayStyle(
-          statusBarColor: AppTheme.errorColor,
-          statusBarIconBrightness: Brightness.light,
-          statusBarBrightness: Brightness.dark,
+          statusBarColor: Colors.transparent,
+          statusBarIconBrightness: Brightness.dark,
+          statusBarBrightness: Brightness.light,
         ),
         actions: [
           IconButton(

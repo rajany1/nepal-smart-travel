@@ -59,6 +59,10 @@ Route::prefix('v1')->group(function () {
 
     // âœ… Reports - public read
     Route::get('/reports/categories', [ReportController::class, 'categories']);
+    Route::get('/reports/categories/detailed', [ReportController::class, 'categoriesDetailed']);
+    Route::get('/reports/categories/featured', [ReportController::class, 'featuredCategories']);
+    Route::get('/reports/categories/search', [ReportController::class, 'searchCategories']);
+    Route::get('/reports/categories/{id}/form-config', [ReportController::class, 'categoryFormConfig']);
     Route::get('/reports/form-config', [ReportController::class, 'formConfig']);
     Route::get('/reports', [ReportController::class, 'index']);
     // /reports/my MUST be BEFORE /reports/{id} to avoid "my" being matched as {id}
@@ -110,6 +114,17 @@ Route::prefix('v1')->group(function () {
 
     // Around Me - location intelligence feed (public)
     Route::get('/around-me', [AroundMeController::class, 'index']);
+
+    // Travel Context - route-aware intelligence (public / guest-first)
+    // Resolve origin→checkpoints→destination corridor; rank existing
+    // approved reports/alerts/places along it. Read-only consumer layer.
+    Route::post('/travel-context/resolve', [\App\Http\Controllers\Api\TravelContextController::class, 'resolve'])
+        ->middleware('throttle:30,1');
+    Route::get('/travel-context/intelligence', [\App\Http\Controllers\Api\TravelContextController::class, 'intelligence'])
+        ->middleware('throttle:30,1');
+    // POST preferred: travel_context geometry can exceed URL length limits.
+    Route::post('/travel-context/intelligence', [\App\Http\Controllers\Api\TravelContextController::class, 'intelligence'])
+        ->middleware('throttle:30,1');
 
     // Map layers - category-filtered map data (public)
     Route::get('/map/layers', [MapLayersController::class, 'index']);

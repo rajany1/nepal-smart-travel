@@ -74,6 +74,11 @@ class EmployeeSalary extends Model
 
     public function markAsPaid(): void
     {
+        // Idempotent: skip if already paid
+        if ($this->payment_status === 'paid') {
+            return;
+        }
+
         $this->update([
             'payment_status' => 'paid',
             'payment_date' => Carbon::now(),

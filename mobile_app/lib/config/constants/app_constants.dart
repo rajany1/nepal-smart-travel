@@ -10,10 +10,11 @@ class AppConstants {
 
   // API
   static const String devEmulator = 'http://10.0.2.2:8000/api/v1';
-  static const String devPhone = 'http://192.168.10.67:8000/api/v1';
+  static const String devPhone = 'http://192.168.1.67:8000/api/v1';
   static String get prod => const String.fromEnvironment(
     'API_BASE_URL',
-    defaultValue: 'https://api.nepalsmarttravel.com/api/v1',
+    defaultValue: 'http://192.168.10.67:8000/api/v1',
+    // defaultValue: 'https://api.nepalsmarttravel.com/api/v1',
   );
   static const Duration apiTimeout = Duration(seconds: 30);
   static const int apiRetryCount = 3;
@@ -25,7 +26,27 @@ class AppConstants {
     }
 
     return devPhone;
-  }  
+  }
+
+  // Website — canonical web URLs (the Legal Center lives here).
+  // Override per build with --dart-define=WEBSITE_BASE_URL=https://...
+  static String get websiteBaseUrl => const String.fromEnvironment(
+    'WEBSITE_BASE_URL',
+    defaultValue: 'https://nepalsmarttravel.com',
+  );
+  static String get legalCenterUrl => '$websiteBaseUrl/legal';
+  static String legalDocumentUrl(String slug) => '$websiteBaseUrl/legal/$slug';
+
+  // Canonical legal document slugs (must match backend legal_documents.slug).
+  static const Map<String, String> legalDocuments = {
+    'Terms & Conditions': 'terms',
+    'Privacy Policy': 'privacy',
+    'Community Guidelines & Report Policy': 'community-guidelines',
+    'Coins & Wallet Terms': 'coins',
+    'SOS & Emergency Policy': 'sos',
+    'AI Disclosure': 'ai',
+    'Business & Advertising Terms': 'business-advertising',
+  };
 
   // Location
   static const double defaultLatitude = 27.7172;

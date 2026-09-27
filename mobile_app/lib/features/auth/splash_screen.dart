@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../providers/auth_provider.dart';
 import '../../providers/profile_provider.dart';
+import '../../providers/travel_context_provider.dart';
 import '../../core/services/localization_service.dart';
 
 class AuthInitializationWrapper extends StatefulWidget {
@@ -14,35 +15,9 @@ class AuthInitializationWrapper extends StatefulWidget {
 }
 
 class _AuthInitializationWrapperState
-    extends State<AuthInitializationWrapper>
-    with SingleTickerProviderStateMixin {
+    extends State<AuthInitializationWrapper> {
   bool _initialized = false;
   static const Duration _timeout = Duration(seconds: 12);
-
-  late AnimationController _animController;
-  late Animation<double> _fadeAnim;
-  late Animation<double> _scaleAnim;
-  late Animation<Offset> _slideAnim;
-
-  @override
-  void initState() {
-    super.initState();
-    _animController = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 1200),
-    );
-    _fadeAnim = CurvedAnimation(parent: _animController, curve: Curves.easeOut);
-    _scaleAnim = CurvedAnimation(
-      parent: _animController,
-      curve: const Interval(0.0, 0.6, curve: Curves.elasticOut),
-    );
-    _slideAnim = Tween<Offset>(
-      begin: const Offset(0, 0.3),
-      end: Offset.zero,
-    ).animate(CurvedAnimation(parent: _animController, curve: Curves.easeOutCubic));
-
-    _animController.forward();
-  }
 
   @override
   void didChangeDependencies() {
@@ -61,6 +36,8 @@ class _AuthInitializationWrapperState
     if (!mounted) return;
 
     if (auth.isAuthenticated) {
+      // Authenticated cold start: restore saved route (guests skip).
+      await context.read<TravelContextProvider>().handleLoggedIn();
       try {
         final profileProvider = context.read<ProfileProvider>();
         await profileProvider.loadSettings().timeout(_timeout);
@@ -80,122 +57,40 @@ class _AuthInitializationWrapperState
   }
 
   @override
-  void dispose() {
-    _animController.dispose();
-    super.dispose();
-  }
-
-  @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: Container(
-        width: double.infinity,
-        height: double.infinity,
-        decoration: const BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-            colors: [
-              Color(0xFF004D40),
-              Color(0xFF00695C),
-              Color(0xFF00897B),
-            ],
-          ),
-        ),
-        child: SafeArea(
-          child: Column(
-            children: [
-              const Spacer(flex: 3),
-              // Logo with scale animation
-              ScaleTransition(
-                scale: _scaleAnim,
-                child: Container(
-                  width: 120,
-                  height: 120,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    color: Colors.white.withOpacity(0.15),
-                    border: Border.all(color: Colors.white.withOpacity(0.3), width: 2),
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.black.withOpacity(0.2),
-                        blurRadius: 30,
-                        spreadRadius: 5,
-                      ),
-                    ],
-                  ),
-                  child: ClipOval(
-                    child: Image.asset(
-                      'assets/images/oripori_logo_dark.png',
-                      fit: BoxFit.contain,
-                      errorBuilder: (_, __, ___) => const Icon(
-                        Icons.explore,
-                        size: 64,
-                        color: Colors.white,
-                      ),
-                    ),
-                  ),
-                ),
+      backgroundColor: Colors.white,
+      body: Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            const Text(
+              'ORIPORI',
+              style: TextStyle(
+                fontSize: 32,
+                fontWeight: FontWeight.bold,
+                color: Color(0xFF031A38),
+                letterSpacing: 2,
               ),
-              const SizedBox(height: 24),
-              // App name with slide animation
-              SlideTransition(
-                position: _slideAnim,
-                child: FadeTransition(
-                  opacity: _fadeAnim,
-                  child: Column(
-                    children: [
-                      const Text(
-                        'Oripori',
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontSize: 36,
-                          fontWeight: FontWeight.w800,
-                          letterSpacing: 1.5,
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      Text(
-                        'Nepal Smart Travel & Local Intelligence',
-                        textAlign: TextAlign.center,
-                        style: TextStyle(
-                          color: Colors.white.withOpacity(0.8),
-                          fontSize: 13,
-                          letterSpacing: 0.5,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
+            ),
+            const SizedBox(height: 12),
+            const Text(
+              'Coming soon...',
+              style: TextStyle(
+                fontSize: 16,
+                color: Colors.grey,
               ),
-              const Spacer(flex: 3),
-              // Loading indicator
-              FadeTransition(
-                opacity: _fadeAnim,
-                child: Column(
-                  children: [
-                    SizedBox(
-                      width: 32,
-                      height: 32,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 3,
-                        color: Colors.white.withOpacity(0.8),
-                      ),
-                    ),
-                    const SizedBox(height: 16),
-                    Text(
-                      'Loading...',
-                      style: TextStyle(
-                        color: Colors.white.withOpacity(0.6),
-                        fontSize: 13,
-                      ),
-                    ),
-                  ],
-                ),
+            ),
+            const SizedBox(height: 40),
+            SizedBox(
+              width: 28,
+              height: 28,
+              child: CircularProgressIndicator(
+                strokeWidth: 2.5,
+                color: Colors.grey.shade400,
               ),
-              const Spacer(),
-            ],
-          ),
+            ),
+          ],
         ),
       ),
     );

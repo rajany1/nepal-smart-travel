@@ -3,10 +3,10 @@
 @section('title', 'Complete Business Profile')
 
 @section('content')
-<div class="max-w-lg mx-auto mt-6">
-    <div class="bg-white rounded-2xl shadow-xl p-8">
-        <div class="mb-6">
-            <h2 class="text-2xl font-bold text-slate-800">Business Profile</h2>
+<div class="max-w-lg mx-auto mt-4 sm:mt-6">
+    <div class="bg-white rounded-2xl shadow-xl border border-slate-100 p-5 sm:p-8">
+        <div class="mb-5">
+            <h2 class="text-xl sm:text-2xl font-bold text-slate-800">Business Profile</h2>
             <p class="text-sm text-slate-500 mt-1">
                 @if(isset($partner) && $partner && $partner->verification_status === 'rejected')
                     <span class="inline-flex items-center gap-1.5 text-red-600 font-medium"><i class="fas fa-times-circle"></i> Your previous application was rejected: {{ $partner->rejected_reason ?? 'No reason given' }}</span>
@@ -35,12 +35,20 @@
                 </div>
                 <div>
                     <label class="block text-sm font-medium text-slate-700 mb-1">Business Type</label>
-                    <select name="type" required class="w-full rounded-xl border border-slate-300 px-4 py-2.5 focus:ring-2 focus:ring-primary-500 outline-none">
+                    <select name="type" id="bizTypeSelect" required class="w-full rounded-xl border border-slate-300 px-4 py-2.5 focus:ring-2 focus:ring-primary-500 outline-none">
                         @foreach($types as $t)
                             <option value="{{ $t }}" @selected(old('type', $partner->type ?? '') === $t)>{{ ucwords(str_replace('_', ' ', $t)) }}</option>
                         @endforeach
                     </select>
                 </div>
+            </div>
+            <div id="otherTypeWrap" class="hidden">
+                <label class="block text-sm font-medium text-slate-700 mb-1">Specify Business Type</label>
+                <input type="text" name="other_type" id="otherTypeInput" maxlength="60"
+                       value="{{ old('other_type', $partner->type_label ?? '') }}"
+                       placeholder="e.g. Bakery, Cyber cafe, Photography studio"
+                       class="w-full rounded-xl border border-slate-300 px-4 py-2.5 focus:ring-2 focus:ring-primary-500 outline-none">
+                <p class="text-xs text-slate-400 mt-1">Shown as your business category across the platform.</p>
             </div>
             <div>
                 <label class="block text-sm font-medium text-slate-700 mb-1">Phone</label>
@@ -75,4 +83,22 @@
         </form>
     </div>
 </div>
+@endsection
+
+@section('scripts')
+<script>
+(function () {
+    var sel = document.getElementById('bizTypeSelect');
+    var wrap = document.getElementById('otherTypeWrap');
+    var input = document.getElementById('otherTypeInput');
+    if (!sel || !wrap || !input) return;
+    function sync() {
+        var show = sel.value === 'other';
+        wrap.classList.toggle('hidden', !show);
+        input.required = show;
+    }
+    sel.addEventListener('change', sync);
+    sync();
+})();
+</script>
 @endsection

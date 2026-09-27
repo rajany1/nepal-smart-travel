@@ -27,6 +27,7 @@
             <a href="{{ route('admin.users', ['status' => 'active', 'role' => $role]) }}" class="px-2.5 py-1 text-xs rounded-lg {{ $status === 'active' ? 'bg-green-700 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200' }}">Active</a>
             <a href="{{ route('admin.users', ['status' => 'suspended', 'role' => $role]) }}" class="px-2.5 py-1 text-xs rounded-lg {{ $status === 'suspended' ? 'bg-red-700 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200' }}">Suspended</a>
             <a href="{{ route('admin.users', ['status' => 'banned', 'role' => $role]) }}" class="px-2.5 py-1 text-xs rounded-lg {{ $status === 'banned' ? 'bg-gray-900 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200' }}">Banned</a>
+            <a href="{{ route('admin.users', ['status' => 'suspicious', 'role' => $role]) }}" class="px-2.5 py-1 text-xs rounded-lg {{ $status === 'suspicious' ? 'bg-orange-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200' }}"><i class="fas fa-flag mr-1"></i> Suspicious</a>
         </div>
         <form method="GET" action="{{ route('admin.users') }}" class="ml-auto flex gap-2">
             <input type="hidden" name="role" value="{{ $role }}">

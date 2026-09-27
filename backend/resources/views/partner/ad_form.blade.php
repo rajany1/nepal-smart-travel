@@ -3,11 +3,11 @@
 
 @section('content')
 <div class="max-w-6xl mx-auto">
-    <div class="flex items-center gap-3 mb-6">
-        <a href="{{ route('partner.ads') }}" class="w-9 h-9 rounded-xl bg-white border border-slate-200 grid place-items-center text-slate-500 hover:bg-slate-50"><i class="fas fa-arrow-left"></i></a>
-        <div>
-            <h2 class="text-2xl font-bold text-slate-900">{{ $adCampaign->exists ? 'Edit Ad Campaign' : 'New Ad Campaign' }}</h2>
-<p class="text-sm text-slate-500">Submit for admin approval - you pay a budget via eSewa/Khalti once approved (billed per view &amp; click from the budget).</p>
+    <div class="flex items-center gap-3 mb-5">
+        <a href="{{ route('partner.ads') }}" class="w-9 h-9 rounded-xl bg-white border border-slate-200 grid place-items-center text-slate-500 hover:bg-slate-50 transition shrink-0"><i class="fas fa-arrow-left"></i></a>
+        <div class="min-w-0">
+            <h2 class="text-xl sm:text-2xl font-bold text-slate-900">{{ $adCampaign->exists ? 'Edit Ad Campaign' : 'New Ad Campaign' }}</h2>
+            <p class="text-sm text-slate-500 truncate">Submit for admin approval — pay via eSewa/Khalti once approved.</p>
         </div>
     </div>
 

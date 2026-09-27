@@ -20,9 +20,9 @@ class AdRevenueLedger extends Model
     ];
 
     protected $casts = [
-        'gross_amount' => 'float',
-        'user_share' => 'float',
-        'admin_share' => 'float',
+        'gross_amount' => 'decimal:4',
+        'user_share' => 'decimal:4',
+        'admin_share' => 'decimal:4',
     ];
 
     public function adCampaign(): BelongsTo

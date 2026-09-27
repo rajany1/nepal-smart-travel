@@ -14,6 +14,10 @@ class CoinSetting extends Model
         'description',
     ];
 
+    protected $casts = [
+        'value' => 'decimal:2',
+    ];
+
     public static function getValue(string $key, $default = null)
     {
         $setting = static::where('key', $key)->first();

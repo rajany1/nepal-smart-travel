@@ -1,5 +1,6 @@
 <?php
 
+use App\Jobs\SyncBipadData;
 use Illuminate\Foundation\Inspiring;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Schedule;
@@ -18,3 +19,9 @@ Schedule::command('offers:expire')->everyMinute()->withoutOverlapping();
 
 // Auto-pause ad campaigns whose end time passed (also guarded lazily by isServable)
 Schedule::command('ads:expire')->everyMinute()->withoutOverlapping();
+
+// BIPAD API Sync - runs every minute to fetch latest incidents & alerts
+Schedule::job(new SyncBipadData('both'))->everyMinute()->withoutOverlapping();
+
+// Data retention purge - runs daily at 3 AM
+Schedule::command('data:purge')->dailyAt('03:00')->withoutOverlapping();

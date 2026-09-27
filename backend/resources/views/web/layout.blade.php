@@ -19,12 +19,22 @@
             }
         }
     </script>
+    <style>
+        /* Fixed header that compacts on scroll — out of flow so content never shifts.
+           Body padding-top reserves full height (refined by script). */
+        #site-header { position: fixed; top: 0; left: 0; right: 0; }
+        #site-header .site-row { transition: height 0.25s ease; }
+        #site-header.is-compact .site-row { height: 3rem; }
+        #site-header.is-compact .site-subnav { display: none; }
+        body { padding-top: 65px; }
+        @media (max-width: 767px) { body { padding-top: 106px; } }
+    </style>
     @stack('head')
 </head>
 <body class="bg-slate-50 min-h-screen flex flex-col font-sans">
-    <header class="bg-primary-900 text-white shadow-lg sticky top-0 z-40">
+    <header id="site-header" class="bg-primary-900 text-white shadow-lg z-40">
         <div class="max-w-7xl mx-auto px-4 sm:px-6">
-            <div class="flex items-center justify-between h-16">
+            <div class="site-row flex items-center justify-between h-16">
                 <a href="{{ route('web.home') }}" class="flex items-center gap-3">
                     <div class="w-10 h-10 rounded-xl bg-accent-500 grid place-items-center text-xl"><i class="fas fa-mountain"></i></div>
                     <div class="leading-tight">
@@ -46,7 +56,7 @@
                 </a>
             </div>
         </div>
-        <nav class="md:hidden border-t border-primary-800">
+        <nav class="site-subnav md:hidden border-t border-primary-800">
             <div class="max-w-7xl mx-auto px-4 flex items-center gap-5 overflow-x-auto text-sm text-teal-100 py-2.5">
                 <a href="{{ route('web.places') }}" class="whitespace-nowrap hover:text-white">Places</a>
                 <a href="{{ route('web.category', 'hotels') }}" class="whitespace-nowrap hover:text-white">Hotels</a>
@@ -111,6 +121,26 @@
             if (new URLSearchParams(window.location.search).has('app')) {
                 document.cookie = 'nst_app=1; path=/; max-age=31536000';
             }
+        })();
+
+        // Fixed header: reserve its full height, compact on scroll (hysteresis)
+        (function () {
+            var header = document.getElementById('site-header');
+            if (!header) return;
+            document.body.style.paddingTop = header.offsetHeight + 'px';
+            window.addEventListener('resize', function () {
+                var was = header.classList.contains('is-compact');
+                header.classList.remove('is-compact');
+                document.body.style.paddingTop = header.offsetHeight + 'px';
+                if (was) header.classList.add('is-compact');
+            });
+            var onScroll = function () {
+                var y = window.scrollY;
+                if (y > 60) header.classList.add('is-compact');
+                else if (y < 8) header.classList.remove('is-compact');
+            };
+            onScroll();
+            window.addEventListener('scroll', onScroll, { passive: true });
         })();
     </script>
     @stack('scripts')

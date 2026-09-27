@@ -12,6 +12,8 @@ class ReportMedia extends Model
         'report_id',
         'type',
         'media_url',
+        'media_hash',
+        'fingerprint_hash',
     ];
 
     public function report()

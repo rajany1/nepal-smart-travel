@@ -114,6 +114,8 @@ class _UserPublicProfileScreenState extends State<UserPublicProfileScreen> {
           final approvalRate = p['approval_rate'] is num ? p['approval_rate'] as num : 0;
           final badges = p['badges'] as List? ?? [];
           final recentReports = p['recent_reports'] as List? ?? [];
+          final isSuspicious = p['is_suspicious'] as bool? ?? false;
+          final fraudLevel = p['fraud_level'] as String? ?? 'none';
 
           return RefreshIndicator(
             onRefresh: () => prov.loadPublicProfile(widget.userId),
@@ -123,7 +125,7 @@ class _UserPublicProfileScreenState extends State<UserPublicProfileScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  _buildHeader(name, avatarUrl, bio, tick),
+                  _buildHeader(name, avatarUrl, bio, tick, isSuspicious, fraudLevel),
                   const SizedBox(height: 16),
                   SectionCard(
                     child: Column(
@@ -265,13 +267,15 @@ class _UserPublicProfileScreenState extends State<UserPublicProfileScreen> {
     );
   }
 
-  Widget _buildHeader(String name, String? avatarUrl, String? bio, String tick) {
+  Widget _buildHeader(String name, String? avatarUrl, String? bio, String tick, bool isSuspicious, String fraudLevel) {
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(24),
       decoration: BoxDecoration(
-        gradient: const LinearGradient(
-          colors: [AppTheme.primaryColor, AppTheme.primaryLight],
+        gradient: LinearGradient(
+          colors: isSuspicious
+              ? [const Color(0xFFDC2626), const Color(0xFFEF4444)]
+              : [AppTheme.primaryColor, AppTheme.primaryLight],
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
         ),
@@ -302,6 +306,25 @@ class _UserPublicProfileScreenState extends State<UserPublicProfileScreen> {
           ),
           const SizedBox(height: 12),
           Text(name, style: const TextStyle(fontSize: AppTheme.text2xl, fontWeight: FontWeight.bold, color: Colors.white)),
+          if (isSuspicious) ...[
+            const SizedBox(height: 8),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+              decoration: BoxDecoration(
+                color: Colors.white.withOpacity(0.2),
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(color: Colors.white.withOpacity(0.4)),
+              ),
+              child: const Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.flag, color: Colors.white, size: 16),
+                  SizedBox(width: 6),
+                  Text('Flagged for suspicious activity', style: TextStyle(fontSize: 12, color: Colors.white, fontWeight: FontWeight.w600)),
+                ],
+              ),
+            ),
+          ],
           if (bio != null && bio.isNotEmpty) ...[
             const SizedBox(height: 6),
             Text(bio, style: const TextStyle(fontSize: AppTheme.textBase, color: Colors.white70), textAlign: TextAlign.center, maxLines: 3, overflow: TextOverflow.ellipsis),

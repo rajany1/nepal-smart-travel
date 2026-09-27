@@ -7,6 +7,7 @@ use App\Models\PlatformExpense;
 use App\Models\EmployeeSalary;
 use App\Models\AdRevenueLedger;
 use App\Models\Withdrawal;
+use App\Models\CoinSetting;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Carbon\Carbon;
@@ -201,7 +202,7 @@ class PlatformExpenseController extends Controller
         $startOfMonth = Carbon::createFromDate($year, $month, 1)->startOfMonth();
         $endOfMonth = $startOfMonth->copy()->endOfMonth();
 
-        // Revenue
+        // Revenue (monthly)
         $adRevenue = AdRevenueLedger::whereBetween('created_at', [$startOfMonth, $endOfMonth])->sum('admin_share');
         $bookingRevenue = \App\Models\Booking::where('status', 'completed')
             ->whereBetween('created_at', [$startOfMonth, $endOfMonth])
@@ -213,23 +214,29 @@ class PlatformExpenseController extends Controller
 
         $totalRevenue = $adRevenue + $bookingRevenue + $subscriptionRevenue;
 
-        // Expenses
+        // Expenses (monthly)
         $monthlyExpenses = PlatformExpense::active()->get()->sum('monthly_equivalent');
         $salaryExpenses = EmployeeSalary::forMonth($month, $year)->sum('net_salary');
         $totalExpenses = $monthlyExpenses + $salaryExpenses;
 
-        // Rewards
-        $coinSettings = \App\Models\CoinSetting::first();
-        $coinToNpr = (float) ($coinSettings->coin_to_npr_rate ?? 1);
+        // Rewards — monthly only (coins issued this month, NOT all-time)
+        $coinToNpr = (float) CoinSetting::getValue('coin_to_npr_rate', 1);
 
-        $pointsIssued = \App\Models\CoinTransaction::whereMonth('created_at', $month)
-            ->whereYear('created_at', $year)
-            ->where('type', 'ad_impression')
+        $pointsIssued = \App\Models\CoinTransaction::whereBetween('created_at', [$startOfMonth, $endOfMonth])
+            ->whereIn('type', ['impression_earning', 'click_earning'])
             ->sum('amount');
 
-        $pointsRedeemed = \App\Models\OriporiCoinWallet::sum('total_withdrawn');
-        $outstandingPoints = \App\Models\OriporiCoinWallet::sum('total_earned') - $pointsRedeemed;
-        $rewardCost = $pointsRedeemed * $coinToNpr;
+        // Monthly reward cost = coins issued this month × coin_to_npr_rate
+        $rewardCost = $pointsIssued * $coinToNpr;
+
+        // Points redeemed (withdrawn) this month
+        $pointsRedeemed = \App\Models\CoinTransaction::whereBetween('created_at', [$startOfMonth, $endOfMonth])
+            ->where('type', 'withdrawal')
+            ->sum('amount');
+
+        // Outstanding = all-time earned - all-time withdrawn (for balance sheet context)
+        $outstandingPoints = \App\Models\OriporiCoinWallet::sum('total_earned')
+            - \App\Models\OriporiCoinWallet::sum('total_withdrawn');
 
         $netProfit = $totalRevenue - $totalExpenses - $rewardCost;
 

@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta name="description" content="Nepal Smart Travel & Local Intelligence Platform — discover places, live road conditions, routes, and exclusive local offers.">
+    <meta name="description" content="@yield('description', 'Nepal Smart Travel & Local Intelligence Platform — discover places, live road conditions, routes, and exclusive local offers.')">
     <title>@yield('title', 'Nepal Smart Travel')</title>
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800;900&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
@@ -13,6 +13,7 @@
             font-family: 'Plus Jakarta Sans', sans-serif;
             background: #020e0e; color: #fff; overflow-x: hidden; position: relative;
             min-height: 100vh; display: flex; flex-direction: column;
+            padding-top: 76px; /* reserves fixed navbar height (refined by script) */
         }
         body::before {
             content: ''; position: fixed; inset: 0;
@@ -29,7 +30,7 @@
         @keyframes orbFloat { 0%,100%{transform:translate(0,0) scale(1)} 33%{transform:translate(40px,-40px) scale(1.1)} 66%{transform:translate(-30px,30px) scale(0.9)} }
 
         /* NAVBAR */
-        .k-nav { display:flex; align-items:center; justify-content:space-between; padding:0.75rem 3rem; position:sticky; top:0; z-index:100; backdrop-filter:blur(24px); background:rgba(2,14,14,0.7); border-bottom:1px solid rgba(255,255,255,0.04); }
+        .k-nav { display:flex; align-items:center; justify-content:space-between; padding:0.75rem 3rem; position:fixed; top:0; left:0; right:0; z-index:100; backdrop-filter:blur(24px); background:rgba(2,14,14,0.7); border-bottom:1px solid rgba(255,255,255,0.04); transition:padding 0.25s ease; }
         .k-logo { display:flex; align-items:center; gap:0.75rem; }
         .k-logo-icon { width:42px; height:42px; background:linear-gradient(135deg,#f59e0b,#ea580c); border-radius:12px; display:flex; align-items:center; justify-content:center; box-shadow:0 8px 32px rgba(245,158,11,0.3); position:relative; overflow:hidden; }
         .k-logo-icon::after { content:''; position:absolute; inset:-50%; background:linear-gradient(45deg,transparent 30%,rgba(255,255,255,0.25) 50%,transparent 70%); animation:shine 4s infinite; }
@@ -68,9 +69,16 @@
             .k-nav-links { display:none; }
             .k-nav { padding:1rem 1.5rem; }
             .k-footer-inner { grid-template-columns:1fr; gap:2rem; }
+            body { padding-top:84px; }
         }
+
+        /* Compact navbar on scroll — fixed & out of flow, so content never shifts */
+        .k-nav.is-compact { padding:0.4rem 3rem; }
+        .k-nav.is-compact .k-logo img { height:44px !important; }
+        @media (max-width: 1024px) { .k-nav.is-compact { padding:0.45rem 1.5rem; } }
         @stack('head')
     </style>
+    @stack('meta')
 </head>
 <body>
     <div class="orb orb-1"></div>
@@ -79,9 +87,7 @@
 
     <nav class="k-nav">
         <a href="{{ route('web.home') }}" class="k-logo" style="text-decoration:none">
-            <div style="background:rgba(255,255,255,0.9);border-radius:16px;padding:8px 12px;display:flex;align-items:center;box-shadow:0 4px 20px rgba(0,0,0,0.3)">
-                <img src="{{ asset('images/oripori_logo.png') }}" alt="Oripori" style="height:80px;width:auto;object-fit:contain">
-            </div>
+            <img src="{{ asset('images/oripori_logo_wordmark.png') }}" alt="Oripori" style="height:52px;width:auto;object-fit:contain">
         </a>
         <ul class="k-nav-links">
             <li><a href="{{ route('web.home') }}">Home</a></li>
@@ -129,8 +135,8 @@
                 <ul>
                     <li><a href="#">Help Center</a></li>
                     <li><a href="#">Safety</a></li>
-                    <li><a href="#">Terms of Service</a></li>
-                    <li><a href="#">Privacy Policy</a></li>
+                    <li><a href="{{ route('web.legal.show', 'terms') }}">Terms of Service</a></li>
+                    <li><a href="{{ route('web.legal.show', 'privacy') }}">Privacy Policy</a></li>
                 </ul>
             </div>
         </div>
@@ -144,6 +150,26 @@
             if (new URLSearchParams(window.location.search).has('app')) {
                 document.cookie = 'nst_app=1; path=/; max-age=31536000';
             }
+        })();
+
+        /* Fixed navbar: reserve its full height, compact on scroll (hysteresis) */
+        (function () {
+            var nav = document.querySelector('.k-nav');
+            if (!nav) return;
+            document.body.style.paddingTop = nav.offsetHeight + 'px';
+            window.addEventListener('resize', function () {
+                var was = nav.classList.contains('is-compact');
+                nav.classList.remove('is-compact');
+                document.body.style.paddingTop = nav.offsetHeight + 'px';
+                if (was) nav.classList.add('is-compact');
+            });
+            var onScroll = function () {
+                var y = window.scrollY;
+                if (y > 60) nav.classList.add('is-compact');
+                else if (y < 8) nav.classList.remove('is-compact');
+            };
+            onScroll();
+            window.addEventListener('scroll', onScroll, { passive: true });
         })();
     </script>
     @stack('scripts')

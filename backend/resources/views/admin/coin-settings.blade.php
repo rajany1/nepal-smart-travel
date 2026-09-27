@@ -3,8 +3,6 @@
 @section('title', 'Coin Settings - Admin')
 
 @php
-    $impVal = (float) ($settings->where('key', 'impression_value')->first()?->value ?? 0.05);
-    $clkVal = (float) ($settings->where('key', 'click_value')->first()?->value ?? 0.50);
     $usrShare = (float) ($settings->where('key', 'user_share_percent')->first()?->value ?? 70);
     $admShare = (float) ($settings->where('key', 'admin_share_percent')->first()?->value ?? 30);
     $coinRate = (float) ($settings->where('key', 'coin_to_npr_rate')->first()?->value ?? 1);
@@ -14,8 +12,10 @@
     $dailyCap = $settings->where('key', 'daily_earning_cap')->first()?->value ?? 500;
     $dailyImpCap = $settings->where('key', 'daily_impression_cap')->first()?->value ?? 1000;
     $cooldown = $settings->where('key', 'impression_cooldown_minutes')->first()?->value ?? 10;
-    $coinsPerImp = round($impVal * ($usrShare / 100), 4);
-    $coinsPerClick = round($clkVal * ($usrShare / 100), 4);
+    $adCpm = (float) \App\Models\GameSetting::getValue('ad_cpm', 50);
+    $adCpc = (float) \App\Models\GameSetting::getValue('ad_cpc', 0.50);
+    $coinsPerImp = round(($adCpm / 1000) * ($usrShare / 100), 4);
+    $coinsPerClick = round($adCpc * ($usrShare / 100), 4);
     $lastUpdated = $settings->sortByDesc('updated_at')->first()?->updated_at;
 @endphp
 
@@ -35,10 +35,10 @@
     <div class="bg-gradient-to-r from-teal-500 to-teal-600 rounded-xl p-6 mb-6 text-white">
         <h3 class="font-bold text-lg mb-3"><i class="fas fa-info-circle mr-2"></i> How Oripori Coins Work</h3>
         <div class="grid grid-cols-1 md:grid-cols-4 gap-4 text-sm">
-            <div class="bg-white/10 rounded-lg p-3">
-                <div class="font-bold">1. Partner Posts Ad</div>
-                <div class="text-teal-100">Pays Rs. {{ number_format($impVal * 1000, 2) }}/1000 views (CPM)</div>
-            </div>
+                <div class="bg-white/10 rounded-lg p-3">
+                    <div class="font-bold">1. Partner Posts Ad</div>
+                    <div class="text-teal-100">Pays Rs. {{ number_format($adCpm, 2) }}/1000 views (CPM)</div>
+                </div>
             <div class="bg-white/10 rounded-lg p-3">
                 <div class="font-bold">2. Ad Shows on Report</div>
                 <div class="text-teal-100">User's report screen ma ad dekhincha</div>
@@ -89,11 +89,11 @@
                 <div class="space-y-4">
                     <div class="flex items-center justify-between p-3 bg-blue-50 rounded-lg">
                         <span class="text-sm font-medium text-gray-700">CPM (per 1000 views)</span>
-                        <span class="font-bold text-blue-600 text-lg">Rs. {{ number_format($impVal * 1000, 2) }}</span>
+                        <span class="font-bold text-blue-600 text-lg">Rs. {{ number_format($adCpm, 2) }}</span>
                     </div>
                     <div class="flex items-center justify-between p-3 bg-indigo-50 rounded-lg">
                         <span class="text-sm font-medium text-gray-700">CPC (per click)</span>
-                        <span class="font-bold text-indigo-600 text-lg">Rs. {{ number_format($clkVal, 2) }}</span>
+                        <span class="font-bold text-indigo-600 text-lg">Rs. {{ number_format($adCpc, 2) }}</span>
                     </div>
                     <div class="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
                         <span class="text-sm font-medium text-gray-700">Revenue Split</span>
@@ -161,54 +161,54 @@
             </div>
         </div>
 
-        {{-- Coin Value Settings --}}
+        {{-- Ad Pricing Settings --}}
         <div class="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
             <div class="bg-green-50 border-b border-green-100 px-6 py-4">
                 <h2 class="text-lg font-semibold text-gray-900">
-                    <i class="fas fa-coins text-green-500 mr-2"></i> Coin Values
+                    <i class="fas fa-ad text-green-500 mr-2"></i> Ad Pricing
                 </h2>
-                <p class="text-sm text-gray-600 mt-1">Kati coins dincha per impression/click</p>
+                <p class="text-sm text-gray-600 mt-1">Advertisers le kati tircha per impression/click — yo bata actual revenue generate hunchha</p>
             </div>
             <div class="p-6">
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
                     <div>
-                        <label class="block text-sm font-semibold text-gray-700 mb-2">Per 1000 Views (CPM)</label>
+                        <label class="block text-sm font-semibold text-gray-700 mb-2">CPM — Cost Per 1000 Views (NPR)</label>
                         <div class="relative">
-                            <input type="number" name="impression_value" step="0.01" min="0"
-                                value="{{ $impVal }}"
-                                class="w-full border-2 border-gray-300 rounded-xl px-4 py-3 focus:border-green-500 focus:ring-2 focus:ring-green-200"
-                                id="impressionValueInput">
-                            <span class="absolute right-4 top-1/2 -translate-y-1/2 text-gray-400 font-bold">Coins</span>
+                            <span class="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 font-bold">Rs.</span>
+                            <input type="number" name="ad_cpm" step="0.01" min="0"
+                                value="{{ $adCpm }}"
+                                class="w-full border-2 border-gray-300 rounded-xl pl-10 pr-12 py-3 focus:border-green-500 focus:ring-2 focus:ring-green-200"
+                                id="adCpmInput">
                         </div>
-                        <p class="text-xs text-gray-500 mt-2">1000 impressions huda kati coins total</p>
+                        <p class="text-xs text-gray-500 mt-2">Advertisers le 1000 impressions ko lagi kati tircha</p>
                     </div>
                     <div>
-                        <label class="block text-sm font-semibold text-gray-700 mb-2">Per Click (CPC)</label>
+                        <label class="block text-sm font-semibold text-gray-700 mb-2">CPC — Cost Per Click (NPR)</label>
                         <div class="relative">
-                            <input type="number" name="click_value" step="0.01" min="0"
-                                value="{{ $clkVal }}"
-                                class="w-full border-2 border-gray-300 rounded-xl px-4 py-3 focus:border-green-500 focus:ring-2 focus:ring-green-200"
-                                id="clickValueInput">
-                            <span class="absolute right-4 top-1/2 -translate-y-1/2 text-gray-400 font-bold">Coins</span>
+                            <span class="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 font-bold">Rs.</span>
+                            <input type="number" name="ad_cpc" step="0.01" min="0"
+                                value="{{ $adCpc }}"
+                                class="w-full border-2 border-gray-300 rounded-xl pl-10 pr-12 py-3 focus:border-green-500 focus:ring-2 focus:ring-green-200"
+                                id="adCpcInput">
                         </div>
-                        <p class="text-xs text-gray-500 mt-2">Eutai click huda kati coins</p>
+                        <p class="text-xs text-gray-500 mt-2">Advertisers le eutai click ko lagi kati tircha</p>
                     </div>
                 </div>
 
                 {{-- Calculation Formula --}}
                 <div class="mt-6 p-4 bg-green-50 rounded-xl">
-                    <p class="text-sm font-semibold text-gray-700 mb-2"><i class="fas fa-calculator mr-1"></i> Calculation Formula:</p>
+                    <p class="text-sm font-semibold text-gray-700 mb-2"><i class="fas fa-calculator mr-1"></i> Calculation Formula (Actual):</p>
                     <div class="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
                         <div class="bg-white rounded-lg p-3 border border-green-200">
                             <p class="font-semibold text-green-700">Per Impression:</p>
                             <code class="text-xs" id="impressionFormula">
-                                {{ $impVal }} × ({{ $usrShare }} / 100) = {{ $coinsPerImp }} Coins
+                                ({{ $adCpm }} / 1000) × ({{ $usrShare }} / 100) = {{ $coinsPerImp }} Coins
                             </code>
                         </div>
                         <div class="bg-white rounded-lg p-3 border border-green-200">
                             <p class="font-semibold text-green-700">Per Click:</p>
                             <code class="text-xs" id="clickFormula">
-                                {{ $clkVal }} × ({{ $usrShare }} / 100) = {{ $coinsPerClick }} Coins
+                                {{ $adCpc }} × ({{ $usrShare }} / 100) = {{ $coinsPerClick }} Coins
                             </code>
                         </div>
                     </div>
@@ -354,8 +354,8 @@
     function updatePreview() {
         var userShare = parseFloat(document.getElementById('userShareInput').value) || 70;
         var adminShare = 100 - userShare;
-        var impressionValue = parseFloat(document.getElementById('impressionValueInput').value) || 0.05;
-        var clickValue = parseFloat(document.getElementById('clickValueInput').value) || 0.50;
+        var adCpm = parseFloat(document.getElementById('adCpmInput').value) || 50;
+        var adCpc = parseFloat(document.getElementById('adCpcInput').value) || 0.50;
         var coinToNpr = parseFloat(document.getElementById('coinToNprInput').value) || 1;
 
         document.getElementById('adminShareDisplay').value = adminShare;
@@ -365,13 +365,14 @@
         document.getElementById('userBarText').textContent = 'Rs. ' + userShare + ' → User';
         document.getElementById('adminBarText').textContent = 'Rs. ' + adminShare + ' → Platform';
 
-        var coinsPerImpression = (impressionValue * (userShare / 100));
-        var coinsPerClick = (clickValue * (userShare / 100));
+        var grossPerImp = adCpm / 1000;
+        var coinsPerImpression = grossPerImp * (userShare / 100);
+        var coinsPerClick = adCpc * (userShare / 100);
 
         document.getElementById('impressionFormula').textContent =
-            impressionValue + ' × (' + userShare + ' / 100) = ' + coinsPerImpression.toFixed(4) + ' Coins';
+            '(' + adCpm + ' / 1000) × (' + userShare + ' / 100) = ' + coinsPerImpression.toFixed(4) + ' Coins';
         document.getElementById('clickFormula').textContent =
-            clickValue + ' × (' + userShare + ' / 100) = ' + coinsPerClick.toFixed(4) + ' Coins';
+            adCpc + ' × (' + userShare + ' / 100) = ' + coinsPerClick.toFixed(4) + ' Coins';
 
         document.getElementById('earningPreview').textContent =
             coinsPerImpression.toFixed(4) + ' Coins per view';
@@ -385,7 +386,7 @@
             '100 Coins = Rs. ' + withdrawal100.toFixed(2);
     }
 
-    ['userShareInput', 'impressionValueInput', 'clickValueInput', 'coinToNprInput', 'min_withdrawal_esewa', 'min_withdrawal_bank'].forEach(function(id) {
+    ['userShareInput', 'adCpmInput', 'adCpcInput', 'coinToNprInput', 'min_withdrawal_esewa', 'min_withdrawal_bank'].forEach(function(id) {
         var el = document.getElementById(id) || document.querySelector('[name=' + id + ']');
         if (el) el.addEventListener('input', updatePreview);
     });

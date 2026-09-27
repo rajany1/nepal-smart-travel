@@ -6,14 +6,24 @@ use App\Models\OriporiCoinWallet;
 use App\Models\CoinTransaction;
 use App\Models\Withdrawal;
 use App\Models\CoinSetting;
+use App\Models\PaymentTransaction;
 use App\Services\CoinService;
+use App\Services\PaymentProcessor;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 
 class WithdrawalController extends Controller
 {
+    private PaymentProcessor $paymentProcessor;
+
+    public function __construct(PaymentProcessor $paymentProcessor)
+    {
+        $this->paymentProcessor = $paymentProcessor;
+    }
+
     /**
      * Get user wallet info.
      */
@@ -28,30 +38,35 @@ class WithdrawalController extends Controller
         $withdrawalMethods = [
             'esewa' => [
                 'min_withdrawal' => (float) CoinSetting::getValue('min_withdrawal_esewa', 100),
+                'max_withdrawal' => (float) CoinSetting::getValue('max_withdrawal_esewa', 50000),
                 'label' => 'eSewa',
             ],
             'khalti' => [
                 'min_withdrawal' => (float) CoinSetting::getValue('min_withdrawal_khalti', 100),
+                'max_withdrawal' => (float) CoinSetting::getValue('max_withdrawal_khalti', 50000),
                 'label' => 'Khalti',
             ],
             'bank' => [
                 'min_withdrawal' => (float) CoinSetting::getValue('min_withdrawal_bank', 500),
+                'max_withdrawal' => (float) CoinSetting::getValue('max_withdrawal_bank', 500000),
                 'label' => 'Bank Transfer',
             ],
         ];
 
-        // Recent withdrawals
+        // Recent withdrawals with pagination
+        $page = (int) $request->get('page', 1);
+        $perPage = min((int) $request->get('per_page', 20), 50);
         $recentWithdrawals = Withdrawal::where('user_id', $user->id)
             ->orderByDesc('created_at')
-            ->limit(10)
-            ->get(['id', 'amount', 'method', 'status', 'created_at'])
+            ->paginate($perPage, ['id', 'amount', 'method', 'status', 'created_at', 'processed_at'], 'page', $page)
             ->toArray();
 
         return response()->json([
             'wallet' => $balance,
             'today_earnings' => $todayEarnings,
             'withdrawal_methods' => $withdrawalMethods,
-            'recent_withdrawals' => $recentWithdrawals,
+            'withdrawals' => $recentWithdrawals,
+            'coin_to_npr_rate' => (float) CoinSetting::getValue('coin_to_npr_rate', 1),
         ]);
     }
 
@@ -84,26 +99,39 @@ class WithdrawalController extends Controller
             'amount' => 'required|numeric|min:1',
             'method' => 'required|in:esewa,khalti,bank',
             'account_details' => 'required|array',
+            '_idempotency_key' => 'sometimes|string|max:100',
         ]);
 
         $user = Auth::user();
         $coinService = app(CoinService::class);
         $wallet = OriporiCoinWallet::getForUser($user->id);
 
+        $amountCoins = (float) $request->amount;
+        $method = $request->method;
+
         // Check minimum withdrawal (in Coins)
-        $minKey = "min_withdrawal_{$request->method}";
+        $minKey = "min_withdrawal_{$method}";
         $minWithdrawal = (float) CoinSetting::getValue($minKey, 100);
+        $maxKey = "max_withdrawal_{$method}";
+        $maxWithdrawal = (float) CoinSetting::getValue($maxKey, 50000);
         $coinToNpr = (float) CoinSetting::getValue('coin_to_npr_rate', 1);
 
-        if ((float) $request->amount < $minWithdrawal) {
+        if ($amountCoins < $minWithdrawal) {
             return response()->json([
                 'success' => false,
-                'error' => "Minimum withdrawal for {$request->method} is {$minWithdrawal} Coins",
+                'error' => "Minimum withdrawal for {$method} is {$minWithdrawal} Coins",
+            ], 422);
+        }
+
+        if ($amountCoins > $maxWithdrawal) {
+            return response()->json([
+                'success' => false,
+                'error' => "Maximum withdrawal for {$method} is {$maxWithdrawal} Coins",
             ], 422);
         }
 
         // Check balance
-        if (!$wallet->canWithdraw((float) $request->amount)) {
+        if (!$wallet->canWithdraw($amountCoins)) {
             return response()->json([
                 'success' => false,
                 'error' => 'Insufficient balance',
@@ -111,7 +139,7 @@ class WithdrawalController extends Controller
         }
 
         // Validate account details based on method
-        $accountValidation = $this->validateAccountDetails($request->method, $request->account_details);
+        $accountValidation = $this->validateAccountDetails($method, $request->account_details);
         if (!$accountValidation['valid']) {
             return response()->json([
                 'success' => false,
@@ -119,42 +147,104 @@ class WithdrawalController extends Controller
             ], 422);
         }
 
-        // Check for pending withdrawals
+        // Check for pending withdrawals (allow configurable max)
+        $maxPending = (int) CoinSetting::getValue('max_pending_withdrawals', 3);
         $pendingCount = Withdrawal::where('user_id', $user->id)
             ->whereIn('status', ['pending', 'processing'])
             ->count();
 
-        if ($pendingCount > 0) {
+        if ($pendingCount >= $maxPending) {
             return response()->json([
                 'success' => false,
-                'error' => 'You already have a pending withdrawal request',
+                'error' => "You have {$maxPending} pending withdrawals. Please wait for them to complete.",
             ], 422);
         }
 
-        return DB::transaction(function () use ($user, $wallet, $request) {
-            // Debit wallet
-            $wallet->debit((float) $request->amount);
+        // Convert to NPR for limit checks
+        $amountNpr = $this->paymentProcessor->coinsToNpr($amountCoins);
+
+        // Check user daily/monthly limits
+        $limitCheck = $this->paymentProcessor->checkUserLimits($user->id, $method, $amountNpr);
+        if (!$limitCheck['allowed']) {
+            return response()->json([
+                'success' => false,
+                'error' => $limitCheck['message'],
+            ], 422);
+        }
+
+        // Generate idempotency key
+        $idempotencyKey = $request->input('_idempotency_key')
+            ?? $request->header('Idempotency-Key')
+            ?? 'withdrawal-' . $user->id . '-' . $method . '-' . $amountCoins . '-' . now()->format('YmdHis');
+
+        // Check if this exact request was already processed
+        $existing = PaymentTransaction::where('idempotency_key', $idempotencyKey)
+            ->where('user_id', $user->id)
+            ->first();
+        if ($existing) {
+            return response()->json([
+                'success' => true,
+                'message' => 'Withdrawal request already submitted',
+                'withdrawal' => [
+                    'id' => $existing->withdrawal_id,
+                    'status' => $existing->status,
+                ],
+            ]);
+        }
+
+        return DB::transaction(function () use ($user, $wallet, $request, $amountCoins, $method, $amountNpr, $idempotencyKey) {
+            // Debit wallet via FinancialLedgerService (atomic + ledger-backed)
+            $ledger = app(\App\Services\FinancialLedgerService::class);
+            $coinTxn = $ledger->debitCoins(
+                userId: $user->id,
+                amount: $amountCoins,
+                type: 'withdrawal',
+                description: "Withdrawal via {$method} (Rs. " . number_format($amountNpr, 2) . ")",
+                metadata: [
+                    'method' => $method,
+                    'amount_npr' => $amountNpr,
+                ],
+                idempotencyKey: $idempotencyKey . '-coin',
+            );
 
             // Create withdrawal request
             $withdrawal = Withdrawal::create([
                 'user_id' => $user->id,
-                'amount' => $request->amount,
-                'method' => $request->method,
+                'amount' => $amountCoins,
+                'method' => $method,
                 'account_details' => $request->account_details,
                 'status' => 'pending',
             ]);
 
-            // Create coin transaction record
-            CoinTransaction::create([
+            // Create payment transaction record (pending)
+            PaymentTransaction::create([
+                'reference_id' => 'WTH-' . $withdrawal->id . '-' . \Illuminate\Support\Str::upper(\Illuminate\Support\Str::random(6)),
+                'method' => $method,
+                'amount_npr' => $amountNpr,
+                'account_details' => $request->account_details,
+                'status' => 'pending',
+                'idempotency_key' => $idempotencyKey,
                 'user_id' => $user->id,
-                'type' => 'withdrawal',
-                'amount' => -$request->amount,
-                'description' => "Withdrawal via {$request->method}",
+                'withdrawal_id' => $withdrawal->id,
                 'metadata' => [
-                    'withdrawal_id' => $withdrawal->id,
-                    'method' => $request->method,
+                    'amount_coins' => $amountCoins,
+                    'coin_to_npr_rate' => \App\Services\FinancialLedgerService::getCoinToNprRate(),
                 ],
             ]);
+
+            // Audit log
+            app(\App\Services\ModeratorService::class)->log(
+                $user,
+                'withdrawal.requested',
+                'withdrawal',
+                $withdrawal->id,
+                "User requested withdrawal of {$amountCoins} Coins (Rs. " . number_format($amountNpr, 2) . ") via {$method}",
+                [
+                    'amount_coins' => $amountCoins,
+                    'amount_npr' => $amountNpr,
+                    'method' => $method,
+                ]
+            );
 
             return response()->json([
                 'success' => true,
@@ -162,6 +252,7 @@ class WithdrawalController extends Controller
                 'withdrawal' => [
                     'id' => $withdrawal->id,
                     'amount' => $withdrawal->amount,
+                    'amount_npr' => $amountNpr,
                     'method' => $withdrawal->method,
                     'status' => $withdrawal->status,
                 ],
@@ -200,6 +291,9 @@ class WithdrawalController extends Controller
                 if (empty($details['bank_name']) || empty($details['account_number']) || empty($details['account_name'])) {
                     return ['valid' => false, 'error' => 'Bank name, account number, and account name are required'];
                 }
+                if (strlen($details['account_number']) < 10) {
+                    return ['valid' => false, 'error' => 'Invalid bank account number'];
+                }
                 break;
         }
 
@@ -226,21 +320,47 @@ class WithdrawalController extends Controller
         }
 
         return DB::transaction(function () use ($withdrawal, $user) {
-            $wallet = OriporiCoinWallet::getForUser($user->id);
-            $wallet->credit((float) $withdrawal->amount);
+            // Credit back via FinancialLedgerService (atomic + ledger-backed)
+            $ledger = app(\App\Services\FinancialLedgerService::class);
+            $amountNpr = $this->paymentProcessor->coinsToNpr((float) $withdrawal->amount);
+
+            $ledger->creditCoins(
+                userId: $user->id,
+                amount: (float) $withdrawal->amount,
+                type: 'admin_adjustment',
+                description: "Withdrawal cancelled - amount refunded",
+                metadata: [
+                    'withdrawal_id' => $withdrawal->id,
+                    'action' => 'cancel',
+                    'amount_npr' => $amountNpr,
+                ],
+                idempotencyKey: "wth-cancel:{$withdrawal->id}",
+            );
 
             $withdrawal->update(['status' => 'cancelled']);
 
-            CoinTransaction::create([
-                'user_id' => $user->id,
-                'type' => 'admin_adjustment',
-                'amount' => $withdrawal->amount,
-                'description' => "Withdrawal cancelled - amount refunded",
-                'metadata' => [
-                    'withdrawal_id' => $withdrawal->id,
-                    'action' => 'cancel',
-                ],
-            ]);
+            // Update payment transaction
+            PaymentTransaction::where('withdrawal_id', $withdrawal->id)
+                ->where('user_id', $user->id)
+                ->update([
+                    'status' => 'rejected',
+                    'failure_reason' => 'Cancelled by user',
+                    'completed_at' => now(),
+                ]);
+
+            // Audit log
+            app(\App\Services\ModeratorService::class)->log(
+                $user,
+                'withdrawal.cancelled',
+                'withdrawal',
+                $withdrawal->id,
+                "User cancelled withdrawal of {$withdrawal->amount} Coins (Rs. " . number_format($amountNpr, 2) . ")",
+                [
+                    'amount_coins' => $withdrawal->amount,
+                    'amount_npr' => $amountNpr,
+                    'method' => $withdrawal->method,
+                ]
+            );
 
             return response()->json([
                 'success' => true,
@@ -250,5 +370,32 @@ class WithdrawalController extends Controller
                 ],
             ]);
         });
+    }
+
+    /**
+     * Get withdrawal details (for user).
+     */
+    public function show(int $id): JsonResponse
+    {
+        $user = Auth::user();
+
+        $withdrawal = Withdrawal::where('id', $id)
+            ->where('user_id', $user->id)
+            ->first();
+
+        if (!$withdrawal) {
+            return response()->json([
+                'success' => false,
+                'error' => 'Withdrawal not found',
+            ], 404);
+        }
+
+        $paymentTxn = PaymentTransaction::where('withdrawal_id', $withdrawal->id)->first();
+
+        return response()->json([
+            'withdrawal' => $withdrawal,
+            'payment_transaction' => $paymentTxn,
+            'amount_npr' => $this->paymentProcessor->coinsToNpr((float) $withdrawal->amount),
+        ]);
     }
 }

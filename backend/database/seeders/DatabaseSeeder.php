@@ -15,21 +15,106 @@ class DatabaseSeeder extends Seeder
     {
         // Report Categories (first one is the default)
         $reportCategories = [
-            ['name' => 'General', 'icon' => 'info'],
-            ['name' => 'Road & Traffic', 'icon' => 'road'],
-            ['name' => 'Safety & Hazards', 'icon' => 'warning'],
-            ['name' => 'Weather & Conditions', 'icon' => 'ac_unit'],
-            ['name' => 'Transportation', 'icon' => 'directions_bus'],
-            ['name' => 'Hidden Destinations', 'icon' => 'explore'],
-            ['name' => 'Services & Utilities', 'icon' => 'local_gas_station'],
-            ['name' => 'Events & Notices', 'icon' => 'event'],
+            [
+                'name' => 'General',
+                'slug' => 'general',
+                'icon' => 'info',
+                'description' => 'General reports and updates',
+                'description_ne' => 'सामान्य रिपोर्ट र अपडेटहरू',
+                'sort_order' => 0,
+                'is_active' => true,
+                'is_featured' => false,
+                'is_emergency' => false,
+            ],
+            [
+                'name' => 'Road & Traffic',
+                'slug' => 'road-traffic',
+                'icon' => 'road',
+                'description' => 'Road conditions, traffic, construction, blockages',
+                'description_ne' => 'सडक अवस्था, यातायात, निर्माण, अवरोधहरू',
+                'sort_order' => 1,
+                'is_active' => true,
+                'is_featured' => true,
+                'is_emergency' => false,
+            ],
+            [
+                'name' => 'Safety & Hazards',
+                'slug' => 'safety-hazards',
+                'icon' => 'warning',
+                'description' => 'Safety concerns, hazards, dangerous conditions',
+                'description_ne' => 'सुरक्षा चिन्ता, जोखिम, खतरनाक अवस्थाहरू',
+                'sort_order' => 2,
+                'is_active' => true,
+                'is_featured' => true,
+                'is_emergency' => true,
+            ],
+            [
+                'name' => 'Weather & Conditions',
+                'slug' => 'weather-conditions',
+                'icon' => 'ac_unit',
+                'description' => 'Weather reports, flooding, landslides, conditions',
+                'description_ne' => 'मौसम रिपोर्ट, बाढी, पहिरो, अवस्थाहरू',
+                'sort_order' => 3,
+                'is_active' => true,
+                'is_featured' => true,
+                'is_emergency' => true,
+            ],
+            [
+                'name' => 'Transportation',
+                'slug' => 'transportation',
+                'icon' => 'directions_bus',
+                'description' => 'Public transport, bus, taxi, flight issues',
+                'description_ne' => 'सार्वजनिक यातायात, बस, ट्याक्सी, उडान समस्याहरू',
+                'sort_order' => 4,
+                'is_active' => true,
+                'is_featured' => false,
+                'is_emergency' => false,
+            ],
+            [
+                'name' => 'Hidden Destinations',
+                'slug' => 'hidden-destinations',
+                'icon' => 'explore',
+                'description' => 'Off-the-beaten-path places and discoveries',
+                'description_ne' => 'अनछुए स्थानहरू र नयाँ खोजहरू',
+                'sort_order' => 5,
+                'is_active' => true,
+                'is_featured' => false,
+                'is_emergency' => false,
+            ],
+            [
+                'name' => 'Services & Utilities',
+                'slug' => 'services-utilities',
+                'icon' => 'local_gas_station',
+                'description' => 'Fuel, electricity, water, internet, ATMs',
+                'description_ne' => 'इन्धन, बिजुली, पानी, इन्टरनेट, एटीएम',
+                'sort_order' => 6,
+                'is_active' => true,
+                'is_featured' => true,
+                'is_emergency' => false,
+            ],
+            [
+                'name' => 'Events & Notices',
+                'slug' => 'events-notices',
+                'icon' => 'event',
+                'description' => 'Local events, festivals, community notices',
+                'description_ne' => 'स्थानीय कार्यक्रमहरू, पर्वहरू, समुदायिक सूचनाहरू',
+                'sort_order' => 7,
+                'is_active' => true,
+                'is_featured' => false,
+                'is_emergency' => false,
+            ],
         ];
 
         foreach ($reportCategories as $cat) {
-            ReportCategorie::create($cat);
+            ReportCategorie::firstOrCreate(['slug' => $cat['slug']], $cat);
         }
 
         $this->command->info('Created ' . count($reportCategories) . ' report categories.');
+
+        // Seed report category groups, options, and fields
+        $this->call(\Database\Seeders\ReportCategoryGroupSeeder::class);
+        $this->call(\Database\Seeders\ReportCategoryOptionSeeder::class);
+        $this->call(\Database\Seeders\ReportCategoryFieldSeeder::class);
 
         // Place Categories - use firstOrCreate to prevent duplicates on re-seeding
         $categories = [
@@ -98,6 +183,9 @@ $this->call(\Database\Seeders\AppUiWordSeeder::class);
 
         // Seed curated routes (trekking + itineraries)
         $this->call(\Database\Seeders\CuratedRouteSeeder::class);
+
+        // Seed legal document types
+        $this->call(\Database\Seeders\LegalDocumentTypeSeeder::class);
 
         // Seed default moderator permissions (deprecated — replaced by RolePermissionSeeder)
         // $this->call(\Database\Seeders\PermissionSeeder::class);

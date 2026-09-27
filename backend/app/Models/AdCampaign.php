@@ -87,7 +87,7 @@ class AdCampaign extends Model
             : (float) GameSetting::getValue('ad_cpm', 50);
         $cpc = (float) $this->cost_per_click > 0
             ? (float) $this->cost_per_click
-            : (float) GameSetting::getValue('ad_cpc', 10);
+            : (float) GameSetting::getValue('ad_cpc', 0.50);
         return round(($this->current_impressions / 1000) * $cpm + $this->current_clicks * $cpc, 2);
     }
 

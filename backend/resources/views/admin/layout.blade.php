@@ -14,6 +14,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="csrf-token" content="{{ csrf_token() }}">
     <title>@yield('title', 'Dashboard') - {{ config('app.name') }}</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script>
@@ -61,6 +62,35 @@
 
         $pendingCount = \App\Models\Report::where('status', 'pending')->count();
 
+        // Centralized pending counts for sidebar badges
+        $sidebarBadges = [];
+        if ($user->hasPermission('manage_withdrawals')) {
+            $w = \App\Models\Withdrawal::where('status', 'pending')->count();
+            if ($w > 0) $sidebarBadges['manage_withdrawals'] = $w;
+        }
+        if ($user->hasPermission('manage_payouts')) {
+            $p = \App\Models\Payout::where('status', 'pending')->count();
+            if ($p > 0) $sidebarBadges['manage_payouts'] = $p;
+        }
+        if ($user->hasPermission('verify_businesses')) {
+            $tp = \App\Models\TravelPartner::where('verification_status', 'pending')->count();
+            if ($tp > 0) $sidebarBadges['verify_businesses'] = $tp;
+        }
+        if ($user->hasPermission('manage_content_safety')) {
+            $cv = \App\Models\ContentViolation::whereDate('created_at', today())->count();
+            if ($cv > 0) $sidebarBadges['manage_content_safety'] = $cv;
+        }
+        $activeSos = \App\Models\SosAlert::where('status', 'active')->count();
+        if ($activeSos > 0) $sidebarBadges['sos'] = $activeSos;
+
+        // Support inbox badge
+        if ($user->hasPermission('manage_support')) {
+            $awaitingHuman = \App\Models\SupportConversation::where('status', 'awaiting_human')->count();
+            $openUnassigned = \App\Models\SupportConversation::where('status', 'open')->whereNull('assigned_to')->count();
+            $supportBadge = $awaitingHuman + $openUnassigned;
+            if ($supportBadge > 0) $sidebarBadges['manage_support'] = $supportBadge;
+        }
+
         $menuPerms = \App\Models\Permission::whereNotNull('menu_label')
             ->whereNotNull('route_name')
             ->whereNotNull('menu_icon')
@@ -72,15 +102,8 @@
         <!-- Sidebar -->
         <aside class="hidden xl:flex flex-col w-72 bg-primary-900 text-teal-100 shadow-xl shrink-0 border-r border-primary-950 xl:sticky xl:top-0 xl:h-screen">
             <div class="px-6 py-5 border-b border-primary-800">
-                <div class="flex items-center gap-3">
-                    <div class="w-12 h-12 rounded-2xl bg-accent-500 grid place-items-center text-white text-xl shadow-lg">
-                        <i class="fas fa-shield-alt"></i>
-                    </div>
-                    <div>
-                        <h1 class="text-xl font-semibold">Nepal Admin</h1>
-                        <p class="text-xs text-teal-300">Smart Travel Dashboard</p>
-                    </div>
-                </div>
+                <img src="{{ asset('images/oripori_logo_wordmark.png') }}" alt="Oripori" class="h-9 w-auto mb-1.5">
+                <p class="text-xs text-teal-300">Smart Travel — Admin Panel</p>
             </div>
             @php
                 $menuGroups = [
@@ -90,22 +113,75 @@
                     'access' => ['label' => 'Access Control', 'admin_only' => true],
                 ];
             @endphp
+            @php
+                // Restructured sidebar groups — route-based mapping for logical grouping
+                $restructuredGroups = [
+                    'operations' => ['label' => 'OPERATIONS', 'admin_only' => false, 'routes' => [
+                        'admin.dashboard', 'admin.reports', 'admin.moderation', 'admin.places',
+                        'admin.places.osm', 'admin.places.corrections', 'admin.alerts',
+                        'admin.support',
+                    ]],
+                    'people' => ['label' => 'PEOPLE', 'admin_only' => false, 'routes' => [
+                        'admin.users', 'admin.users.progress', 'admin.achievements',
+                    ]],
+                    'growth' => ['label' => 'GROWTH', 'admin_only' => false, 'routes' => [
+                        'admin.ad-campaigns', 'admin.offers', 'admin.travel-partners',
+                        'admin.bookings', 'admin.subscription.plans', 'admin.subscription.users',
+                    ]],
+                    'finance' => ['label' => 'FINANCE', 'admin_only' => false, 'routes' => [
+                        'admin.withdrawals', 'admin.payouts', 'admin.earnings-report',
+                        'admin.financial-overview', 'admin.coin-settings', 'admin.expenses',
+                        'admin.salaries',
+                    ]],
+                    'ai' => ['label' => 'AI & TOOLS', 'admin_only' => false, 'routes' => [
+                        'admin.ai.agents', 'admin.ai.tasks', 'admin.translator', 'admin.routes',
+                    ]],
+                    'system' => ['label' => 'SYSTEM', 'admin_only' => true, 'routes' => [
+                        'admin.settings', 'admin.roles', 'admin.permissions', 'admin.audit-logs',
+                    ]],
+                ];
+
+                // Build grouped items from permissions
+                $groupedItems = [];
+                foreach ($restructuredGroups as $key => $cfg) {
+                    $groupedItems[$key] = ['label' => $cfg['label'], 'admin_only' => $cfg['admin_only'], 'items' => collect()];
+                }
+
+                // Map permissions to groups by route name
+                foreach ($menuPerms as $mp) {
+                    $assigned = false;
+                    foreach ($restructuredGroups as $key => $cfg) {
+                        if (in_array($mp->route_name, $cfg['routes'])) {
+                            $groupedItems[$key]['items']->push($mp);
+                            $assigned = true;
+                            break;
+                        }
+                    }
+                    // Fallback: keep in original group if not mapped
+                    if (!$assigned) {
+                        $origGroup = $mp->menu_group ?? 'main';
+                        if (!isset($groupedItems[$origGroup])) {
+                            $groupedItems[$origGroup] = ['label' => strtoupper($origGroup), 'admin_only' => false, 'items' => collect()];
+                        }
+                        $groupedItems[$origGroup]['items']->push($mp);
+                    }
+                }
+            @endphp
             <nav class="flex-1 overflow-y-auto p-4 space-y-2 scrollbar-thin">
-                @foreach($menuGroups as $group => $cfg)
-                    @php $groupPerms = $menuPerms->where('menu_group', $group); @endphp
-                    @if($groupPerms->isNotEmpty() && (!$cfg['admin_only'] || !$isModerator))
-                        @if($cfg['label'])
+                @foreach($groupedItems as $key => $group)
+                    @if($group['items']->isNotEmpty() && (!$group['admin_only'] || !$isModerator))
                         <div class="pt-3 border-t border-primary-800">
-                            <p class="px-4 text-xs font-semibold text-teal-400 uppercase tracking-wider mb-2">{{ $cfg['label'] }}</p>
+                            <p class="px-4 text-xs font-semibold text-teal-400 uppercase tracking-wider mb-2">{{ $group['label'] }}</p>
                         </div>
-                        @endif
-                        @foreach($groupPerms as $mp)
+                        @foreach($group['items'] as $mp)
                             @can($mp->name)
                             <a href="{{ route($mp->route_name) }}" class="group flex items-center gap-3 rounded-3xl px-4 py-3 transition {{ request()->routeIs($mp->route_name . '*') ? 'bg-accent-500 text-white shadow-lg' : 'text-teal-200 hover:bg-primary-800 hover:text-white' }}">
                                 <i class="fas fa-{{ $mp->menu_icon }} w-5 text-center"></i>
                                 <span class="font-medium">{{ $mp->menu_label }}</span>
                                 @if($mp->name === 'approve_reports' && $pendingCount > 0)
                                     <span class="ml-auto rounded-full bg-red-500 px-2.5 py-0.5 text-[11px] font-semibold text-white">{{ $pendingCount }}</span>
+                                @elseif(isset($sidebarBadges[$mp->name]))
+                                    <span class="ml-auto rounded-full bg-red-500 px-2.5 py-0.5 text-[11px] font-semibold text-white">{{ $sidebarBadges[$mp->name] }}</span>
                                 @endif
                             </a>
                             @endcan
@@ -113,39 +189,29 @@
                     @endif
                 @endforeach
 
-                <!-- AI Agents - hardcoded link -->
+                <!-- SOS Emergency -->
                 <div class="pt-3 border-t border-primary-800">
-                    <p class="px-4 text-xs font-semibold text-teal-400 uppercase tracking-wider mb-2">AI</p>
+                    <p class="px-4 text-xs font-semibold text-teal-400 uppercase tracking-wider mb-2">EMERGENCY</p>
                 </div>
-                <a href="{{ route('admin.ai.agents') }}" class="group flex items-center gap-3 rounded-3xl px-4 py-3 transition {{ request()->routeIs('admin.ai.agents*') ? 'bg-accent-500 text-white shadow-lg' : 'text-teal-200 hover:bg-primary-800 hover:text-white' }}">
-                    <i class="fas fa-robot w-5 text-center"></i>
-                    <span class="font-medium">AI Employees</span>
-                </a>
-                <a href="{{ route('admin.ai.tasks') }}" class="group flex items-center gap-3 rounded-3xl px-4 py-3 transition {{ request()->routeIs('admin.ai.tasks*') ? 'bg-accent-500 text-white shadow-lg' : 'text-teal-200 hover:bg-primary-800 hover:text-white' }}">
-                    <i class="fas fa-tasks w-5 text-center"></i>
-                    <span class="font-medium">AI Tasks</span>
-                </a>
-                <a href="{{ route('admin.translator') }}" class="group flex items-center gap-3 rounded-3xl px-4 py-3 transition {{ request()->routeIs('admin.translator*') ? 'bg-accent-500 text-white shadow-lg' : 'text-teal-200 hover:bg-primary-800 hover:text-white' }}">
-                    <i class="fas fa-language w-5 text-center"></i>
-                    <span class="font-medium">Translator</span>
+                <a href="{{ route('admin.sos') }}" class="group flex items-center gap-3 rounded-3xl px-4 py-3 transition {{ request()->routeIs('admin.sos*') ? 'bg-accent-500 text-white shadow-lg' : 'text-teal-200 hover:bg-primary-800 hover:text-white' }}">
+                    <i class="fas fa-exclamation-triangle w-5 text-center"></i>
+                    <span class="font-medium">SOS Alerts</span>
+                    @if(isset($sidebarBadges['sos']))
+                        <span class="ml-auto rounded-full bg-red-500 px-2.5 py-0.5 text-[11px] font-semibold text-white">{{ $sidebarBadges['sos'] }}</span>
+                    @endif
                 </a>
 
-                <!-- Legal Documents - hardcoded link -->
+                <!-- Legal Documents -->
                 <div class="pt-3 border-t border-primary-800">
-                    <p class="px-4 text-xs font-semibold text-teal-400 uppercase tracking-wider mb-2">Legal</p>
+                    <p class="px-4 text-xs font-semibold text-teal-400 uppercase tracking-wider mb-2">LEGAL &amp; POLICIES</p>
                 </div>
                 <a href="{{ route('admin.legal-documents.index') }}" class="group flex items-center gap-3 rounded-3xl px-4 py-3 transition {{ request()->routeIs('admin.legal-documents*') ? 'bg-accent-500 text-white shadow-lg' : 'text-teal-200 hover:bg-primary-800 hover:text-white' }}">
                     <i class="fas fa-file-contract w-5 text-center"></i>
                     <span class="font-medium">Legal Documents</span>
                 </a>
-
-                <!-- SOS Emergency -->
-                <div class="pt-3 border-t border-primary-800">
-                    <p class="px-4 text-xs font-semibold text-teal-400 uppercase tracking-wider mb-2">Emergency</p>
-                </div>
-                <a href="{{ route('admin.sos') }}" class="group flex items-center gap-3 rounded-3xl px-4 py-3 transition {{ request()->routeIs('admin.sos*') ? 'bg-accent-500 text-white shadow-lg' : 'text-teal-200 hover:bg-primary-800 hover:text-white' }}">
-                    <i class="fas fa-exclamation-triangle w-5 text-center"></i>
-                    <span class="font-medium">SOS Alerts</span>
+                <a href="{{ route('admin.legal-document-types.index') }}" class="group flex items-center gap-3 rounded-3xl px-4 py-3 transition {{ request()->routeIs('admin.legal-document-types*') ? 'bg-accent-500 text-white shadow-lg' : 'text-teal-200 hover:bg-primary-800 hover:text-white' }}">
+                    <i class="fas fa-tags w-5 text-center"></i>
+                    <span class="font-medium">Document Types</span>
                 </a>
             </nav>
             <div class="border-t border-primary-800 px-6 py-4">
@@ -165,22 +231,22 @@
 
         <!-- Mobile header -->
         <div class="md:hidden fixed top-0 left-0 right-0 z-50 bg-primary-800 text-white p-3 flex items-center justify-between">
-            <h1 class="font-bold text-sm">Admin Panel</h1>
+            <div class="flex items-center gap-2.5">
+                <img src="{{ asset('images/oripori_logo_wordmark.png') }}" alt="Oripori" class="h-5 w-auto">
+                <span class="font-bold text-sm">Admin</span>
+            </div>
             <button onclick="document.getElementById('mobileMenu').classList.toggle('hidden')" class="text-white">
                 <i class="fas fa-bars text-xl"></i>
             </button>
         </div>
         <div id="mobileMenu" class="md:hidden fixed top-12 left-0 right-0 z-50 bg-primary-800 text-white hidden">
             <nav class="p-3 space-y-1">
-                @foreach($menuGroups as $group => $cfg)
-                    @php $groupPerms = $menuPerms->where('menu_group', $group); @endphp
-                    @if($groupPerms->isNotEmpty() && (!$cfg['admin_only'] || !$isModerator))
-                        @if($cfg['label'])
+                @foreach($groupedItems as $key => $group)
+                    @if($group['items']->isNotEmpty() && (!$group['admin_only'] || !$isModerator))
                         <div class="border-t border-primary-700 my-2 pt-2">
-                            <p class="px-3 text-xs font-semibold text-accent-300 uppercase tracking-wider mb-1">{{ $cfg['label'] }}</p>
+                            <p class="px-3 text-xs font-semibold text-accent-300 uppercase tracking-wider mb-1">{{ $group['label'] }}</p>
                         </div>
-                        @endif
-                        @foreach($groupPerms as $mp)
+                        @foreach($group['items'] as $mp)
                             @can($mp->name)
                             <a href="{{ route($mp->route_name) }}" class="block px-3 py-2 rounded {{ request()->routeIs($mp->route_name . '*') ? 'bg-primary-700' : '' }}"><i class="fas fa-{{ $mp->menu_icon }} w-5"></i> {{ $mp->menu_label }}</a>
                             @endcan
@@ -188,15 +254,14 @@
                     @endif
                 @endforeach
                 <div class="border-t border-primary-700 my-2 pt-2">
-                    <p class="px-3 text-xs font-semibold text-accent-300 uppercase tracking-wider mb-1">AI</p>
+                    <p class="px-3 text-xs font-semibold text-accent-300 uppercase tracking-wider mb-1">EMERGENCY</p>
                 </div>
-                <a href="{{ route('admin.ai.agents') }}" class="block px-3 py-2 rounded {{ request()->routeIs('admin.ai.agents*') ? 'bg-primary-700' : '' }}"><i class="fas fa-robot w-5"></i> AI Employees</a>
-                <a href="{{ route('admin.ai.tasks') }}" class="block px-3 py-2 rounded {{ request()->routeIs('admin.ai.tasks*') ? 'bg-primary-700' : '' }}"><i class="fas fa-tasks w-5"></i> AI Tasks</a>
-                <a href="{{ route('admin.translator') }}" class="block px-3 py-2 rounded {{ request()->routeIs('admin.translator*') ? 'bg-primary-700' : '' }}"><i class="fas fa-language w-5"></i> Translator</a>
+                <a href="{{ route('admin.sos') }}" class="block px-3 py-2 rounded {{ request()->routeIs('admin.sos*') ? 'bg-primary-700' : '' }}"><i class="fas fa-exclamation-triangle w-5"></i> SOS Alerts</a>
                 <div class="border-t border-primary-700 my-2 pt-2">
-                    <p class="px-3 text-xs font-semibold text-accent-300 uppercase tracking-wider mb-1">Legal</p>
+                    <p class="px-3 text-xs font-semibold text-accent-300 uppercase tracking-wider mb-1">LEGAL &amp; POLICIES</p>
                 </div>
                 <a href="{{ route('admin.legal-documents.index') }}" class="block px-3 py-2 rounded {{ request()->routeIs('admin.legal-documents*') ? 'bg-primary-700' : '' }}"><i class="fas fa-file-contract w-5"></i> Legal Documents</a>
+                <a href="{{ route('admin.legal-document-types.index') }}" class="block px-3 py-2 rounded {{ request()->routeIs('admin.legal-document-types*') ? 'bg-primary-700' : '' }}"><i class="fas fa-tags w-5"></i> Document Types</a>
                 <hr class="border-primary-700 my-2">
                 <a href="/" class="block px-3 py-2"><i class="fas fa-arrow-left w-5"></i> Back to Site</a>
                 <form method="POST" action="{{ route('logout') }}">
@@ -261,10 +326,65 @@
                     @yield('content')
                 </div>
             </main>
-        </div>
     </div>
-    @yield('scripts')
+</div>
 <script>window.adminPrefix = '{{ $adminPrefix }}';</script>
+@yield('scripts')
+<script>
+(function () {
+    'use strict';
+    // Remember filters: save last filter state per page in localStorage
+    var FILTER_PAGES = ['reports', 'users', 'places', 'withdrawals', 'payouts', 'ad-campaigns'];
+    var STORAGE_KEY = 'admin_filters';
+
+    function getStored() {
+        try { return JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}'); } catch (e) { return {}; }
+    }
+    function store(data) {
+        try { localStorage.setItem(STORAGE_KEY, JSON.stringify(data)); } catch (e) {}
+    }
+
+    // Save current page's filters when navigating away via sidebar
+    function saveCurrentFilters() {
+        var path = location.pathname;
+        var qs = location.search;
+        if (!qs || qs.length < 2) return;
+        var page = FILTER_PAGES.find(function (p) { return path.indexOf('/' + p) >= 0 || path.indexOf('/' + p.replace('-', '-')) >= 0; });
+        if (!page) return;
+        var stored = getStored();
+        stored[page] = qs;
+        store(stored);
+    }
+
+    // Restore filters when clicking sidebar link
+    document.addEventListener('click', function (e) {
+        var a = e.target && e.target.closest ? e.target.closest('a[href]') : null;
+        if (!a) return;
+        var aside = document.querySelector('aside nav');
+        var mob = document.getElementById('mobileMenu');
+        if (!aside && !mob) return;
+        if (!(aside && aside.contains(a)) && !(mob && mob.contains(a))) return;
+
+        saveCurrentFilters();
+
+        var href = a.getAttribute('href') || '';
+        var page = FILTER_PAGES.find(function (p) { return href.indexOf('/' + p) >= 0; });
+        if (!page) return;
+
+        var stored = getStored();
+        if (stored[page] && href.indexOf('?') < 0) {
+            e.preventDefault();
+            e.stopPropagation();
+            var target = href + stored[page];
+            a.setAttribute('href', target);
+            a.click();
+        }
+    }, true);
+
+    // Also save on popstate (back/forward)
+    window.addEventListener('popstate', saveCurrentFilters);
+})();
+</script>
 <script>
 (function () {
     'use strict';

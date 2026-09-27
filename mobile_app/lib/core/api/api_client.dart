@@ -695,6 +695,50 @@ class ApiClient {
     return _dio.get('/routes/$id/geometry');
   }
 
+  // ============ Travel Context (route-aware intelligence) ============
+
+  /// Resolve origin → checkpoints → destination into a travel corridor.
+  Future<Response> resolveTravelContext({
+    required String origin,
+    required String destination,
+    List<String> checkpoints = const [],
+    double? currentLat,
+    double? currentLng,
+    bool detectAmbiguity = true,
+  }) {
+    return _dio.post('/travel-context/resolve', data: {
+      'origin': origin,
+      'destination': destination,
+      if (checkpoints.isNotEmpty) 'checkpoints': checkpoints,
+      if (currentLat != null) 'current_lat': currentLat,
+      if (currentLng != null) 'current_lng': currentLng,
+      'detect_ambiguity': detectAmbiguity,
+    });
+  }
+
+  /// Ranked intelligence along a resolved travel context.
+  ///
+  /// Uses POST: corridor geometry can be 100KB+ and cannot fit in a URL query.
+  Future<Response> getTravelIntelligence({
+    Map<String, dynamic>? travelContext,
+    String? origin,
+    String? destination,
+    List<String> checkpoints = const [],
+    double? currentLat,
+    double? currentLng,
+    String? layers,
+  }) {
+    return _dio.post('/travel-context/intelligence', data: {
+      if (travelContext != null) 'travel_context': travelContext,
+      if (origin != null && origin.isNotEmpty) 'origin': origin,
+      if (destination != null && destination.isNotEmpty) 'destination': destination,
+      if (checkpoints.isNotEmpty) 'checkpoints': checkpoints,
+      if (currentLat != null) 'current_lat': currentLat,
+      if (currentLng != null) 'current_lng': currentLng,
+      if (layers != null && layers.isNotEmpty) 'layers': layers,
+    });
+  }
+
   // ===== Oripori Coins / Wallet =====
 
   Future<Response> getWallet() async {

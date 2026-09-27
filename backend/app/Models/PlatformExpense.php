@@ -110,6 +110,11 @@ class PlatformExpense extends Model
 
     public function markAsPaid(): void
     {
+        // Idempotent: skip if already paid today
+        if ($this->last_paid_date && $this->last_paid_date->isToday()) {
+            return;
+        }
+
         $this->update([
             'last_paid_date' => Carbon::now(),
             'renewal_alert_sent' => false,

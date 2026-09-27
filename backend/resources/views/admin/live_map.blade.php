@@ -35,8 +35,8 @@
             </div>
             <div class="flex items-center gap-3 text-xs text-gray-500 ml-2">
                 <label class="flex items-center gap-1.5 cursor-pointer">
-                    <input type="checkbox" checked onchange="toggleLayer('places', this.checked)" class="rounded border-gray-300 text-blue-500">
-                    <span class="w-2.5 h-2.5 rounded-full bg-blue-500 inline-block"></span> Places
+                    <input type="checkbox" checked onchange="toggleLayer('places', this.checked)" class="rounded border-gray-300 text-green-500">
+                    <span class="w-2.5 h-2.5 rounded-full bg-green-500 inline-block"></span> Landmarks
                 </label>
                 <label class="flex items-center gap-1.5 cursor-pointer">
                     <input type="checkbox" checked onchange="toggleLayer('reports', this.checked)" class="rounded border-gray-300 text-orange-500">
@@ -52,10 +52,7 @@
                 </label>
             </div>
         </div>
-        <label class="flex items-center gap-2 text-sm text-gray-600 cursor-pointer select-none">
-            <input type="checkbox" id="satelliteToggle" onchange="toggleSatellite()" class="rounded border-gray-300">
-            <i class="fas fa-satellite"></i> Satellite
-        </label>
+
     </div>
 
     <div id="liveMap" style="height: 78vh;" class="rounded-xl border border-slate-200 shadow-sm"></div>
@@ -102,11 +99,26 @@
 .marker-cluster-medium div { background-color: rgba(0, 105, 92, 0.7); color: #fff; font-weight: 600; }
 .marker-cluster-large { background-color: rgba(0, 105, 92, 0.3); }
 .marker-cluster-large div { background-color: rgba(0, 105, 92, 0.8); color: #fff; font-weight: 600; }
-.custom-marker { display:flex; align-items:center; justify-content:center; border-radius:50%; border:2px solid #fff; box-shadow:0 2px 6px rgba(0,0,0,0.3); font-size:12px; color:#fff; transition:transform 0.15s; }
-.custom-marker:hover { transform:scale(1.15); z-index:1000 !important; }
+.custom-marker { display:flex; align-items:center; justify-content:center; border-radius:50%; border:2.5px solid #fff; box-shadow:0 3px 10px rgba(0,0,0,0.4); font-size:12px; color:#fff; transition:transform 0.15s; }
+.custom-marker:hover { transform:scale(1.2); z-index:1000 !important; }
 .leaflet-popup-content-wrapper { border-radius:12px !important; box-shadow:0 4px 20px rgba(0,0,0,0.15) !important; }
 .leaflet-popup-content { margin:14px !important; min-width:220px; }
 .leaflet-popup-tip { box-shadow:none !important; }
+.nepal-label span { background: rgba(255,255,255,0.75); padding: 1px 5px; border-radius: 3px; font-size: 10px; white-space: nowrap; pointer-events: none; }
+.province-label span { color: #7c3aed; font-weight: 500; border: 1px solid #7c3aed30; }
+.district-label span { color: #2563eb; font-weight: 400; border: 1px solid #2563eb20; font-size: 9px; }
+/* Landmark pure text labels — exact position, always on top */
+#liveMap .landmark-label-el {
+    position: absolute;
+    z-index: 700 !important;
+    color: #16a34a;
+    font-size: 9px;
+    font-weight: 600;
+    white-space: nowrap;
+    pointer-events: none;
+    text-shadow: 1px 1px 2px #fff, -1px -1px 2px #fff, 1px -1px 2px #fff, -1px 1px 2px #fff;
+    transform: translate(-50%, -50%);
+}
 </style>
 <script>
 const reports = @json($reports);
@@ -118,28 +130,184 @@ const map = L.map('liveMap', {
     center: [27.7, 85.3], zoom: 7, minZoom: 6,
     maxBounds: nepalBounds, maxBoundsViscosity: 1.0,
     zoomControl: false,
+    attributionControl: true,
+    zoomAnimation: true,
+    markerZoomAnimation: true,
+    fadeAnimation: true
 });
+
+L.control.attribution({
+    position: 'bottomleft',
+    prefix: '<a href="https://www.geoboundaries.org/" target="_blank">geoBoundaries</a> | <a href="https://www.openstreetmap.org/copyright" target="_blank">© OpenStreetMap</a>'
+}).addTo(map);
+
+// ===== Nepal Map System: Canvas Mask + ADM1 + ADM2 =====
+const provinceStyle = { color: '#7c3aed', weight: 2, opacity: 0.8, fillColor: 'transparent', fillOpacity: 0, interactive: false };
+const districtStyle = { color: '#2563eb', weight: 1.5, opacity: 0.7, fillColor: 'transparent', fillOpacity: 0, interactive: false };
+
+let nepalLatLngs = [];
+let nepalPolygon = null;
+let provinceLayer = L.layerGroup();
+let districtLayer = L.layerGroup();
+let searchHighlight = null;
+const provinces = [];
+const districts = [];
+let landmarks = [];
+
+// 1) ADM0: Canvas mask ONLY (no boundary polygon — mask defines the border)
+fetch('{{ route("admin.nepal.boundary") }}')
+    .then(r => r.json())
+    .then(data => {
+        const coords = data.features[0].geometry.coordinates[0];
+        nepalLatLngs = coords.map(c => L.latLng(c[1], c[0]));
+        nepalPolygon = L.polygon(nepalLatLngs);
+
+        // Canvas mask: hide everything outside Nepal — sits BELOW markers
+        const pane = map.getPane('shadowPane');
+        const canvas = document.createElement('canvas');
+        canvas.style.position = 'absolute';
+        canvas.style.pointerEvents = 'none';
+        canvas.style.opacity = '0.65';
+        pane.appendChild(canvas);
+        const ctx = canvas.getContext('2d');
+
+        function redrawMask() {
+            const size = map.getSize();
+            const topLeft = map.containerPointToLayerPoint([0, 0]);
+            canvas.width = size.x;
+            canvas.height = size.y;
+            canvas.style.left = topLeft.x + 'px';
+            canvas.style.top = topLeft.y + 'px';
+            ctx.clearRect(0, 0, size.x, size.y);
+            ctx.fillStyle = '#e5e7eb';
+            ctx.fillRect(0, 0, size.x, size.y);
+            ctx.globalCompositeOperation = 'destination-out';
+            ctx.beginPath();
+            nepalLatLngs.forEach(function(ll, i) {
+                const pt = map.latLngToContainerPoint(ll);
+                if (i === 0) ctx.moveTo(pt.x, pt.y);
+                else ctx.lineTo(pt.x, pt.y);
+            });
+            ctx.closePath();
+            ctx.fill();
+            ctx.globalCompositeOperation = 'source-over';
+        }
+
+        let maskRaf = null;
+        function scheduleMaskRedraw() {
+            if (maskRaf) cancelAnimationFrame(maskRaf);
+            maskRaf = requestAnimationFrame(redrawMask);
+        }
+
+        redrawMask();
+        map.on('moveend zoomend resize', scheduleMaskRedraw);
+    })
+    .catch(err => console.warn('Nepal boundary load failed:', err));
+
+// 2) ADM1: Province boundaries (zoom 7+)
+fetch('{{ route("admin.nepal.adm1") }}')
+    .then(r => r.json())
+    .then(data => {
+        data.features.forEach(function(f) {
+            const coords = f.geometry.type === 'MultiPolygon'
+                ? f.geometry.coordinates.map(p => p[0].map(c => [c[1], c[0]]))
+                : [f.geometry.coordinates[0].map(c => [c[1], c[0]])];
+            coords.forEach(function(ring) {
+                L.polygon(ring, provinceStyle).addTo(provinceLayer);
+            });
+            const bounds = L.latLngBounds(coords[0]);
+            const center = bounds.getCenter();
+            provinces.push({
+                name: f.properties.name || f.properties.shapeName || '',
+                center: center,
+                bounds: bounds,
+                rings: coords
+            });
+        });
+        updateBoundaryVisibility();
+    })
+    .catch(err => console.warn('Province boundary load failed:', err));
+
+// 3) ADM2: District boundaries (zoom 9+)
+fetch('{{ route("admin.nepal.adm2") }}')
+    .then(r => r.json())
+    .then(data => {
+        data.features.forEach(function(f) {
+            const geom = f.geometry;
+            let rings;
+            if (geom.type === 'MultiPolygon') {
+                rings = geom.coordinates.map(function(poly) {
+                    return poly[0].map(function(c) { return [c[1], c[0]]; });
+                });
+            } else {
+                rings = [geom.coordinates[0].map(function(c) { return [c[1], c[0]]; })];
+            }
+            rings.forEach(function(ring) {
+                L.polygon(ring, districtStyle).addTo(districtLayer);
+            });
+            const bounds = L.latLngBounds(rings[0]);
+            const center = bounds.getCenter();
+            const dlabel = L.marker(center, {
+                icon: L.divIcon({
+                    className: 'nepal-label district-label',
+                    html: '<span>' + (f.properties.DISTRICT || f.properties.shapeName || '') + '</span>',
+                    iconSize: [100, 18],
+                    iconAnchor: [50, 9]
+                }),
+                interactive: false
+            });
+            dlabel.addTo(districtLayer);
+            districts.push({
+                name: f.properties.DISTRICT || f.properties.shapeName || '',
+                center: center,
+                bounds: bounds,
+                rings: rings
+            });
+        });
+        updateBoundaryVisibility();
+    })
+    .catch(err => console.warn('District boundary load failed:', err));
+
+// Zoom-based visibility
+function updateBoundaryVisibility() {
+    const z = map.getZoom();
+
+    // Boundaries
+    if (z >= 9) {
+        if (!map.hasLayer(provinceLayer)) map.addLayer(provinceLayer);
+        if (!map.hasLayer(districtLayer)) map.addLayer(districtLayer);
+    } else if (z >= 7) {
+        if (!map.hasLayer(provinceLayer)) map.addLayer(provinceLayer);
+        if (map.hasLayer(districtLayer)) map.removeLayer(districtLayer);
+    } else {
+        if (map.hasLayer(provinceLayer)) map.removeLayer(provinceLayer);
+        if (map.hasLayer(districtLayer)) map.removeLayer(districtLayer);
+    }
+
+    // Districts 9+, Places 11+ (landmarks via CartoDB labels, no green text)
+    if (z >= 11) {
+        if (!map.hasLayer(placeCluster)) map.addLayer(placeCluster);
+    } else if (z >= 9) {
+        if (map.hasLayer(placeCluster)) map.removeLayer(placeCluster);
+    } else {
+        if (map.hasLayer(placeCluster)) map.removeLayer(placeCluster);
+    }
+    landmarks.forEach(function(l) { l.el.style.display = 'none'; });
+}
+map.on('zoomend', updateBoundaryVisibility);
+map.on('moveend zoomend', function() { if (landmarks.length) updateLandmarkPositions(); });
 
 L.control.zoom({ position: 'bottomright' }).addTo(map);
 
-const osmLayer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19 }).addTo(map);
-const satelliteLayer = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', { maxZoom: 19 });
-const overlayLayer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-    maxZoom: 19, opacity: 0.35,
-});
+const satelliteLayer = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+    maxZoom: 19,
+    attribution: '&copy; Esri'
+}).addTo(map);
+const overlayLayer = L.tileLayer('https://{s}.basemaps.cartocdn.com/light_only_labels/{z}/{x}/{y}.png', {
+    maxZoom: 19, subdomains: 'abcd', opacity: 0.75,
+}).addTo(map);
 
-function toggleSatellite() {
-    const use = document.getElementById('satelliteToggle').checked;
-    if (use) {
-        map.removeLayer(osmLayer);
-        map.addLayer(satelliteLayer);
-        map.addLayer(overlayLayer);
-    } else {
-        map.removeLayer(satelliteLayer);
-        map.removeLayer(overlayLayer);
-        map.addLayer(osmLayer);
-    }
-}
+function toggleSatellite() {}
 
 const categoryIcons = {
     'restaurant': '\uf0f5', 'hotel': '\uf236', 'attractions': '\uf06b',
@@ -170,11 +338,12 @@ function makeMarkerIcon(color, iconName, size) {
     });
 }
 
-const placeCluster = L.markerClusterGroup({ chunkedLoading: true, maxClusterRadius: 60 });
-const reportCluster = L.markerClusterGroup({ chunkedLoading: true, maxClusterRadius: 60 });
-const alertGroup = L.layerGroup();
-const weatherGroup = L.layerGroup();
+let placeCluster = L.markerClusterGroup({ chunkedLoading: true, maxClusterRadius: 60 });
+let reportCluster = L.markerClusterGroup({ chunkedLoading: true, maxClusterRadius: 60 });
+let alertGroup = L.layerGroup();
+let weatherGroup = L.layerGroup();
 let weatherData = [];
+let landmarkMarkers = [];
 
 function fetchWeatherGrid() {
     fetch('/api/v1/weather/grid')
@@ -282,6 +451,61 @@ function loadPlaces(district, label) {
         });
 }
 
+let landmarkAbort = null;
+function loadLandmarks() {
+    if (landmarkAbort) landmarkAbort.abort();
+    landmarkAbort = new AbortController();
+
+    fetch('/' + window.adminPrefix + '/live-map/landmarks', { signal: landmarkAbort.signal })
+        .then(r => r.json())
+        .then(res => {
+            if (!res.success) return;
+            landmarks.forEach(function(l) { if (l.el) l.el.remove(); });
+            landmarkMarkers = [];
+            landmarks = [];
+
+            const mapContainer = map.getContainer();
+            res.places.forEach(function(p) {
+                const el = document.createElement('div');
+                el.className = 'landmark-label-el';
+                el.textContent = p.name;
+                el.style.cssText = 'position:absolute;color:#16a34a;font-size:9px;font-weight:500;white-space:nowrap;pointer-events:none;text-shadow:1px 1px 2px #fff,-1px -1px 2px #fff,1px -1px 2px #fff,-1px 1px 2px #fff;z-index:700;transform:translate(-50%,-50%);';
+                mapContainer.appendChild(el);
+
+                landmarks.push({
+                    name: p.name,
+                    lat: p.latitude,
+                    lng: p.longitude,
+                    center: L.latLng(p.latitude, p.longitude),
+                    el: el
+                });
+            });
+            updateLandmarkPositions();
+        })
+        .catch(() => {});
+}
+
+function updateLandmarkPositions() {
+    const placed = [];
+    const minDist = 60;
+    landmarks.forEach(function(l) {
+        const pt = map.latLngToContainerPoint(l.center);
+        let visible = true;
+        for (let i = 0; i < placed.length; i++) {
+            const dx = pt.x - placed[i].x;
+            const dy = pt.y - placed[i].y;
+            if (Math.sqrt(dx * dx + dy * dy) < minDist) {
+                visible = false;
+                break;
+            }
+        }
+        l.el.style.left = pt.x + 'px';
+        l.el.style.top = pt.y + 'px';
+        l.el.style.display = visible ? '' : 'none';
+        if (visible) placed.push({ x: pt.x, y: pt.y });
+    });
+}
+
 function applyPlaceDelta(change) {
     const ids = change.new.concat(change.updated);
 
@@ -364,11 +588,23 @@ window.addEventListener('livefeed:change', function(e) {
 });
 
 function selectDistrict(name, label) {
-    loadPlaces(name, label);
+    if (map.getZoom() >= 11) {
+        loadPlaces(name, label);
+    }
     document.getElementById('districtPicker').removeAttribute('open');
 }
 
-loadPlaces('all', 'All Nepal');
+// CartoDB handles place labels — no green text needed
+// Landmarks only loaded for search (hidden DOM elements)
+if (map.getZoom() >= 11) {
+    loadPlaces('all', 'All Nepal');
+}
+map.on('zoomend', function() {
+    const z = map.getZoom();
+    if (z >= 11 && placeMarkers.length === 0) {
+        loadPlaces('all', 'All Nepal');
+    }
+});
 
 reports.forEach(function(r) {
     const color = r.color || '#f97316';
@@ -478,9 +714,59 @@ function toggleLayer(type, show) {
 
 function filterMarkers(query) {
     const q = query.toLowerCase().trim();
+
+    // Remove previous highlight
+    if (searchHighlight) {
+        map.removeLayer(searchHighlight);
+        searchHighlight = null;
+    }
+
+    if (!q) {
+        allMarkers.forEach(function(m) {
+            if (m._type === 'place' && !placeCluster.hasLayer(m)) placeCluster.addLayer(m);
+            if (m._type === 'report' && !reportCluster.hasLayer(m)) reportCluster.addLayer(m);
+            if (m._type === 'alert' && !alertGroup.hasLayer(m)) alertGroup.addLayer(m);
+        });
+        return;
+    }
+
+    // Search provinces
+    let found = provinces.find(function(p) { return p.name.toLowerCase().includes(q); });
+    if (found) {
+        map.flyToBounds(found.bounds, { padding: [50, 50], duration: 1 });
+        searchHighlight = L.polygon(found.rings, {
+            color: '#7c3aed', weight: 4, opacity: 1,
+            fillColor: '#7c3aed', fillOpacity: 0.15, dashArray: '8, 4'
+        }).addTo(map);
+        return;
+    }
+
+    // Search districts
+    found = districts.find(function(d) { return d.name.toLowerCase().includes(q); });
+    if (found) {
+        map.flyToBounds(found.bounds, { padding: [50, 50], duration: 1 });
+        searchHighlight = L.polygon(found.rings, {
+            color: '#2563eb', weight: 4, opacity: 1,
+            fillColor: '#2563eb', fillOpacity: 0.15, dashArray: '8, 4'
+        }).addTo(map);
+        return;
+    }
+
+    // Search landmarks
+    found = landmarks.find(function(l) { return l.name.toLowerCase().includes(q); });
+    if (found) {
+        map.flyTo(found.center, 13, { duration: 1 });
+        searchHighlight = L.circleMarker(found.center, {
+            radius: 15, color: '#16a34a', weight: 3, opacity: 1,
+            fillColor: '#16a34a', fillOpacity: 0.2
+        }).addTo(map);
+        return;
+    }
+
+    // Fallback: filter markers
     allMarkers.forEach(function(m) {
         const r = m._resource;
-        const match = !q || (r.name && r.name.toLowerCase().includes(q)) || (r.category && r.category.toLowerCase().includes(q)) || (r.description && r.description.toLowerCase().includes(q));
+        const match = (r.name && r.name.toLowerCase().includes(q)) || (r.category && r.category.toLowerCase().includes(q)) || (r.description && r.description.toLowerCase().includes(q));
         if (match) {
             if (m._type === 'place' && !placeCluster.hasLayer(m)) placeCluster.addLayer(m);
             if (m._type === 'report' && !reportCluster.hasLayer(m)) reportCluster.addLayer(m);

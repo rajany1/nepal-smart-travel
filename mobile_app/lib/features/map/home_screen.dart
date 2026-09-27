@@ -1,4 +1,6 @@
 ﻿import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:flutter_svg/flutter_svg.dart';
 import 'package:provider/provider.dart';
 import "../../core/services/localization_service.dart";
 import '../../config/themes/app_theme.dart';
@@ -39,7 +41,7 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> {
-  int _currentIndex = 2;
+  int _currentIndex = 0;
   final LocationService _locationService = LocationService();
 
   @override
@@ -368,7 +370,18 @@ class _ExploreTabState extends State<_ExploreTab> {
 
     return Scaffold(
       appBar: AppBar(
-        title: Text(context.t('Nepal Smart Travel')),
+        title: SvgPicture.asset(
+          'assets/images/oripori_logo.svg',
+          height: 32,
+        ),
+        backgroundColor: Colors.white,
+        elevation: 0,
+        systemOverlayStyle: const SystemUiOverlayStyle(
+          statusBarColor: Colors.transparent,
+          statusBarIconBrightness: Brightness.dark,
+          statusBarBrightness: Brightness.light,
+        ),
+        iconTheme: const IconThemeData(color: Colors.black87),
         actions: [
           IconButton(
             icon: const Icon(Icons.notifications_outlined),
@@ -538,11 +551,13 @@ class _ExploreTabState extends State<_ExploreTab> {
             ),
             _buildSearchHero(context),
             const SizedBox(height: 16),
-            const AdBannerCarousel(),
+
+            // Welcome Card (above banner)
+            _buildWelcomeCard(context, user),
             const SizedBox(height: 16),
 
-            // Welcome Card
-            _buildWelcomeCard(context, user),
+            // Banner Carousel (below welcome card)
+            const AdBannerCarousel(),
             const SizedBox(height: 20),
 
             // Discover by category

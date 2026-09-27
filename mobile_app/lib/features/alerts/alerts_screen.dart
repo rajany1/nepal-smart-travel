@@ -1,4 +1,3 @@
-import 'dart:async';
 import "../../core/services/localization_service.dart";
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
@@ -17,10 +16,12 @@ class AlertsScreen extends StatefulWidget {
 }
 
 class _AlertsScreenState extends State<AlertsScreen> {
-  Timer? _pollTimer;
   final LocationService _locationService = LocationService();
   // FL-32: keys seen before — only genuinely new items trigger a notification
   final Set<String> _seenItemKeys = {};
+  // Pull-to-refresh cooldown
+  DateTime? _lastRefreshTime;
+  static const _refreshCooldown = Duration(seconds: 10);
 
   @override
   void initState() {
@@ -36,18 +37,31 @@ class _AlertsScreenState extends State<AlertsScreen> {
       if (loc != null) {
         context.read<SosProvider>().fetchNearbySos(loc.latitude, loc.longitude, radiusKm: 10);
       }
-      // Seed seen-keys so the first poll doesn't re-notify existing items
+      // Seed seen-keys so the first pull doesn't re-notify existing items
       _seenItemKeys.addAll(provider.items.map((i) => '${i.source}:${i.id}'));
-    });
-    _pollTimer = Timer.periodic(const Duration(seconds: 30), (_) {
-      _pollNearby();
+      _lastRefreshTime = DateTime.now();
     });
   }
 
-  Future<void> _pollNearby() async {
+  Future<void> _onRefresh() async {
+    final now = DateTime.now();
+    if (_lastRefreshTime != null && now.difference(_lastRefreshTime!) < _refreshCooldown) {
+      return; // Cooldown active — skip API call
+    }
+    _lastRefreshTime = now;
+
     if (!mounted) return;
     final provider = context.read<AlertProvider>();
+    final loc = await _locationService.getCurrentLocation();
+    if (loc != null && mounted) {
+      provider.setLocation(loc.latitude, loc.longitude);
+    }
+    if (!mounted) return;
     await provider.fetchNearby();
+    if (loc != null && mounted) {
+      context.read<SosProvider>().fetchNearbySos(loc.latitude, loc.longitude, radiusKm: 10);
+    }
+    // Notify user of new items
     if (!mounted) return;
     final newItems = provider.items
         .where((i) => _seenItemKeys.add('${i.source}:${i.id}'))
@@ -68,12 +82,6 @@ class _AlertsScreenState extends State<AlertsScreen> {
               ? AppTheme.severityHigh
               : AppTheme.severityMedium,
     ));
-  }
-
-  @override
-  void dispose() {
-    _pollTimer?.cancel();
-    super.dispose();
   }
 
   @override
@@ -120,7 +128,7 @@ class _AlertsScreenState extends State<AlertsScreen> {
             ),
             actions: [
               GestureDetector(
-                onTap: () => provider.fetchNearby(),
+                onTap: _onRefresh,
                 child: Container(
                   margin: const EdgeInsets.symmetric(vertical: 10, horizontal: 4),
                   padding: const EdgeInsets.all(8),
@@ -170,10 +178,21 @@ class _AlertsScreenState extends State<AlertsScreen> {
                     ),
                     // Alert List
                     Expanded(
-                      child: provider.filteredItems.isEmpty && context.watch<SosProvider>().nearbySos.isEmpty
-                          ? Center(child: Column(mainAxisSize: MainAxisSize.min, children: [const Icon(Icons.notifications_off, size: 48, color: AppTheme.textSecondary), const SizedBox(height: 12), Text(context.t('No alerts found'), style: const TextStyle(color: AppTheme.textSecondary)), const SizedBox(height: 4), Text(context.t('Everything looks clear in your area'), style: const TextStyle(color: AppTheme.textSecondary, fontSize: AppTheme.textSm))]))
-                          : ListView.builder(
-                              padding: const EdgeInsets.all(12),
+                      child: RefreshIndicator(
+                        onRefresh: _onRefresh,
+                        child: provider.filteredItems.isEmpty && context.watch<SosProvider>().nearbySos.isEmpty
+                            ? LayoutBuilder(
+                                builder: (context, constraints) => SingleChildScrollView(
+                                  physics: const AlwaysScrollableScrollPhysics(),
+                                  child: SizedBox(
+                                    height: constraints.maxHeight,
+                                    child: Center(child: Column(mainAxisSize: MainAxisSize.min, children: [const Icon(Icons.notifications_off, size: 48, color: AppTheme.textSecondary), const SizedBox(height: 12), Text(context.t('No alerts found'), style: const TextStyle(color: AppTheme.textSecondary)), const SizedBox(height: 4), Text(context.t('Everything looks clear in your area'), style: const TextStyle(color: AppTheme.textSecondary, fontSize: AppTheme.textSm))])),
+                                  ),
+                                ),
+                              )
+                            : ListView.builder(
+                                physics: const AlwaysScrollableScrollPhysics(),
+                                padding: const EdgeInsets.all(12),
                               itemCount: provider.filteredItems.length + context.watch<SosProvider>().nearbySos.length,
                               itemBuilder: (context, index) {
                                 final sosList = context.read<SosProvider>().nearbySos;
@@ -293,6 +312,7 @@ class _AlertsScreenState extends State<AlertsScreen> {
                                 );
                               },
                             ),
+                      ),
                     ),
                   ],
                 ),

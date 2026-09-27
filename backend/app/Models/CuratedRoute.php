@@ -9,12 +9,13 @@ class CuratedRoute extends Model
     protected $fillable = [
         'title', 'slug', 'route_type', 'difficulty', 'description', 'image', 'duration_days',
         'best_season', 'max_altitude_m', 'total_distance_km', 'elevation_gain_m',
-        'starting_point', 'ending_point', 'waypoints', 'track', 'is_active',
+        'starting_point', 'ending_point', 'waypoints', 'track', 'track_segment_modes', 'is_active',
     ];
 
     protected $casts = [
         'waypoints' => 'array',
         'track' => 'array',
+        'track_segment_modes' => 'array',
         'is_active' => 'boolean',
         'max_altitude_m' => 'integer',
         'total_distance_km' => 'float',

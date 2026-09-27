@@ -602,45 +602,98 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   void _showDeleteConfirmation(BuildContext context) {
+    final emailController = TextEditingController();
+    final user = context.read<AuthProvider>().user;
+    bool isLoading = false;
+
     showDialog(
       context: context,
-      builder: (ctx) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: Row(
-          children: [
-            Container(
-              padding: const EdgeInsets.all(8),
-              decoration: BoxDecoration(
-                color: AppTheme.errorColor.withOpacity(0.1),
-                borderRadius: BorderRadius.circular(8),
+      barrierDismissible: false,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialogState) => AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          title: Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: AppTheme.errorColor.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: const Icon(Icons.delete_forever, color: AppTheme.errorColor, size: 24),
               ),
-              child: const Icon(Icons.delete_forever, color: AppTheme.errorColor, size: 24),
+              const SizedBox(width: 12),
+              Text(ctx.t('Delete Account')),
+            ],
+          ),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(ctx.t(
+                  'This action is permanent and cannot be undone.',
+                )),
+                const SizedBox(height: 12),
+                Text(ctx.t('What will be deleted:')),
+                const SizedBox(height: 4),
+                Text(ctx.t('• Profile, social logins, push tokens\n• Achievements, XP, subscription\n• Emergency contacts, SOS history\n• Support conversations, reviews\n• Report images and interactions'),
+                  style: TextStyle(fontSize: 13, color: Colors.grey[600]),
+                ),
+                const SizedBox(height: 12),
+                Text(ctx.t('What may be retained:')),
+                const SizedBox(height: 4),
+                Text(ctx.t('• Reports (anonymized author)\n• Financial records (audit compliance)\n• Audit logs (compliance)'),
+                  style: TextStyle(fontSize: 13, color: Colors.grey[600]),
+                ),
+                const SizedBox(height: 16),
+                Text(ctx.t('Type your email to confirm:')),
+                const SizedBox(height: 8),
+                TextField(
+                  controller: emailController,
+                  keyboardType: TextInputType.emailAddress,
+                  decoration: InputDecoration(
+                    hintText: user?.email ?? '',
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                  ),
+                ),
+              ],
             ),
-            const SizedBox(width: 12),
-            Text(ctx.t('Delete Account')),
+          ),
+          actions: [
+            TextButton(
+              onPressed: isLoading ? null : () => Navigator.of(ctx).pop(),
+              child: Text(ctx.t('Cancel')),
+            ),
+            ElevatedButton(
+              onPressed: isLoading ? null : () {
+                final enteredEmail = emailController.text.trim();
+                final expectedEmail = user?.email ?? '';
+                if (enteredEmail != expectedEmail) {
+                  ScaffoldMessenger.of(ctx).showSnackBar(
+                    SnackBar(
+                      content: Text(ctx.t('Email does not match. Please type your exact email.')),
+                      backgroundColor: AppTheme.errorColor,
+                    ),
+                  );
+                  return;
+                }
+                setDialogState(() => isLoading = true);
+                Navigator.of(ctx).pop();
+                _deleteAccount(context);
+              },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppTheme.errorColor,
+                foregroundColor: Colors.white,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+              ),
+              child: isLoading
+                  ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                  : Text(ctx.t('Delete')),
+            ),
           ],
         ),
-        content: Text(ctx.t(
-          'Are you sure you want to delete your account? This action cannot be undone. All your data, reports, and contributions will be permanently removed.',
-        )),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(),
-            child: Text(ctx.t('Cancel')),
-          ),
-          ElevatedButton(
-            onPressed: () {
-              Navigator.of(ctx).pop();
-              _deleteAccount(context);
-            },
-            style: ElevatedButton.styleFrom(
-              backgroundColor: AppTheme.errorColor,
-              foregroundColor: Colors.white,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-            ),
-            child: Text(ctx.t('Delete')),
-          ),
-        ],
       ),
     );
   }
@@ -650,7 +703,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final messenger = ScaffoldMessenger.of(context);
     final navigator = Navigator.of(context);
 
-    final deleted = await authProvider.deleteAccount();
+    final user = authProvider.user;
+    if (user == null) return;
+
+    final deleted = await authProvider.deleteAccount(confirmation: user.email);
     if (deleted) {
       messenger.showSnackBar(
         SnackBar(
@@ -665,7 +721,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     } else {
       messenger.showSnackBar(
         SnackBar(
-          content: Text(context.t('Could not delete your account. Please try again.')),
+          content: Text(context.t('Could not delete your account. Please try again or contact support.')),
           backgroundColor: AppTheme.errorColor,
           behavior: SnackBarBehavior.floating,
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),

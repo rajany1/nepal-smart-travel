@@ -115,7 +115,7 @@
                         <td class="px-4 py-3">
                             <p class="text-sm font-medium">{{ $b->travelPartner->name }}</p>
                             <p class="text-xs text-slate-400">
-                                {{ str_replace('_', ' ', $b->travelPartner->type) }}
+                                {{ $b->travelPartner->typeDisplay() }}
                                 @if($b->travelPartner->district) â€¢ {{ $b->travelPartner->district }}@endif
                             </p>
                         </td>

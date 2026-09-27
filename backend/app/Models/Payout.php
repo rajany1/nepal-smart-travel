@@ -22,7 +22,7 @@ class Payout extends Model
     ];
 
     protected $casts = [
-        'amount' => 'float',
+        'amount' => 'decimal:2',
         'requested_at' => 'datetime',
         'processed_at' => 'datetime',
     ];

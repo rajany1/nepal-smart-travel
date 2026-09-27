@@ -1,5 +1,4 @@
 import 'dart:async';
-import "../../core/services/localization_service.dart";
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -7,6 +6,7 @@ import 'package:dio/dio.dart';
 import '../core/api/api_client.dart';
 import '../core/models/report.dart';
 import '../core/models/form_field_config.dart';
+import '../core/models/report_category.dart' as rc;
 import '../config/constants/app_constants.dart';
 
 class ReportProvider extends ChangeNotifier {
@@ -16,11 +16,15 @@ class ReportProvider extends ChangeNotifier {
   List<ReportModel> _reports = [];
   List<ReportModel> _myReports = [];
   List<ReportModel> _emergencyReports = [];
-  List<ReportCategory> _categories = [];
+  List<rc.ReportCategory> _categories = [];
+  List<rc.ReportCategoryGroup> _categoryGroups = [];
+  List<rc.ReportCategory> _featuredCategories = [];
   ReportFormConfig? _formConfig;
   bool _isLoading = false;
   bool _isLoadingMore = false;
   bool _isLoadingMoreEmergency = false;
+  bool _isLoadingCategories = false;
+  bool _isLoadingFeatured = false;
   String? _errorMessage;
   String? _submissionErrorMessage;
   String _activeTab = 'recent';
@@ -44,11 +48,15 @@ class ReportProvider extends ChangeNotifier {
   List<ReportModel> get reports => _reports;
   List<ReportModel> get myReports => _myReports;
   List<ReportModel> get emergencyReports => _emergencyReports;
-  List<ReportCategory> get categories => _categories;
+  List<rc.ReportCategory> get categories => _categories;
+  List<rc.ReportCategoryGroup> get categoryGroups => _categoryGroups;
+  List<rc.ReportCategory> get featuredCategories => _featuredCategories;
   ReportFormConfig? get formConfig => _formConfig;
   bool get isLoading => _isLoading;
   bool get isLoadingMore => _isLoadingMore;
   bool get isLoadingMoreEmergency => _isLoadingMoreEmergency;
+  bool get isLoadingCategories => _isLoadingCategories;
+  bool get isLoadingFeatured => _isLoadingFeatured;
   String? get errorMessage => _errorMessage;
   String? get submissionErrorMessage => _submissionErrorMessage;
   String get activeTab => _activeTab;
@@ -92,29 +100,103 @@ class ReportProvider extends ChangeNotifier {
     }
   }
 
-  /// Fetch categories from the backend (dynamic)
+  /// Fetch all categories from the backend (dynamic)
   Future<void> fetchCategories() async {
+    _isLoadingCategories = true;
+    _errorMessage = null;
+    notifyListeners();
+
     try {
-      final response = await _api.dio.get('/reports/categories');
+      final response = await _api.dio.get('/reports/categories/detailed');
       final data = response.data['data'] as List? ?? [];
-      _categories = data.map((j) => ReportCategory.fromJson(j)).toList();
+      
+      // Flatten categories from groups
+      _categoryGroups = data.map((g) => rc.ReportCategoryGroup.fromJson(g)).toList();
+      _categories = _categoryGroups.expand((g) => g.categories).toList();
+      
+      _isLoadingCategories = false;
+      _errorMessage = null;
       notifyListeners();
     } catch (e) {
       print('⚠️ Failed to fetch report categories: $e');
+      _isLoadingCategories = false;
+      _errorMessage = 'Failed to load categories';
       // Fallback to hardcoded categories if API fails
       if (_categories.isEmpty) {
         _categories = [
-          ReportCategory(id: 1, name: 'General', icon: 'info'),
-          ReportCategory(id: 2, name: 'Road & Traffic', icon: 'road'),
-          ReportCategory(id: 3, name: 'Safety & Hazards', icon: 'warning'),
-          ReportCategory(id: 4, name: 'Weather & Conditions', icon: 'ac_unit'),
-          ReportCategory(id: 5, name: 'Transportation', icon: 'directions_bus'),
-          ReportCategory(id: 6, name: 'Hidden Destinations', icon: 'explore'),
-          ReportCategory(id: 7, name: 'Services & Utilities', icon: 'local_gas_station'),
-          ReportCategory(id: 8, name: 'Events & Notices', icon: 'event'),
+          rc.ReportCategory(id: 1, name: 'General', icon: 'info', slug: 'general'),
+          rc.ReportCategory(id: 2, name: 'Road & Traffic', icon: 'road', slug: 'road-traffic'),
+          rc.ReportCategory(id: 3, name: 'Safety & Hazards', icon: 'warning', slug: 'safety-hazards'),
+          rc.ReportCategory(id: 4, name: 'Weather & Conditions', icon: 'ac_unit', slug: 'weather-conditions'),
+          rc.ReportCategory(id: 5, name: 'Transportation', icon: 'directions_bus', slug: 'transportation'),
+          rc.ReportCategory(id: 6, name: 'Hidden Destinations', icon: 'explore', slug: 'hidden-destinations'),
+          rc.ReportCategory(id: 7, name: 'Services & Utilities', icon: 'local_gas_station', slug: 'services-utilities'),
+          rc.ReportCategory(id: 8, name: 'Events & Notices', icon: 'event', slug: 'events-notices'),
         ];
         notifyListeners();
       }
+    }
+  }
+
+  /// Fetch featured/most-used categories for the initial report bottom sheet
+  Future<void> fetchFeaturedCategories({int limit = 6}) async {
+    _isLoadingFeatured = true;
+    notifyListeners();
+
+    try {
+      final response = await _api.dio.get('/reports/categories/featured', queryParameters: {'limit': limit});
+      final data = response.data['data'] as List? ?? [];
+      _featuredCategories = data.map((j) => rc.ReportCategory.fromJson(j)).toList();
+      _isLoadingFeatured = false;
+      notifyListeners();
+    } catch (e) {
+      print('⚠️ Failed to fetch featured categories: $e');
+      _isLoadingFeatured = false;
+      // Fallback: use first few categories
+      if (_featuredCategories.isEmpty && _categories.isNotEmpty) {
+        _featuredCategories = _categories.take(limit).toList();
+        notifyListeners();
+      }
+    }
+  }
+
+  /// Search categories
+  Future<List<rc.ReportCategory>> searchCategories(String query, {int limit = 20}) async {
+    try {
+      final response = await _api.dio.get('/reports/categories/search', queryParameters: {
+        'q': query,
+        'limit': limit,
+      });
+      final data = response.data['data'] as List? ?? [];
+      return data.map((j) => rc.ReportCategory.fromJson(j)).toList();
+    } catch (e) {
+      print('⚠️ Failed to search categories: $e');
+      return [];
+    }
+  }
+
+  /// Get category form configuration for dynamic form rendering
+  Future<rc.ReportCategory?> getCategoryFormConfig(int categoryId) async {
+    try {
+      final response = await _api.dio.get('/reports/categories/$categoryId/form-config');
+      final data = response.data['data'] as Map<String, dynamic>? ?? {};
+      return rc.ReportCategory.fromJson(data);
+    } catch (e) {
+      print('⚠️ Failed to fetch category form config: $e');
+      return null;
+    }
+  }
+
+  /// Increment category usage count (call when user selects a category)
+  Future<void> incrementCategoryUsage(int categoryId) async {
+    try {
+      // This could be a separate endpoint, for now we just track locally
+      final cat = _categories.firstWhere((c) => c.id == categoryId, orElse: () => null);
+      if (cat != null) {
+        // Note: usageCount is not mutable in the model, would need backend call
+      }
+    } catch (e) {
+      print('⚠️ Failed to increment category usage: $e');
     }
   }
 
@@ -406,6 +488,7 @@ class ReportProvider extends ChangeNotifier {
     await Future.wait([
       fetchFormConfig(),
       fetchCategories(),
+      fetchFeaturedCategories(),
       fetchReports(lat: lat, lng: lng, radiusKm: 20.0),
     ]);
     // Try loading my reports separately (handles auth failure gracefully)

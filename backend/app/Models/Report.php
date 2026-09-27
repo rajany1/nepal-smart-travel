@@ -17,6 +17,8 @@ class Report extends Model
         'description',
         'priority',
         'status',
+        'source',
+        'provenance',
         'moderation_message',
         'authenticity_score',
         'latitude',
@@ -41,6 +43,10 @@ class Report extends Model
         'expires_at',
         'confirmed_by_count',
         'last_confirmed_at',
+        'bipad_id',
+        'bipad_hazard_id',
+        'bipad_source',
+        'bipad_raw',
     ];
 
     protected $casts = [
@@ -62,6 +68,10 @@ class Report extends Model
         'unhelpful_count' => 'integer',
         'comments_count' => 'integer',
         'confirmed_by_count' => 'integer',
+        'source' => 'string',
+        'bipad_id' => 'integer',
+        'bipad_hazard_id' => 'integer',
+        'bipad_raw' => 'array',
     ];
 
     public function place(): BelongsTo

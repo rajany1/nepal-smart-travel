@@ -10,6 +10,7 @@ class Alert extends Model
     protected $fillable = [
         'uuid',
         'title',
+        'title_ne',
         'description',
         'alert_type',
         'severity',
@@ -25,6 +26,10 @@ class Alert extends Model
         'sender_type',
         'link_type',
         'link_value',
+        'bipad_id',
+        'bipad_hazard_id',
+        'bipad_source',
+        'bipad_raw',
     ];
 
     public function targetUser()
@@ -39,6 +44,9 @@ class Alert extends Model
             'longitude' => 'decimal:7',
             'expires_at' => 'datetime',
             'is_broadcast' => 'boolean',
+            'bipad_id' => 'integer',
+            'bipad_hazard_id' => 'integer',
+            'bipad_raw' => 'array',
         ];
     }
 

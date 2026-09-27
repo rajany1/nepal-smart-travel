@@ -16,6 +16,7 @@
             color: #fff;
             overflow-x: hidden;
             position: relative;
+            padding-top: 76px; /* reserves fixed navbar height (refined by script) */
         }
 
         body::before {
@@ -53,12 +54,13 @@
             align-items: center;
             justify-content: space-between;
             padding: 0.75rem 3rem;
-            position: sticky;
-            top: 0;
+            position: fixed;
+            top: 0; left: 0; right: 0;
             z-index: 100;
             backdrop-filter: blur(24px);
             background: rgba(2,14,14,0.7);
             border-bottom: 1px solid rgba(255,255,255,0.04);
+            transition: padding 0.25s ease;
         }
 
         .k-logo {
@@ -670,6 +672,7 @@
             .k-footer-inner { grid-template-columns: 1fr; gap: 2rem; }
             .k-nav-links { display: none; }
             .k-nav { padding: 1rem 1.5rem; }
+            body { padding-top: 84px; }
             .k-section { padding: 4rem 1.5rem; }
             .k-stats-bar { flex-wrap: wrap; gap: 2rem; padding: 2rem; }
         }
@@ -677,6 +680,11 @@
             .k-places-grid { grid-template-columns: repeat(2, 1fr); }
             .k-phone { width: 240px; height: 480px; }
         }
+
+        /* Compact navbar on scroll — fixed & out of flow, so content never shifts */
+        .k-nav.is-compact { padding: 0.4rem 3rem; }
+        .k-nav.is-compact .k-logo img { height: 44px !important; }
+        @media (max-width: 1024px) { .k-nav.is-compact { padding: 0.45rem 1.5rem; } }
     </style>
 </head>
 <body>
@@ -687,9 +695,7 @@
     <!-- NAVBAR -->
     <nav class="k-nav">
         <a href="{{ route('web.home') }}" class="k-logo" style="text-decoration:none">
-            <div style="background:rgba(255,255,255,0.9);border-radius:16px;padding:8px 12px;display:flex;align-items:center;box-shadow:0 4px 20px rgba(0,0,0,0.3)">
-                <img src="{{ asset('images/oripori_logo.png') }}" alt="Oripori" style="height:80px;width:auto;object-fit:contain">
-            </div>
+            <img src="{{ asset('images/oripori_logo_wordmark.png') }}" alt="Oripori" style="height:52px;width:auto;object-fit:contain">
         </a>
         <ul class="k-nav-links">
             <li><a href="#services">Services</a></li>
@@ -1080,8 +1086,8 @@
                 <ul>
                     <li><a href="#">Help Center</a></li>
                     <li><a href="#">Safety</a></li>
-                    <li><a href="#">Terms of Service</a></li>
-                    <li><a href="#">Privacy Policy</a></li>
+                    <li><a href="{{ route('web.legal.show', 'terms') }}">Terms of Service</a></li>
+                    <li><a href="{{ route('web.legal.show', 'privacy') }}">Privacy Policy</a></li>
                 </ul>
             </div>
         </div>
@@ -1118,6 +1124,26 @@
             if (new URLSearchParams(window.location.search).has('app')) {
                 document.cookie = 'nst_app=1; path=/; max-age=31536000';
             }
+        })();
+
+        // Fixed navbar: reserve its full height, compact on scroll (hysteresis)
+        (function () {
+            var nav = document.querySelector('.k-nav');
+            if (!nav) return;
+            document.body.style.paddingTop = nav.offsetHeight + 'px';
+            window.addEventListener('resize', function () {
+                var was = nav.classList.contains('is-compact');
+                nav.classList.remove('is-compact');
+                document.body.style.paddingTop = nav.offsetHeight + 'px';
+                if (was) nav.classList.add('is-compact');
+            });
+            var onScroll = function () {
+                var y = window.scrollY;
+                if (y > 60) nav.classList.add('is-compact');
+                else if (y < 8) nav.classList.remove('is-compact');
+            };
+            onScroll();
+            window.addEventListener('scroll', onScroll, { passive: true });
         })();
     </script>
 </body>

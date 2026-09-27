@@ -11,7 +11,7 @@ return new class extends Migration
         Schema::create('push_tokens', function (Blueprint $table) {
             $table->id();
             $table->foreignId('user_id')->constrained()->cascadeOnDelete();
-            $table->string('player_id', 255);
+            $table->string('player_id', 191);
             $table->string('device_type', 50)->nullable();
             $table->boolean('subscribed')->default(true);
             $table->timestamps();

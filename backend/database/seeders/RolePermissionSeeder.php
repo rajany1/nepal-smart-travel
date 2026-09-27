@@ -95,6 +95,9 @@ class RolePermissionSeeder extends Seeder
 
             // Audit Logs
             ['name' => 'view_audit_logs', 'display_name' => 'View Audit Logs', 'group' => 'system', 'description' => 'View system audit logs', 'menu_label' => 'Audit Logs', 'menu_icon' => 'history', 'menu_order' => 26, 'route_name' => 'admin.audit-logs', 'menu_group' => 'main'],
+
+            // Support Inbox
+            ['name' => 'manage_support', 'display_name' => 'Manage Support', 'group' => 'operations', 'menu_group' => 'operations', 'description' => 'View and respond to user support conversations', 'menu_label' => 'Support Inbox', 'menu_icon' => 'headset', 'menu_order' => 27, 'route_name' => 'admin.support'],
         ];
 
         foreach ($permissions as $p) {
@@ -128,7 +131,7 @@ class RolePermissionSeeder extends Seeder
                 'permissions' => [
                     'view_dashboard', 'view_live_map', 'approve_reports', 'delete_reports',
                     'manage_places', 'manage_alerts', 'manage_users',
-                    'view_analytics',
+                    'view_analytics', 'manage_support',
                 ],
             ],
             'user' => [

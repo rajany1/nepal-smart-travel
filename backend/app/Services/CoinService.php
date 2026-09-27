@@ -6,6 +6,7 @@ use App\Models\OriporiCoinWallet;
 use App\Models\CoinTransaction;
 use App\Models\CoinSetting;
 use App\Models\AdCampaign;
+use App\Models\AdRewardEvent;
 use App\Models\Report;
 use App\Models\User;
 use Illuminate\Support\Facades\DB;
@@ -14,32 +15,66 @@ use Carbon\Carbon;
 
 class CoinService
 {
+    protected FinancialLedgerService $ledger;
+
+    public function __construct(FinancialLedgerService $ledger)
+    {
+        $this->ledger = $ledger;
+    }
+
     /**
      * Credit coins to user when ad impression happens on their report.
+     * Coins derived from: gross_amount (CPM/1000) × user_share_percent / coin_to_npr_rate
+     * NOT from static impression_value — that's just a fallback.
      */
     public function creditImpression(User $user, AdCampaign $campaign, Report $report): ?CoinTransaction
     {
-        // Fraud checks
         if (!$this->canCredit($user, $campaign, $report, 'impression')) {
             return null;
         }
 
-        $impressionValue = (float) CoinSetting::getValue('impression_value', 0.05);
-        $userSharePercent = (float) CoinSetting::getValue('user_share_percent', 70);
-        $coins = round($impressionValue * ($userSharePercent / 100), 4);
+        $grossAmount = $this->calculateGrossAmount($campaign, 'impression');
+        $userSharePercent = (float) CoinSetting::getValue('user_share_percent', 47);
+        $coinToNprRate = (float) CoinSetting::getValue('coin_to_npr_rate', 1);
+
+        // Canonical: coins = gross × user_share_percent / coin_to_npr_rate
+        $coins = round(($grossAmount * $userSharePercent / 100) / $coinToNprRate, 4);
+
+        // Fallback: if calculation yields 0, use static impression_value
+        if ($coins <= 0) {
+            $coins = round((float) CoinSetting::getValue('impression_value', 0.0235), 4);
+        }
 
         if ($coins <= 0) {
             return null;
         }
 
-        return $this->credit($user, $coins, 'impression_earning', $campaign, $report, "Ad impression on report: {$report->title}", [
-            'impression_value' => $impressionValue,
+        $idempotencyKey = AdRewardEvent::generateIdempotencyKey('imp', $user->id, $campaign->id);
+
+        $rateSnapshot = [
+            'coin_to_npr_rate' => $coinToNprRate,
             'user_share_percent' => $userSharePercent,
-        ]);
+            'gross_amount' => $grossAmount,
+        ];
+
+        return $this->ledger->creditCoins(
+            userId: $user->id,
+            amount: $coins,
+            type: 'impression_earning',
+            description: "Ad impression on report: {$report->title}",
+            metadata: array_merge($rateSnapshot, [
+                'ad_campaign_id' => $campaign->id,
+                'report_id' => $report->id,
+                'ip_address' => request()->ip(),
+            ]),
+            idempotencyKey: $idempotencyKey,
+        );
     }
 
     /**
      * Credit coins to user when ad click happens on their report.
+     * Coins derived from: gross_amount (CPC) × user_share_percent / coin_to_npr_rate
+     * NOT from static click_value — that's just a fallback.
      */
     public function creditClick(User $user, AdCampaign $campaign, Report $report): ?CoinTransaction
     {
@@ -47,18 +82,61 @@ class CoinService
             return null;
         }
 
-        $clickValue = (float) CoinSetting::getValue('click_value', 0.50);
-        $userSharePercent = (float) CoinSetting::getValue('user_share_percent', 70);
-        $coins = round($clickValue * ($userSharePercent / 100), 4);
+        $grossAmount = $this->calculateGrossAmount($campaign, 'click');
+        $userSharePercent = (float) CoinSetting::getValue('user_share_percent', 47);
+        $coinToNprRate = (float) CoinSetting::getValue('coin_to_npr_rate', 1);
+
+        // Canonical: coins = gross × user_share_percent / coin_to_npr_rate
+        $coins = round(($grossAmount * $userSharePercent / 100) / $coinToNprRate, 4);
+
+        // Fallback: if calculation yields 0, use static click_value
+        if ($coins <= 0) {
+            $coins = round((float) CoinSetting::getValue('click_value', 0.235), 4);
+        }
 
         if ($coins <= 0) {
             return null;
         }
 
-        return $this->credit($user, $coins, 'click_earning', $campaign, $report, "Ad click on report: {$report->title}", [
-            'click_value' => $clickValue,
+        $idempotencyKey = AdRewardEvent::generateIdempotencyKey('click', $user->id, $campaign->id);
+
+        $rateSnapshot = [
+            'coin_to_npr_rate' => $coinToNprRate,
             'user_share_percent' => $userSharePercent,
-        ]);
+            'gross_amount' => $grossAmount,
+        ];
+
+        return $this->ledger->creditCoins(
+            userId: $user->id,
+            amount: $coins,
+            type: 'click_earning',
+            description: "Ad click on report: {$report->title}",
+            metadata: array_merge($rateSnapshot, [
+                'ad_campaign_id' => $campaign->id,
+                'report_id' => $report->id,
+                'ip_address' => request()->ip(),
+            ]),
+            idempotencyKey: $idempotencyKey,
+        );
+    }
+
+    /**
+     * Calculate gross NPR amount for an ad event (what the advertiser is charged).
+     */
+    private function calculateGrossAmount(AdCampaign $campaign, string $eventType): float
+    {
+        if ($eventType === 'impression') {
+            $cpm = (float) $campaign->cost_per_view > 0
+                ? (float) $campaign->cost_per_view
+                : (float) \App\Models\GameSetting::getValue('ad_cpm', 50);
+            return round($cpm / 1000, 4);
+        }
+
+        // Click
+        $cpc = (float) $campaign->cost_per_click > 0
+            ? (float) $campaign->cost_per_click
+            : (float) \App\Models\GameSetting::getValue('ad_cpc', 0.50);
+        return round($cpc, 4);
     }
 
     /**
@@ -66,26 +144,18 @@ class CoinService
      */
     private function canCredit(User $user, AdCampaign $campaign, Report $report, string $type): bool
     {
-        // Self-view check: user can't earn from their own report's ads
-        // Actually, users SHOULD earn from their own reports (that's the point)
-        // But they can't game it by viewing their own report repeatedly
-
-        // Bot detection
         if ($this->isBot()) {
             return false;
         }
 
-        // IP cooldown check (prevent rapid repeated views)
         if (!$this->checkCooldown($user->id, $campaign->id, $type)) {
             return false;
         }
 
-        // Daily earning cap
         if (!$this->checkDailyEarningCap($user->id)) {
             return false;
         }
 
-        // Daily impression cap for this report
         if (!$this->checkDailyReportCap($report->id)) {
             return false;
         }
@@ -100,9 +170,16 @@ class CoinService
     {
         $cooldownMinutes = (int) CoinSetting::getValue('impression_cooldown_minutes', 10);
         $cacheKey = "coin_cooldown:{$userId}:{$campaignId}:{$type}";
-        $lastInteraction = Cache::get($cacheKey);
 
-        if ($lastInteraction) {
+        // Use Cache::lock for atomic check-and-set
+        $lock = Cache::lock("coin_cooldown_lock:{$cacheKey}", $cooldownMinutes * 60);
+        if (!$lock->get()) {
+            return false;
+        }
+
+        // Check if cooldown already set (from concurrent request that won the lock first)
+        if (Cache::get($cacheKey)) {
+            $lock->release();
             return false;
         }
 
@@ -151,35 +228,6 @@ class CoinService
             }
         }
         return false;
-    }
-
-    /**
-     * Credit coins to user wallet.
-     */
-    private function credit(User $user, float $amount, string $type, AdCampaign $campaign, Report $report, string $description, array $settingsMeta = []): CoinTransaction
-    {
-        return DB::transaction(function () use ($user, $amount, $type, $campaign, $report, $description, $settingsMeta) {
-            // Get or create wallet
-            $wallet = OriporiCoinWallet::getForUser($user->id);
-
-            // Credit wallet
-            $wallet->credit($amount);
-
-            // Create transaction record
-            $transaction = CoinTransaction::create([
-                'user_id' => $user->id,
-                'type' => $type,
-                'amount' => $amount,
-                'ad_campaign_id' => $campaign->id,
-                'report_id' => $report->id,
-                'description' => $description,
-                'metadata' => array_merge($settingsMeta, [
-                    'ip_address' => request()->ip(),
-                ]),
-            ]);
-
-            return $transaction;
-        });
     }
 
     /**

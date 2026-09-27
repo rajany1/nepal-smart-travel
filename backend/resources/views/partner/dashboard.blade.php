@@ -20,7 +20,7 @@
             <div class="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
                 <div class="min-w-0">
                     <h2 class="text-xl sm:text-2xl font-bold text-slate-800 leading-tight">Welcome, {{ auth()->user()->name }}</h2>
-                    <p class="text-slate-500 text-sm mt-1 truncate">{{ $partner->name }} &middot; {{ ucwords(str_replace('_', ' ', $partner->type)) }}</p>
+                    <p class="text-slate-500 text-sm mt-1 truncate">{{ $partner->name }} &middot; {{ $partner->typeDisplay() }}</p>
                     <span class="inline-flex items-center gap-1.5 mt-2 text-xs px-3 py-1 rounded-full border {{ $statusColors[$partner->verification_status] ?? 'bg-slate-100 text-slate-600 border-slate-200' }}">
                         <i class="fas fa-shield-alt"></i> {{ ucfirst($partner->verification_status) }}
                     </span>

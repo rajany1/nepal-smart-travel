@@ -35,7 +35,7 @@
                         <td class="px-6 py-4">
                             <div class="flex items-center gap-3">
                                 <div class="w-10 h-10 rounded-lg bg-primary-100 grid place-items-center text-primary-600">
-                                    <i class="fas fa-{{ $p->type === 'hotel' ? 'hotel' : ($p->type === 'guide' ? 'user-tie' : ($p->type === 'adventure' ? 'mountain' : 'car')) }}"></i>
+                                    <i class="fas fa-{{ $p->type === 'hotel' ? 'hotel' : ($p->type === 'guide' ? 'user-tie' : ($p->type === 'adventure' ? 'mountain' : ($p->type === 'other' ? 'store' : 'car'))) }}"></i>
                                 </div>
                                 <div>
                                     <p class="font-semibold">{{ $p->name }}</p>
@@ -43,7 +43,7 @@
                                 </div>
                             </div>
                         </td>
-                        <td class="px-6 py-4"><span class="text-xs bg-slate-100 text-slate-600 px-2 py-1 rounded-full">{{ str_replace('_', ' ', $p->type) }}</span></td>
+                        <td class="px-6 py-4"><span class="text-xs bg-slate-100 text-slate-600 px-2 py-1 rounded-full">{{ $p->typeDisplay() }}</span></td>
                         <td class="px-6 py-4 text-center"><span class="font-semibold text-green-600">{{ $p->commission_rate }}%</span>@if($p->commission_fixed > 0) <span class="text-xs text-slate-400">+ Rs.{{ number_format($p->commission_fixed) }}</span>@endif</td>
                         <td class="px-6 py-4 text-center font-semibold text-green-600">@if($p->value_npr > 0)Rs. {{ number_format($p->value_npr, 2) }}@else<span class="text-slate-300">â€”</span>@endif</td>
                         <td class="px-6 py-4 text-center text-sm text-slate-600">{{ $p->bookings_count }}</td>
@@ -165,6 +165,10 @@
                     </select>
                 </div>
             </div>
+            <div id="editTypeLabelWrap" class="hidden">
+                <label class="block text-xs font-semibold text-slate-600 mb-1">Type label (shown when Other is selected)</label>
+                <input type="text" name="type_label" id="editTypeLabel" maxlength="60" placeholder="e.g. Bakery, Cyber cafe" class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm">
+            </div>
             <div><label>Description</label><textarea name="description" id="editDescription" rows="2" class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm"></textarea></div>
             <div class="grid grid-cols-2 gap-4">
                 <div><label>Phone</label><input type="text" name="phone" id="editPhone" class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm"></div>
@@ -192,10 +196,17 @@
 @section('scripts')
 <script>
 let partners = @json($partners->items());
+function syncEditTypeLabel() {
+    document.getElementById('editTypeLabelWrap').classList.toggle('hidden', document.getElementById('editType').value !== 'other');
+}
+document.getElementById('editType').addEventListener('change', syncEditTypeLabel);
+syncEditTypeLabel();
 function openEdit(id) {
     const p = partners.find(x => x.id === id); if (!p) return;
     document.getElementById('editForm').action = '/' + window.adminPrefix + '/travel-partners/' + id;
     document.getElementById('editName').value = p.name; document.getElementById('editType').value = p.type;
+    document.getElementById('editTypeLabel').value = p.type_label || '';
+    syncEditTypeLabel();
     document.getElementById('editDescription').value = p.description || ''; document.getElementById('editPhone').value = p.phone || '';
     document.getElementById('editEmail').value = p.email || ''; document.getElementById('editWebsite').value = p.website || '';
     document.getElementById('editDistrict').value = p.district || ''; document.getElementById('editAddress').value = p.address || '';

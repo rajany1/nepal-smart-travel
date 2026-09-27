@@ -82,3 +82,6 @@ flutter:
     - assets/icons/
     - assets/lottie/
     - assets/videos/
+    - assets/nepal_boundary.geojson
+    - assets/nepal_adm1.geojson
+    - assets/nepal_adm2.geojson

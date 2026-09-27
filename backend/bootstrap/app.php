@@ -11,19 +11,23 @@ return Application::configure(basePath: dirname(__DIR__))
         commands: __DIR__.'/../routes/console.php',
         health: '/up',
     )
-    ->withMiddleware(function (Middleware $middleware): void {
+->withMiddleware(function (Middleware $middleware): void {
         $middleware->api(prepend: [
             \Laravel\Sanctum\Http\Middleware\EnsureFrontendRequestsAreStateful::class,
             \App\Http\Middleware\AccessLog::class,
+            \App\Http\Middleware\IdempotencyMiddleware::class,
         ]);
         $middleware->web(prepend: [
             \App\Http\Middleware\AccessLog::class,
+            \App\Http\Middleware\IdempotencyMiddleware::class,
         ]);
         $middleware->alias([
-'profile.completed' => \App\Http\Middleware\ProfileCompleted::class,
-'status' => \App\Http\Middleware\CheckUserStatus::class,
-'business' => \App\Http\Middleware\EnsureBusiness::class,
-'role' => \App\Http\Middleware\RoleMiddleware::class,
+            'profile.completed' => \App\Http\Middleware\ProfileCompleted::class,
+            'status' => \App\Http\Middleware\CheckUserStatus::class,
+            'business' => \App\Http\Middleware\EnsureBusiness::class,
+            'role' => \App\Http\Middleware\RoleMiddleware::class,
+            'idempotency' => \App\Http\Middleware\IdempotencyMiddleware::class,
+            'legal.acceptance' => \App\Http\Middleware\LegalAcceptance::class,
         ]);
     })
     ->withSchedule(function (\Illuminate\Console\Scheduling\Schedule $schedule) {
@@ -35,6 +39,8 @@ return Application::configure(basePath: dirname(__DIR__))
         $schedule->command('ai:safety-sweep')->everyMinute()->withoutOverlapping(120);
         // Weekly refresh of imported OSM districts (queue-backed, upsert only)
         $schedule->command('osm:refresh')->weekly()->sundays()->at('03:00')->withoutOverlapping();
+        // Refresh Nepal boundary cache every 3 days (Redis)
+        $schedule->command('map:refresh-cache')->dailyAt('03:00')->withoutOverlapping();
     })
     ->withExceptions(function (Exceptions $exceptions): void {
         //

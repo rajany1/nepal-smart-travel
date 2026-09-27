@@ -3,12 +3,15 @@
 namespace App\Http\Controllers\Partner;
 
 use App\Http\Controllers\Controller;
+use App\Mail\PartnerOtpMail;
+use App\Models\PushToken;
 use App\Models\Role;
 use App\Models\TravelPartner;
 use App\Models\User;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Log;
 
 class PartnerAuthController extends Controller
 {
@@ -23,6 +26,7 @@ class PartnerAuthController extends Controller
             request()->session()->invalidate();
             request()->session()->regenerateToken();
         }
+
         return view('partner.register', ['types' => self::BUSINESS_TYPES]);
     }
 
@@ -40,15 +44,26 @@ class PartnerAuthController extends Controller
             'phone' => 'required|unique:users,phone',
             'password' => 'required|min:8|regex:/[a-z]/|regex:/[A-Z]/|regex:/[0-9]/',
             'business_name' => 'required|string|max:255',
-            'type' => 'required|in:' . implode(',', self::BUSINESS_TYPES),
+            'type' => 'required|in:'.implode(',', self::BUSINESS_TYPES),
             'address' => 'nullable|string|max:255',
             'district' => 'nullable|string|max:100',
             'description' => 'nullable|string|max:2000',
             'website' => 'nullable|url|max:255',
+            'agree_terms' => 'accepted',
+            'other_type' => 'required_if:type,other|nullable|string|min:2|max:60',
+        ], [
+            'agree_terms.accepted' => 'You must agree to the Terms & Conditions and Business & Advertising Terms to register.',
+            'other_type.required_if' => 'Please specify your business type.',
         ]);
 
+        $otherType = trim((string) $request->input('other_type', ''));
+        if ($data['type'] === 'other' && $otherType === '') {
+            return back()->withInput()->withErrors(['other_type' => 'Please specify your business type.']);
+        }
+        $otherType = $data['type'] === 'other' ? $otherType : null;
+
         $businessRole = Role::where('name', 'business')->first();
-        if (!$businessRole) {
+        if (! $businessRole) {
             return back()->withErrors(['email' => 'Business role not configured.'])->onlyInput('email');
         }
 
@@ -57,13 +72,17 @@ class PartnerAuthController extends Controller
             'email' => $data['email'],
             'phone' => $data['phone'],
             'password' => $data['password'],
-            'role_id' => $businessRole->id,
         ]);
+
+        // role_id intentionally NOT mass-assigned (not fillable) — set server-side only.
+        $user->role_id = $businessRole->id;
+        $user->save();
 
         TravelPartner::create([
             'user_id' => $user->id,
             'name' => $data['business_name'],
             'type' => $data['type'],
+            'type_label' => $otherType,
             'address' => $data['address'] ?? null,
             'district' => $data['district'] ?? null,
             'description' => $data['description'] ?? null,
@@ -90,11 +109,13 @@ class PartnerAuthController extends Controller
             if ($partner && $partner->verification_status !== 'verified') {
                 $partner->update(['verification_status' => 'verified', 'verified_at' => now()]);
             }
-            Cache::forget("partner_reg_" . $user->id);
+            Cache::forget('partner_reg_'.$user->id);
+
             return redirect()->route('partner.dashboard');
         }
 
         $partner = $user->business;
+
         return view('partner.wizard', compact('user', 'partner'));
     }
 
@@ -104,10 +125,10 @@ class PartnerAuthController extends Controller
         $email = $user->email;
 
         $otp = str_pad(random_int(0, 999999), 6, '0', STR_PAD_LEFT);
-        Cache::put("partner_email_otp_" . $user->id, $otp, now()->addMinutes(15));
-        Cache::forget("partner_email_otp_attempts_" . $user->id);
+        Cache::put('partner_email_otp_'.$user->id, $otp, now()->addMinutes(15));
+        Cache::forget('partner_email_otp_attempts_'.$user->id);
 
-        \Mail::to($email)->send(new \App\Mail\PartnerOtpMail($otp, $user->name));
+        \Mail::to($email)->send(new PartnerOtpMail($otp, $user->name));
 
         return back()->with('success', "Verification code sent to {$email}. Check your inbox.");
     }
@@ -117,13 +138,13 @@ class PartnerAuthController extends Controller
         $request->validate(['otp' => 'required|string|size:6']);
 
         $user = $request->user();
-        $cached = Cache::get("partner_email_otp_" . $user->id);
+        $cached = Cache::get('partner_email_otp_'.$user->id);
 
-        if (!$cached) {
+        if (! $cached) {
             return back()->withErrors(['otp' => 'Code expired. Request a new one.']);
         }
 
-        $attemptsKey = "partner_email_otp_attempts_" . $user->id;
+        $attemptsKey = 'partner_email_otp_attempts_'.$user->id;
         $attempts = (int) Cache::get($attemptsKey, 0);
         if ($attempts >= 5) {
             return back()->withErrors(['otp' => 'Too many failed attempts.']);
@@ -132,11 +153,12 @@ class PartnerAuthController extends Controller
         if ($cached !== $request->otp) {
             Cache::put($attemptsKey, $attempts + 1, now()->addMinutes(15));
             $remaining = 5 - $attempts - 1;
+
             return back()->withErrors(['otp' => "Invalid code. {$remaining} attempts left."]);
         }
 
         $user->update(['email_verified_at' => now()]);
-        Cache::forget("partner_email_otp_" . $user->id);
+        Cache::forget('partner_email_otp_'.$user->id);
         Cache::forget($attemptsKey);
 
         return redirect()->route('partner.wizard')->with('success', 'Email verified!');
@@ -148,11 +170,11 @@ class PartnerAuthController extends Controller
         $phone = $user->phone;
 
         $otp = str_pad(random_int(0, 999999), 6, '0', STR_PAD_LEFT);
-        Cache::put("partner_phone_otp_" . $user->id, $otp, now()->addMinutes(10));
-        Cache::forget("partner_phone_otp_attempts_" . $user->id);
+        Cache::put('partner_phone_otp_'.$user->id, $otp, now()->addMinutes(10));
+        Cache::forget('partner_phone_otp_attempts_'.$user->id);
 
         // Send via push notification to mobile app
-        $tokens = \App\Models\PushToken::where('user_id', $user->id)
+        $tokens = PushToken::where('user_id', $user->id)
             ->where('subscribed', true)
             ->pluck('fcm_token')
             ->toArray();
@@ -172,13 +194,13 @@ class PartnerAuthController extends Controller
         $request->validate(['otp' => 'required|string|size:6']);
 
         $user = $request->user();
-        $cached = Cache::get("partner_phone_otp_" . $user->id);
+        $cached = Cache::get('partner_phone_otp_'.$user->id);
 
-        if (!$cached) {
+        if (! $cached) {
             return back()->withErrors(['otp' => 'Code expired. Request a new one.']);
         }
 
-        $attemptsKey = "partner_phone_otp_attempts_" . $user->id;
+        $attemptsKey = 'partner_phone_otp_attempts_'.$user->id;
         $attempts = (int) Cache::get($attemptsKey, 0);
         if ($attempts >= 5) {
             return back()->withErrors(['otp' => 'Too many failed attempts.']);
@@ -187,11 +209,12 @@ class PartnerAuthController extends Controller
         if ($cached !== $request->otp) {
             Cache::put($attemptsKey, $attempts + 1, now()->addMinutes(15));
             $remaining = 5 - $attempts - 1;
+
             return back()->withErrors(['otp' => "Invalid code. {$remaining} attempts left."]);
         }
 
         $user->update(['phone_verified_at' => now()]);
-        Cache::forget("partner_phone_otp_" . $user->id);
+        Cache::forget('partner_phone_otp_'.$user->id);
         Cache::forget($attemptsKey);
 
         // Auto-approve
@@ -205,7 +228,10 @@ class PartnerAuthController extends Controller
 
     public function showLogin()
     {
-        if (Auth::check()) return redirect()->route('partner.dashboard');
+        if (Auth::check() && Auth::user()->isBusiness()) {
+            return redirect()->route('partner.dashboard');
+        }
+
         return view('partner.login');
     }
 
@@ -219,16 +245,18 @@ class PartnerAuthController extends Controller
         if (Auth::attempt($credentials, $request->boolean('remember'))) {
             $request->session()->regenerate();
             $user = Auth::user();
-            if (!$user->isBusiness()) {
+            if (! $user->isBusiness()) {
                 Auth::logout();
+
                 return back()->withErrors(['email' => 'No business partner access.'])->onlyInput('email');
             }
-            if (!$user->business) {
+            if (! $user->business) {
                 return redirect()->route('partner.business-form');
             }
-            if (!$user->email_verified_at) {
+            if (! $user->email_verified_at) {
                 return redirect()->route('partner.wizard');
             }
+
             return redirect()->intended(route('partner.dashboard'));
         }
 
@@ -240,12 +268,14 @@ class PartnerAuthController extends Controller
         Auth::logout();
         $request->session()->invalidate();
         $request->session()->regenerateToken();
+
         return redirect()->route('partner.login');
     }
 
     public function businessForm()
     {
         $user = Auth::user();
+
         return view('partner.business_form', [
             'types' => self::BUSINESS_TYPES,
             'partner' => $user?->business,
@@ -255,22 +285,34 @@ class PartnerAuthController extends Controller
     public function submitBusinessForm(Request $request)
     {
         $user = Auth::user();
-        if (!$user || !$user->isBusiness()) abort(403);
+        if (! $user || ! $user->isBusiness()) {
+            abort(403);
+        }
 
         $data = $request->validate([
             'business_name' => 'required|string|max:255',
-            'type' => 'required|in:' . implode(',', self::BUSINESS_TYPES),
+            'type' => 'required|in:'.implode(',', self::BUSINESS_TYPES),
             'address' => 'nullable|string|max:255',
             'district' => 'nullable|string|max:100',
             'description' => 'nullable|string|max:2000',
             'website' => 'nullable|url|max:255',
             'phone' => 'required|string|max:30',
+            'other_type' => 'required_if:type,other|nullable|string|min:2|max:60',
+        ], [
+            'other_type.required_if' => 'Please specify your business type.',
         ]);
+
+        $otherType = trim((string) $request->input('other_type', ''));
+        if ($data['type'] === 'other' && $otherType === '') {
+            return back()->withInput()->withErrors(['other_type' => 'Please specify your business type.']);
+        }
+        $otherType = $data['type'] === 'other' ? $otherType : null;
 
         $partner = $user->business;
         if ($partner) {
             $partner->update($data + [
                 'name' => $data['business_name'],
+                'type_label' => $otherType,
                 'verification_status' => 'pending',
                 'rejected_reason' => null,
                 'email' => $user->email,
@@ -280,6 +322,7 @@ class PartnerAuthController extends Controller
                 'user_id' => $user->id,
                 'name' => $data['business_name'],
                 'type' => $data['type'],
+                'type_label' => $otherType,
                 'address' => $data['address'] ?? null,
                 'district' => $data['district'] ?? null,
                 'description' => $data['description'] ?? null,
@@ -301,6 +344,7 @@ class PartnerAuthController extends Controller
         if ($partner && $partner->verification_status === 'verified') {
             return redirect()->route('partner.dashboard');
         }
+
         return view('partner.pending', compact('partner'));
     }
 
@@ -308,13 +352,15 @@ class PartnerAuthController extends Controller
     {
         try {
             $serverKey = config('services.firebase.server_key', env('FIREBASE_SERVER_KEY'));
-            if (empty($serverKey)) return;
+            if (empty($serverKey)) {
+                return;
+            }
 
             $ch = curl_init('https://fcm.googleapis.com/fcm/send');
             curl_setopt_array($ch, [
                 CURLOPT_POST => true,
                 CURLOPT_HTTPHEADER => [
-                    'Authorization: key=' . $serverKey,
+                    'Authorization: key='.$serverKey,
                     'Content-Type: application/json',
                 ],
                 CURLOPT_RETURNTRANSFER => true,
@@ -328,7 +374,7 @@ class PartnerAuthController extends Controller
             curl_exec($ch);
             curl_close($ch);
         } catch (\Throwable $e) {
-            \Illuminate\Support\Facades\Log::warning('FCM notification failed: ' . $e->getMessage());
+            Log::warning('FCM notification failed: '.$e->getMessage());
         }
     }
 }

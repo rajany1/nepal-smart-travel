@@ -10,6 +10,7 @@ import 'package:http/http.dart' as http;
 
 import 'app_settings_service.dart';
 import 'offline_db_service.dart';
+import 'nepal_boundary_service.dart';
 
 /// flutter_map [TileProvider] that serves map tiles from the on-device SQLite
 /// cache first and falls back to the network. Every successfully fetched tile
@@ -140,6 +141,16 @@ class _CachedTileImage extends ImageProvider<_CachedTileImage> {
     // 2) Cache miss — fetch from the network and persist for next time.
     //    Any failure (non-200 OR timeout/exception) falls back to
     //    [fallbackUrl] before giving up with a transparent tile.
+    //    Skip network fetch for tiles completely outside Nepal+buffer to
+    //    avoid downloading foreign-country tiles.
+    final boundary = NepalBoundaryService.instance;
+    if (boundary.isLoaded &&
+        !boundary.isTileInAllowedRegion(
+            coordinates.z, coordinates.x, coordinates.y)) {
+      return decode(
+        await ui.ImmutableBuffer.fromUint8List(TileProvider.transparentImage),
+      );
+    }
     final client = http.Client();
     try {
       Uint8List? bytes;

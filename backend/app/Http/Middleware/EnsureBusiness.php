@@ -12,12 +12,21 @@ class EnsureBusiness
     {
         $user = auth()->user();
 
-        if (!$user || !$user->isBusiness()) {
-            abort(403, 'Business partners only.');
+        if (! $user) {
+            return redirect()->route('partner.login');
+        }
+
+        if (! $user->isBusiness()) {
+            if ($request->expectsJson()) {
+                abort(403, 'Business partners only.');
+            }
+
+            return redirect()->route('partner.login')
+                ->with('error', 'This area is for business partners only.');
         }
 
         $partner = $user->business;
-        if (!$partner) {
+        if (! $partner) {
             return redirect()->route('partner.business-form')->with('error', 'Complete your business profile first.');
         }
 

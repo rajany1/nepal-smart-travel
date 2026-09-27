@@ -21,7 +21,7 @@
         <div class="bg-white rounded-lg shadow p-4">
             <div class="text-sm text-gray-500">Pending</div>
             <div class="text-2xl font-bold text-yellow-600">{{ $stats['pending'] }}</div>
-            <div class="text-xs text-gray-400">{{ number_format($stats['pending_amount'], 2) }} Coins</div>
+            <div class="text-xs text-gray-400">{{ number_format($stats['pending_amount_coins'], 2) }} Coins</div>
         </div>
         <div class="bg-white rounded-lg shadow p-4">
             <div class="text-sm text-gray-500">Processing</div>
@@ -30,7 +30,7 @@
         <div class="bg-white rounded-lg shadow p-4">
             <div class="text-sm text-gray-500">Completed</div>
             <div class="text-2xl font-bold text-green-600">{{ $stats['completed'] }}</div>
-            <div class="text-xs text-gray-400">Rs. {{ number_format($stats['total_amount'], 2) }}</div>
+            <div class="text-xs text-gray-400">Rs. {{ number_format($stats['total_amount_npr'], 2) }}</div>
         </div>
         <div class="bg-white rounded-lg shadow p-4">
             <div class="text-sm text-gray-500">Rejected</div>

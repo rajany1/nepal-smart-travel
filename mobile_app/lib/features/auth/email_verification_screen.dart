@@ -25,13 +25,6 @@ class _EmailVerificationScreenState extends State<EmailVerificationScreen> {
     _otpControllers = List.generate(_otpLength, (i) => TextEditingController());
     _firstFocusNode = FocusNode();
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      // Dev bridge: prefill OTP returned by the backend when no mail server is configured
-      final otp = context.read<AuthProvider>().lastOtp;
-      if (otp != null && otp.length == _otpLength) {
-        for (var i = 0; i < _otpLength; i++) {
-          _otpControllers[i].text = otp[i];
-        }
-      }
       if (mounted) FocusScope.of(context).requestFocus(_firstFocusNode);
     });
   }

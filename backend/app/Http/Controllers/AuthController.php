@@ -2,18 +2,26 @@
 
 namespace App\Http\Controllers;
 
-use Illuminate\Http\Request;
-use App\Models\User;
+use App\Models\LegalDocument;
+use App\Models\LegalDocumentAcceptance;
+use App\Models\PushToken;
 use App\Models\SocialAccount;
+use App\Models\User;
+use App\Services\AccountDeletionService;
+use App\Services\SmsService;
+use Carbon\Carbon;
+use Illuminate\Auth\Events\PasswordReset;
+use Illuminate\Database\QueryException;
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Http;
-use Illuminate\Support\Facades\Schema;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Password;
-use Illuminate\Support\Facades\DB;
-use Illuminate\Auth\Events\PasswordReset;
+use Illuminate\Support\Facades\Schema;
+use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Str;
 use Laravel\Sanctum\PersonalAccessToken;
-use Carbon\Carbon;
 
 class AuthController extends Controller
 {
@@ -22,11 +30,17 @@ class AuthController extends Controller
      */
     private function issueTokenPair(User $user): array
     {
+        // Access token expiry matches Sanctum config (default 30 days)
+        $accessExpiryDays = (int) config('sanctum.expiration', 60 * 24 * 30) / (60 * 24);
+        $expiresIn = config('sanctum.expiration', 60 * 24 * 30) * 60; // seconds
+
         return [
             'access_token' => $user->createToken('app')->plainTextToken,
             'refresh_token' => $user->createToken('refresh', ['*'], now()->addDays(30))->plainTextToken,
+            'expires_in' => $expiresIn,
         ];
     }
+
     // REGISTER
     public function register(Request $request)
     {
@@ -35,6 +49,10 @@ class AuthController extends Controller
             'email' => 'required|email|unique:users',
             'phone' => 'nullable|unique:users',
             'password' => 'required|min:8|regex:/[a-z]/|regex:/[A-Z]/|regex:/[0-9]/',
+            'terms_accepted' => 'required|accepted',
+            'privacy_accepted' => 'required|accepted',
+            'age_confirmed' => 'required|accepted',
+            'app_version' => 'nullable|string|max:20',
         ]);
 
         $data = [
@@ -53,6 +71,10 @@ class AuthController extends Controller
         }
 
         $user = User::create($data);
+
+        // Record legal document acceptances
+        $this->recordConsent($user, 'terms_conditions', $request);
+        $this->recordConsent($user, 'privacy_policy', $request);
 
         $tokens = $this->issueTokenPair($user);
 
@@ -75,15 +97,15 @@ class AuthController extends Controller
     {
         $request->validate([
             'email' => 'required|email',
-            'password' => 'required'
+            'password' => 'required',
         ]);
 
         $user = User::where('email', $request->email)->first();
 
-        if (!$user || !Hash::check($request->password, $user->password)) {
+        if (! $user || ! Hash::check($request->password, $user->password)) {
             return response()->json([
                 'success' => false,
-                'message' => 'Invalid credentials'
+                'message' => 'Invalid credentials',
             ], 401);
         }
 
@@ -114,9 +136,9 @@ class AuthController extends Controller
                 'id' => $user->id,
                 'name' => $user->name,
                 'email' => $user->email,
-                'avatar' => ($a = $user->avatar) ? (str_starts_with($a, 'http') ? $a : asset('storage/' . $a)) : null,
+                'avatar' => ($a = $user->avatar) ? (str_starts_with($a, 'http') ? $a : asset('storage/'.$a)) : null,
                 'role' => $user->roleName ?? 'user',
-            ]
+            ],
         ]);
     }
 
@@ -125,28 +147,29 @@ class AuthController extends Controller
     {
         return response()->json([
             'success' => true,
-            'data' => $request->user()
+            'data' => $request->user(),
         ]);
     }
 
     public function me(Request $request)
     {
         $user = $request->user();
+
         return response()->json([
             'user_id' => $user->id,
             'name' => $user->name,
             'email' => $user->email,
             'phone' => $user->phone,
-            'avatar_url' => $user->avatar ? (str_starts_with($user->avatar, 'http') ? $user->avatar : asset('storage/' . $user->avatar)) : null,
+            'avatar_url' => $user->avatar ? (str_starts_with($user->avatar, 'http') ? $user->avatar : asset('storage/'.$user->avatar)) : null,
             'bio' => $user->bio,
             'role' => $user->roleName ?? 'user',
             'role_display' => $user->role?->display_name ?? 'User',
             'permissions' => $user->role?->permissions->pluck('name') ?? [],
             'status' => $user->status ?? 'active',
             'email_verified_at' => $user->email_verified_at,
-            'profile_completed' => (bool)($user->profile_completed ?? false),
-            'total_xp' => (int)($user->total_xp ?? 0),
-            'current_level' => (int)($user->current_level ?? 1),
+            'profile_completed' => (bool) ($user->profile_completed ?? false),
+            'total_xp' => (int) ($user->total_xp ?? 0),
+            'current_level' => (int) ($user->current_level ?? 1),
             'created_at' => $user->created_at,
         ]);
     }
@@ -172,8 +195,8 @@ class AuthController extends Controller
         $user->update($validated);
 
         // If the user was still profile-incomplete, a completed bio unlocks them
-        if (!($user->profile_completed ?? false)
-            && !empty($validated['bio'])
+        if (! ($user->profile_completed ?? false)
+            && ! empty($validated['bio'])
             && mb_strlen($validated['bio']) >= 10) {
             $user->update(['profile_completed' => true]);
         }
@@ -182,8 +205,8 @@ class AuthController extends Controller
             'success' => true,
             'message' => 'Profile updated successfully',
             'user' => array_merge($user->fresh()->toArray(), [
-                'avatar_url' => $user->fresh()->avatar ? (str_starts_with($user->fresh()->avatar, 'http') ? $user->fresh()->avatar : asset('storage/' . $user->fresh()->avatar)) : null,
-            ])
+                'avatar_url' => $user->fresh()->avatar ? (str_starts_with($user->fresh()->avatar, 'http') ? $user->fresh()->avatar : asset('storage/'.$user->fresh()->avatar)) : null,
+            ]),
         ]);
     }
 
@@ -205,6 +228,7 @@ class AuthController extends Controller
         // Check yearly limit
         if ($user->phone_changed_at && Carbon::parse($user->phone_changed_at)->diffInDays(Carbon::now()) < 365) {
             $daysLeft = 365 - Carbon::parse($user->phone_changed_at)->diffInDays(Carbon::now());
+
             return response()->json([
                 'success' => false,
                 'message' => "Phone can only be changed once per year. Try again in {$daysLeft} days.",
@@ -224,7 +248,7 @@ class AuthController extends Controller
         ]);
 
         // Send OTP via SMS
-        \App\Services\SmsService::send($newPhone, "Your Oripori verification code: {$otp}. Valid for 10 minutes.");
+        SmsService::send($newPhone, "Your Oripori verification code: {$otp}. Valid for 10 minutes.");
 
         return response()->json([
             'success' => true,
@@ -249,7 +273,7 @@ class AuthController extends Controller
         $expires = session('phone_change_expires');
         $userId = session('phone_change_user_id');
 
-        if (!$storedHash || !$newPhone || !$expires || !$userId) {
+        if (! $storedHash || ! $newPhone || ! $expires || ! $userId) {
             return response()->json([
                 'success' => false,
                 'message' => 'No phone change request found. Please request a new OTP.',
@@ -265,6 +289,7 @@ class AuthController extends Controller
 
         if (Carbon::parse($expires)->isPast()) {
             session()->forget(['phone_change_otp', 'phone_change_new', 'phone_change_expires', 'phone_change_user_id']);
+
             return response()->json([
                 'success' => false,
                 'message' => 'OTP has expired. Please request a new one.',
@@ -272,7 +297,7 @@ class AuthController extends Controller
         }
 
         $otpHash = hash('sha256', $request->input('otp'));
-        if (!hash_equals($storedHash, $otpHash)) {
+        if (! hash_equals($storedHash, $otpHash)) {
             return response()->json([
                 'success' => false,
                 'message' => 'Invalid OTP. Please try again.',
@@ -311,6 +336,7 @@ class AuthController extends Controller
         // Check yearly limit
         if ($user->email_changed_at && Carbon::parse($user->email_changed_at)->diffInDays(Carbon::now()) < 365) {
             $daysLeft = 365 - Carbon::parse($user->email_changed_at)->diffInDays(Carbon::now());
+
             return response()->json([
                 'success' => false,
                 'message' => "Email can only be changed once per year. Try again in {$daysLeft} days.",
@@ -330,7 +356,7 @@ class AuthController extends Controller
         ]);
 
         // Send OTP via email
-        \Illuminate\Support\Facades\Mail::raw(
+        Mail::raw(
             "Your Oripori email verification code: {$otp}\n\nThis code is valid for 10 minutes.\n\nIf you did not request this change, please ignore this email.",
             function ($message) use ($newEmail) {
                 $message->to($newEmail)
@@ -361,7 +387,7 @@ class AuthController extends Controller
         $expires = session('email_change_expires');
         $userId = session('email_change_user_id');
 
-        if (!$storedHash || !$newEmail || !$expires || !$userId) {
+        if (! $storedHash || ! $newEmail || ! $expires || ! $userId) {
             return response()->json([
                 'success' => false,
                 'message' => 'No email change request found. Please request a new OTP.',
@@ -377,6 +403,7 @@ class AuthController extends Controller
 
         if (Carbon::parse($expires)->isPast()) {
             session()->forget(['email_change_otp', 'email_change_new', 'email_change_expires', 'email_change_user_id']);
+
             return response()->json([
                 'success' => false,
                 'message' => 'OTP has expired. Please request a new one.',
@@ -384,7 +411,7 @@ class AuthController extends Controller
         }
 
         $otpHash = hash('sha256', $request->input('otp'));
-        if (!hash_equals($storedHash, $otpHash)) {
+        if (! hash_equals($storedHash, $otpHash)) {
             return response()->json([
                 'success' => false,
                 'message' => 'Invalid OTP. Please try again.',
@@ -438,34 +465,121 @@ class AuthController extends Controller
     // DELETE ACCOUNT (anonymize + revoke + purge cascading data)
     public function destroy(Request $request)
     {
+        $request->validate([
+            'confirmation' => 'required|string',
+        ]);
+
         $user = $request->user();
 
-        // Purge per-user data that would otherwise remain
-        $user->socialAccounts()->delete();
-        $user->pushTokens()->delete();
-        $user->xpTransactions()->delete();
-        $user->achievements()->detach();
-        $user->subscription()->delete();
+        // Require explicit confirmation: user must type their email
+        if ($request->input('confirmation') !== $user->email) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Please type your email address to confirm account deletion.',
+            ], 422);
+        }
 
-        $user->tokens()->delete();
+        $service = new AccountDeletionService;
+        $result = $service->delete($user, 'user_requested');
 
-        // Anonymize the account so reports/comments/reviews keep valid refs.
-        // (password stays — the column is NOT NULL; status stays — ENUM has no
-        // 'deleted'; all tokens are revoked so login is impossible anyway)
-        $user->update([
-            'name' => 'Deleted User',
-            'email' => 'deleted_' . $user->id . '@deleted.local',
-            'phone' => null,
-            'avatar' => null,
-            'bio' => null,
-            'gender' => null,
-            'interest' => null,
-            'profile_completed' => false,
+        if ($result['success']) {
+            return response()->json([
+                'success' => true,
+                'message' => 'Your account has been deleted. Some financial and audit records are retained in anonymized form as required by law.',
+                'retained_items' => $result['retained_items'] ?? [],
+            ]);
+        }
+
+        return response()->json([
+            'success' => false,
+            'message' => $result['message'] ?? 'Account deletion failed. Please try again or contact support.',
+        ], 500);
+    }
+
+    /**
+     * Record consent for a legal document.
+     */
+    private function recordConsent(User $user, string $documentType, Request $request): void
+    {
+        $document = LegalDocument::where('type', $documentType)
+            ->where('is_published', true)
+            ->orderByDesc('published_at')
+            ->first();
+
+        if (! $document) {
+            // No published document exists — record acceptance of the default version
+            $version = '1.0';
+            $documentId = null;
+            $hash = hash('sha256', 'default');
+        } else {
+            $version = $document->version ?? '1.0';
+            $documentId = $document->id;
+            $hash = hash('sha256', $document->content ?? '');
+        }
+
+        LegalDocumentAcceptance::create([
+            'user_id' => $user->id,
+            'legal_document_id' => $documentId,
+            'document_type' => $documentType,
+            'document_version' => $version,
+            'document_hash' => $hash,
+            'accepted_at' => now(),
+            'app_version' => $request->input('app_version'),
+            'platform' => $request->input('platform'),
+            'ip_address' => $request->ip(),
+            'user_agent' => substr($request->userAgent(), 0, 500),
         ]);
+    }
+
+    /**
+     * Return which legal documents the authenticated user still needs to accept
+     * (or re-accept because a newer version was published).
+     */
+    public function legalAcceptanceStatus(Request $request)
+    {
+        $user = $request->user();
+        $requiredTypes = ['terms_conditions', 'privacy_policy'];
+        $pending = [];
+
+        foreach ($requiredTypes as $type) {
+            if (LegalDocumentAcceptance::needsReAcceptance($user, $type)) {
+                $doc = LegalDocument::getActive($type);
+                $pending[] = [
+                    'document_type' => $type,
+                    'latest_version' => $doc?->version ?? '1.0',
+                    'title' => $doc?->title ?? $type,
+                ];
+            }
+        }
 
         return response()->json([
             'success' => true,
-            'message' => 'Your account has been deleted.',
+            'requires_acceptance' => count($pending) > 0,
+            'pending_documents' => $pending,
+        ]);
+    }
+
+    /**
+     * Record the user's acceptance of the specified legal documents.
+     */
+    public function acceptLegal(Request $request)
+    {
+        $request->validate([
+            'documents' => 'required|array|min:1',
+            'documents.*' => 'string|in:terms_conditions,privacy_policy',
+            'app_version' => 'nullable|string|max:20',
+            'platform' => 'nullable|string|max:20',
+        ]);
+
+        $user = $request->user();
+
+        foreach ($request->input('documents') as $documentType) {
+            $this->recordConsent($user, $documentType, $request);
+        }
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Legal acceptance recorded successfully.',
         ]);
     }
 
@@ -474,13 +588,17 @@ class AuthController extends Controller
     {
         $request->validate([
             'id_token' => 'required|string',
+            'terms_accepted' => 'sometimes|accepted',
+            'privacy_accepted' => 'sometimes|accepted',
+            'age_confirmed' => 'sometimes|accepted',
+            'app_version' => 'nullable|string|max:20',
         ]);
 
         try {
             // Verify the ID token with Google's public keys
             $payload = $this->verifyGoogleToken($request->id_token);
 
-            if (!$payload || empty($payload['sub'])) {
+            if (! $payload || empty($payload['sub'])) {
                 return response()->json([
                     'success' => false,
                     'message' => 'Invalid Google token',
@@ -497,51 +615,86 @@ class AuthController extends Controller
                 ->where('provider_id', $googleId)
                 ->first();
 
-            if ($socialAccount) {
-                $user = $socialAccount->user;
-            } elseif ($email) {
+            // A social account whose linked user was deleted (orphan) must not
+            // shadow the email lookup — fall back to email so we can re-link.
+            $user = ($socialAccount && $socialAccount->user) ? $socialAccount->user : null;
+
+            if (! $user && $email) {
                 $user = User::where('email', $email)->first();
-            } else {
-                $user = null;
             }
 
-            if (!$user) {
-                // Create new user
-                $user = User::create([
-                    'name' => $name,
-                    'email' => $email ?? 'google_' . $googleId . '@placeholder.local',
-                    'phone' => null,
-                    'password' => Str::random(32),
-                    'avatar' => $avatar,
-                    'bio' => null,
-                    'badges' => [],
-                    'expertise_regions' => [],
-                    'settings' => [],
-                    'profile_completed' => $email !== null,
-                ]);
+            $isNewUser = ! $user;
 
-                // Link social account
-                SocialAccount::create([
-                    'user_id' => $user->id,
-                    'provider' => 'google',
-                    'provider_id' => $googleId,
-                    'provider_email' => $email,
-                    'provider_avatar' => $avatar,
+            // Validate consent for new users (backend determines new-user status)
+            if ($isNewUser) {
+                $validator = Validator::make($request->all(), [
+                    'terms_accepted' => 'required|accepted',
+                    'privacy_accepted' => 'required|accepted',
+                    'age_confirmed' => 'required|accepted',
                 ]);
-            } elseif (!$socialAccount) {
-                // Link existing user to this Google account
-                SocialAccount::create([
-                    'user_id' => $user->id,
-                    'provider' => 'google',
-                    'provider_id' => $googleId,
-                    'provider_email' => $email,
-                    'provider_avatar' => $avatar,
-                ]);
-
-                // Update avatar if not set
-                if (empty($user->avatar) && $avatar) {
-                    $user->update(['avatar' => $avatar]);
+                if ($validator->fails()) {
+                    return response()->json([
+                        'success' => false,
+                        'message' => 'You must accept the Terms of Use, Privacy Policy, and confirm you are 18 or older to create an account.',
+                        'errors' => $validator->errors(),
+                    ], 422);
                 }
+            }
+
+            if (! $user) {
+                // Create new user. Handle the race where the email was
+                // registered between our lookup and this insert.
+                try {
+                    $user = User::create([
+                        'name' => $name,
+                        'email' => $email ?? 'google_'.$googleId.'@placeholder.local',
+                        'phone' => null,
+                        'password' => Str::random(32),
+                        'avatar' => $avatar,
+                        'bio' => null,
+                        'badges' => [],
+                        'expertise_regions' => [],
+                        'settings' => [],
+                        'profile_completed' => $email !== null,
+                    ]);
+                } catch (QueryException $e) {
+                    if ((string) $e->getCode() !== '23000' || ! $email) {
+                        throw $e;
+                    }
+                    $user = User::where('email', $email)->first();
+                    if (! $user) {
+                        throw $e;
+                    }
+                }
+            }
+
+            if ($socialAccount) {
+                // Heal orphaned/desynced link (e.g. linked user was deleted)
+                if ((int) $socialAccount->user_id !== (int) $user->id) {
+                    $socialAccount->user_id = $user->id;
+                    $socialAccount->provider_email = $email;
+                    $socialAccount->provider_avatar = $avatar;
+                    $socialAccount->save();
+                }
+            } else {
+                SocialAccount::create([
+                    'user_id' => $user->id,
+                    'provider' => 'google',
+                    'provider_id' => $googleId,
+                    'provider_email' => $email,
+                    'provider_avatar' => $avatar,
+                ]);
+            }
+
+            // Update avatar if not set
+            if (empty($user->avatar) && $avatar) {
+                $user->update(['avatar' => $avatar]);
+            }
+
+            // Record consent for new users
+            if ($isNewUser) {
+                $this->recordConsent($user, 'terms_conditions', $request);
+                $this->recordConsent($user, 'privacy_policy', $request);
             }
 
             if ($user->status === 'banned') {
@@ -572,15 +725,67 @@ class AuthController extends Controller
                     'id' => $user->id,
                     'name' => $user->name,
                     'email' => $user->email,
-                    'avatar' => ($a = $user->avatar) ? (str_starts_with($a, 'http') ? $a : asset('storage/' . $a)) : null,
+                    'avatar' => ($a = $user->avatar) ? (str_starts_with($a, 'http') ? $a : asset('storage/'.$a)) : null,
                     'role' => $user->roleName ?? 'user',
+                    'is_new_user' => $isNewUser,
                 ],
             ]);
         } catch (\Exception $e) {
-            \Illuminate\Support\Facades\Log::warning('Google auth failed: ' . $e->getMessage());
+            Log::warning('Google auth failed: '.$e->getMessage());
+
             return response()->json([
                 'success' => false,
                 'message' => 'Google authentication failed. Please try again.',
+            ], 401);
+        }
+    }
+
+    /**
+     * Google pre-check: determine if the Google account maps to a new or existing
+     * user WITHOUT creating anything.  Flutter calls this first so it knows
+     * whether to show the consent screen before calling socialLogin.
+     */
+    public function googlePreCheck(Request $request)
+    {
+        $request->validate([
+            'id_token' => 'required|string',
+        ]);
+
+        try {
+            $payload = $this->verifyGoogleToken($request->id_token);
+
+            if (! $payload || empty($payload['sub'])) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Invalid Google token',
+                ], 401);
+            }
+
+            $googleId = $payload['sub'];
+            $email = $payload['email'] ?? null;
+
+            $socialAccount = SocialAccount::where('provider', 'google')
+                ->where('provider_id', $googleId)
+                ->first();
+
+            if ($socialAccount) {
+                $user = $socialAccount->user;
+            } elseif ($email) {
+                $user = User::where('email', $email)->first();
+            } else {
+                $user = null;
+            }
+
+            return response()->json([
+                'success' => true,
+                'is_new_user' => ! $user,
+            ]);
+        } catch (\Exception $e) {
+            Log::warning('Google pre-check failed: '.$e->getMessage());
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Google pre-check failed. Please try again.',
             ], 401);
         }
     }
@@ -591,7 +796,7 @@ class AuthController extends Controller
             'id_token' => $idToken,
         ]);
 
-        if (!$response->successful()) {
+        if (! $response->successful()) {
             return null;
         }
 
@@ -604,7 +809,7 @@ class AuthController extends Controller
 
         $validAudiences = array_filter([$clientId, $androidClientId, $azp]);
 
-        if (!in_array($aud, $validAudiences)) {
+        if (! in_array($aud, $validAudiences)) {
             return null;
         }
 
@@ -629,7 +834,7 @@ class AuthController extends Controller
 
         return response()->json([
             'success' => true,
-            'message' => 'Logged out successfully'
+            'message' => 'Logged out successfully',
         ]);
     }
 
@@ -663,10 +868,10 @@ class AuthController extends Controller
                 'name' => $user->name,
                 'email' => $user->email,
                 'phone' => $user->phone,
-            'avatar_url' => $user->avatar ? (str_starts_with($user->avatar, 'http') ? $user->avatar : asset('storage/' . $user->avatar)) : null,
+                'avatar_url' => $user->avatar ? (str_starts_with($user->avatar, 'http') ? $user->avatar : asset('storage/'.$user->avatar)) : null,
                 'bio' => $user->bio,
-                'profile_completed' => (bool)$user->profile_completed,
-            ]
+                'profile_completed' => (bool) $user->profile_completed,
+            ],
         ]);
     }
 
@@ -676,7 +881,7 @@ class AuthController extends Controller
         $user = $request->user();
 
         return response()->json([
-            'profile_completed' => (bool)($user->profile_completed ?? false),
+            'profile_completed' => (bool) ($user->profile_completed ?? false),
             'missing_fields' => $this->getMissingProfileFields($user),
         ]);
     }
@@ -731,7 +936,7 @@ class AuthController extends Controller
     public function refreshToken(Request $request)
     {
         $plain = $request->input('refresh_token') ?? $request->bearerToken();
-        if (!$plain) {
+        if (! $plain) {
             return response()->json([
                 'success' => false,
                 'message' => 'Refresh token is required.',
@@ -739,7 +944,7 @@ class AuthController extends Controller
         }
 
         $token = PersonalAccessToken::findToken($plain);
-        if (!$token || $token->name !== 'refresh') {
+        if (! $token || $token->name !== 'refresh') {
             return response()->json([
                 'success' => false,
                 'message' => 'Invalid refresh token.',
@@ -748,6 +953,7 @@ class AuthController extends Controller
 
         if ($token->expires_at && $token->expires_at->isPast()) {
             $token->delete();
+
             return response()->json([
                 'success' => false,
                 'message' => 'Refresh token expired. Please log in again.',
@@ -755,8 +961,9 @@ class AuthController extends Controller
         }
 
         $user = $token->tokenable;
-        if (!$user || in_array($user->status, ['banned', 'suspended'])) {
+        if (! $user || in_array($user->status, ['banned', 'suspended'])) {
             $token->delete();
+
             return response()->json([
                 'success' => false,
                 'message' => 'Account is not active.',
@@ -775,7 +982,7 @@ class AuthController extends Controller
                 'id' => $user->id,
                 'name' => $user->name,
                 'email' => $user->email,
-                'avatar' => ($a = $user->avatar) ? (str_starts_with($a, 'http') ? $a : asset('storage/' . $a)) : null,
+                'avatar' => ($a = $user->avatar) ? (str_starts_with($a, 'http') ? $a : asset('storage/'.$a)) : null,
                 'role' => $user->roleName ?? 'user',
             ],
         ]);
@@ -796,20 +1003,22 @@ class AuthController extends Controller
         }
 
         // Simple OTP verification - check against stored hash (timing-safe)
-        $storedOtp = cache('email_otp_' . $user->id);
-        if (!$storedOtp || !hash_equals($storedOtp, (string) $request->otp)) {
+        $storedOtp = cache('email_otp_'.$user->id);
+        if (! $storedOtp || ! hash_equals($storedOtp, (string) $request->otp)) {
             // Brute-force lock: 5 wrong attempts invalidate the OTP entirely.
-            $attemptKey = 'email_otp_attempts_' . $user->id;
+            $attemptKey = 'email_otp_attempts_'.$user->id;
             $attempts = (int) cache($attemptKey, 0) + 1;
             cache([$attemptKey => $attempts], now()->addMinutes(15));
             if ($attempts >= 5) {
-                cache()->forget('email_otp_' . $user->id);
+                cache()->forget('email_otp_'.$user->id);
                 cache()->forget($attemptKey);
+
                 return response()->json([
                     'success' => false,
                     'message' => 'Too many incorrect codes. Request a new code.',
                 ], 429, ['Retry-After' => '3600']);
             }
+
             return response()->json([
                 'success' => false,
                 'message' => 'Invalid or expired OTP.',
@@ -817,9 +1026,9 @@ class AuthController extends Controller
         }
 
         // Reset attempt counter on success
-        cache()->forget('email_otp_attempts_' . $user->id);
+        cache()->forget('email_otp_attempts_'.$user->id);
         $user->update(['email_verified_at' => now()]);
-        cache()->forget('email_otp_' . $user->id);
+        cache()->forget('email_otp_'.$user->id);
 
         return response()->json([
             'success' => true,
@@ -852,12 +1061,12 @@ class AuthController extends Controller
     private function sendVerificationOtp($user): string
     {
         $otp = str_pad(random_int(0, 999999), 6, '0', STR_PAD_LEFT);
-        cache(['email_otp_' . $user->id => $otp], now()->addMinutes(10));
+        cache(['email_otp_'.$user->id => $otp], now()->addMinutes(10));
         // Fresh code = fresh attempts
-        cache()->forget('email_otp_attempts_' . $user->id);
+        cache()->forget('email_otp_attempts_'.$user->id);
 
         try {
-            \Illuminate\Support\Facades\Mail::raw(
+            Mail::raw(
                 "Your Nepal Smart Travel verification code is: {$otp}\n\nIt expires in 10 minutes.",
                 function ($message) use ($user) {
                     $message->to($user->email)
@@ -865,7 +1074,7 @@ class AuthController extends Controller
                 }
             );
         } catch (\Throwable $e) {
-            \Illuminate\Support\Facades\Log::warning('OTP email send failed: ' . $e->getMessage());
+            Log::warning('OTP email send failed: '.$e->getMessage());
         }
 
         return $otp;
@@ -894,21 +1103,21 @@ class AuthController extends Controller
         $otp = str_pad(random_int(0, 999999), 6, '0', STR_PAD_LEFT);
 
         // Store in Redis for 10 minutes
-        Cache::put("phone_otp_" . $user->id, [
+        Cache::put('phone_otp_'.$user->id, [
             'otp' => $otp,
             'phone' => $phone,
         ], now()->addMinutes(10));
 
         // Fresh attempts
-        Cache::forget("phone_otp_attempts_" . $user->id);
+        Cache::forget('phone_otp_attempts_'.$user->id);
 
         // Send via Firebase Push Notification to user's devices
-        $tokens = \App\Models\PushToken::where('user_id', $user->id)
+        $tokens = PushToken::where('user_id', $user->id)
             ->where('subscribed', true)
             ->pluck('fcm_token')
             ->toArray();
 
-        if (!empty($tokens)) {
+        if (! empty($tokens)) {
             foreach ($tokens as $token) {
                 $this->sendFcmNotification($token, [
                     'title' => 'Nepal Smart Travel',
@@ -931,9 +1140,9 @@ class AuthController extends Controller
         ]);
 
         $user = $request->user();
-        $cached = Cache::get("phone_otp_" . $user->id);
+        $cached = Cache::get('phone_otp_'.$user->id);
 
-        if (!$cached) {
+        if (! $cached) {
             return response()->json([
                 'success' => false,
                 'message' => 'Verification code expired. Please request a new one.',
@@ -941,7 +1150,7 @@ class AuthController extends Controller
         }
 
         // Brute-force protection
-        $attemptsKey = "phone_otp_attempts_" . $user->id;
+        $attemptsKey = 'phone_otp_attempts_'.$user->id;
         $attempts = (int) Cache::get($attemptsKey, 0);
         if ($attempts >= 5) {
             return response()->json([
@@ -950,12 +1159,13 @@ class AuthController extends Controller
             ], 429);
         }
 
-        if (!hash_equals($cached['otp'], (string) $request->otp)) {
+        if (! hash_equals($cached['otp'], (string) $request->otp)) {
             Cache::increment($attemptsKey);
             Cache::put($attemptsKey, Cache::get($attemptsKey, 0), now()->addMinutes(15));
+
             return response()->json([
                 'success' => false,
-                'message' => 'Invalid verification code. ' . (5 - $attempts - 1) . ' attempts remaining.',
+                'message' => 'Invalid verification code. '.(5 - $attempts - 1).' attempts remaining.',
             ], 422);
         }
 
@@ -966,7 +1176,7 @@ class AuthController extends Controller
         ]);
 
         // Clean up
-        Cache::forget("phone_otp_" . $user->id);
+        Cache::forget('phone_otp_'.$user->id);
         Cache::forget($attemptsKey);
 
         // Award +50 XP for verification
@@ -985,7 +1195,8 @@ class AuthController extends Controller
         try {
             $serverKey = config('services.firebase.server_key', env('FIREBASE_SERVER_KEY'));
             if (empty($serverKey)) {
-                \Illuminate\Support\Facades\Log::warning('Firebase server key not configured');
+                Log::warning('Firebase server key not configured');
+
                 return;
             }
 
@@ -993,7 +1204,7 @@ class AuthController extends Controller
             curl_setopt_array($ch, [
                 CURLOPT_POST => true,
                 CURLOPT_HTTPHEADER => [
-                    'Authorization: key=' . $serverKey,
+                    'Authorization: key='.$serverKey,
                     'Content-Type: application/json',
                 ],
                 CURLOPT_RETURNTRANSFER => true,
@@ -1007,7 +1218,7 @@ class AuthController extends Controller
             curl_exec($ch);
             curl_close($ch);
         } catch (\Throwable $e) {
-            \Illuminate\Support\Facades\Log::warning('FCM notification failed: ' . $e->getMessage());
+            Log::warning('FCM notification failed: '.$e->getMessage());
         }
     }
 }

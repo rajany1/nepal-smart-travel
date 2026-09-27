@@ -6,6 +6,7 @@ use App\Models\AdCampaign;
 use App\Models\AdClick;
 use App\Models\AdImpression;
 use App\Models\AdRevenueLedger;
+use App\Models\AdRewardEvent;
 use App\Models\Report;
 use App\Models\CoinSetting;
 use App\Services\FraudDetectionService;
@@ -13,6 +14,7 @@ use App\Services\CoinService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\DB;
 
 class AdController extends Controller
 {
@@ -26,6 +28,11 @@ class AdController extends Controller
         $cap = $persistent ? 0 : (int) \App\Models\GameSetting::getValue('ad_freq_cap', 3);
         $userId = Auth::id();
         $today = today()->startOfDay();
+
+        // Block suspicious users from seeing ads (user-level fraud)
+        if ($userId && app(FraudDetectionService::class)->isUserSuspicious($userId)) {
+            return response()->json(['data' => []]);
+        }
 
         $campaigns = AdCampaign::with('business')
             ->active()
@@ -115,6 +122,11 @@ class AdController extends Controller
         $category = $report->category?->slug ?? null;
         $userId = Auth::id();
 
+        // Block suspicious users from seeing ads
+        if ($userId && app(FraudDetectionService::class)->isUserSuspicious($userId)) {
+            return response()->json(['data' => null]);
+        }
+
         // Get active campaigns — filter by context/district in PHP (not SQL LIKE on JSON)
         $campaigns = AdCampaign::with('business')
             ->active()
@@ -149,7 +161,7 @@ class AdController extends Controller
         // Get coin settings for mobile app to display
         $impressionValue = (float) CoinSetting::getValue('impression_value', 0.05);
         $clickValue = (float) CoinSetting::getValue('click_value', 0.50);
-        $userSharePercent = (float) CoinSetting::getValue('user_share_percent', 70);
+        $userSharePercent = (float) CoinSetting::getValue('user_share_percent', 47);
 
         return response()->json([
             'data' => [
@@ -176,6 +188,10 @@ class AdController extends Controller
     /**
      * Track ad impression and credit coins to report owner.
      * report_id is optional - only coin credit on report screens.
+     *
+     * Event lifecycle:
+     *   raw event → fraud evaluation → classification → validated → financial settlement
+     *                                              └→ suspicious/rejected → audit only
      */
     public function trackImpression(Request $request): JsonResponse
     {
@@ -196,25 +212,47 @@ class AdController extends Controller
 
         $fraud = app(FraudDetectionService::class);
         $result = $fraud->checkImpression($request, $campaign);
-        if ($result['blocked']) {
-            return response()->json(['success' => false, 'error' => 'Event blocked', 'reasons' => $result['reasons']], 422);
-        }
 
         $userId = Auth::id();
+        if (!$userId) {
+            return response()->json(['success' => false, 'error' => 'Unauthenticated'], 401);
+        }
 
-        $recent = AdImpression::where('ad_campaign_id', $campaign->id)
-            ->where('viewed_at', '>=', now()->subMinutes(10))
-            ->when(
-                $userId,
-                fn($q) => $q->where('user_id', $userId),
-                fn($q) => $q->where('ip_address', $request->ip())
-            )
+        // Classify event based on fraud evaluation
+        $eventStatus = $result['blocked'] ? 'rejected' : 'validated';
+
+        // Database-level idempotency via canonical key
+        $idempotencyKey = AdRewardEvent::generateIdempotencyKey('imp', $userId, $campaign->id);
+
+        // Explicit check for idempotency (use raw query to avoid model/caching issues)
+        $existingExists = DB::connection()->table('ad_reward_events')
+            ->where('idempotency_key', $idempotencyKey)
             ->exists();
-
-        if ($recent) {
+        if ($existingExists) {
             return response()->json(['success' => false, 'error' => 'Impression already recorded'], 422);
         }
 
+        try {
+            $rewardEvent = AdRewardEvent::create([
+                'ad_campaign_id' => $campaign->id,
+                'user_id' => $userId,
+                'report_id' => $report?->id,
+                'event_type' => 'impression',
+                'event_status' => $eventStatus,
+                'idempotency_key' => $idempotencyKey,
+                'event_time' => now(),
+                'gross_amount' => 0,
+                'user_share' => 0,
+                'admin_share' => 0,
+                'coins_credited' => 0,
+                'coin_to_npr_rate' => 1,
+                'user_share_percent' => 47,
+            ]);
+        } catch (\Illuminate\Database\QueryException|\Illuminate\Database\UniqueConstraintViolationException $e) {
+            return response()->json(['success' => false, 'error' => 'Impression already recorded'], 422);
+        }
+
+        // Always record raw impression for analytics
         AdImpression::create([
             'ad_campaign_id' => $campaign->id,
             'user_id' => $userId,
@@ -223,47 +261,85 @@ class AdController extends Controller
             'viewed_at' => now(),
         ]);
 
-        $campaign->increment('current_impressions');
-        $this->applySpend($campaign);
-
-        // Calculate gross amount for this impression
-        $grossAmount = $this->calculateGrossAmount($campaign, 'impression');
-
-        // Credit coins to report owner (report screen only)
-        $coinService = app(CoinService::class);
-        $coinTransaction = null;
-
-        if ($isReportScreen && $report) {
-            $reportOwner = \App\Models\User::find($report->user_id);
-            if ($reportOwner) {
-                $coinTransaction = $coinService->creditImpression($reportOwner, $campaign, $report);
-            }
+        // Rejected events: recorded for audit, but return 422 (backward compatible)
+        if ($eventStatus === 'rejected') {
+            return response()->json([
+                'success' => false,
+                'error' => 'Event blocked',
+                'reasons' => $result['reasons'] ?? [],
+            ], 422);
         }
 
-        // Record revenue in ledger
-        $userSharePercent = (float) CoinSetting::getValue('user_share_percent', 70);
-        $userShare = $isReportScreen ? round($grossAmount * ($userSharePercent / 100), 4) : 0;
-        $adminShare = $grossAmount - $userShare;
+        // VALIDATED: atomic financial settlement
+        $coinsCredited = 0;
+        DB::transaction(function () use (
+            $campaign, $userId, $report, $isReportScreen, $context,
+            $request, $rewardEvent, &$coinsCredited
+        ) {
+            // 1. Campaign billing — increment counter and recalculate spend
+            $campaign->increment('current_impressions');
+            $campaign->refresh();
+            $this->applySpend($campaign);
 
-        AdRevenueLedger::create([
-            'ad_campaign_id' => $campaign->id,
-            'report_id' => $report?->id,
-            'context' => $context,
-            'gross_amount' => $grossAmount,
-            'user_share' => $userShare,
-            'admin_share' => $adminShare,
-            'event_type' => 'impression',
-        ]);
+            // 2. Calculate gross amount
+            $grossAmount = $this->calculateGrossAmount($campaign, 'impression');
+
+            // 3. Credit coins to report owner (report screen only)
+            $coinTransaction = null;
+            if ($isReportScreen && $report) {
+                $reportOwner = \App\Models\User::find($report->user_id);
+                if ($reportOwner) {
+                    $coinTransaction = app(CoinService::class)->creditImpression($reportOwner, $campaign, $report);
+                }
+            }
+
+            // 4. Revenue ledger — user_share only when coins were actually credited
+            $userSharePercent = (float) CoinSetting::getValue('user_share_percent', 47);
+            $coinsCredited = $coinTransaction ? (float) $coinTransaction->amount : 0;
+            $userShare = ($isReportScreen && $coinsCredited > 0)
+                ? round($grossAmount * ($userSharePercent / 100), 4)
+                : 0;
+            $adminShare = $grossAmount - $userShare;
+
+            AdRevenueLedger::create([
+                'ad_campaign_id' => $campaign->id,
+                'report_id' => $report?->id,
+                'context' => $context,
+                'gross_amount' => $grossAmount,
+                'user_share' => $userShare,
+                'admin_share' => $adminShare,
+                'event_type' => 'impression',
+            ]);
+
+            // 5. Finalize reward event with financial data
+            $coinToNprRate = (float) CoinSetting::getValue('coin_to_npr_rate', 1);
+            $rewardEvent->update([
+                'gross_amount' => $grossAmount,
+                'user_share' => $userShare,
+                'admin_share' => $adminShare,
+                'coins_credited' => $coinsCredited,
+                'coin_to_npr_rate' => $coinToNprRate,
+                'user_share_percent' => $userSharePercent,
+                'metadata' => [
+                    'ip_address' => $request->ip(),
+                    'report_screen' => $isReportScreen,
+                ],
+            ]);
+        });
 
         return response()->json([
             'success' => true,
-            'coins_earned' => $coinTransaction ? (float) $coinTransaction->amount : 0,
+            'coins_earned' => $coinsCredited,
         ]);
     }
 
     /**
      * Track ad click and credit coins to report owner.
      * report_id is optional - only coin credit on report screens.
+     *
+     * Event lifecycle:
+     *   raw event → fraud evaluation → classification → validated → financial settlement
+     *                                              └→ suspicious/rejected → audit only
      */
     public function trackClick(Request $request): JsonResponse
     {
@@ -284,47 +360,47 @@ class AdController extends Controller
 
         $fraud = app(FraudDetectionService::class);
         $result = $fraud->checkClick($request, $campaign);
-        if ($result['blocked']) {
-            return response()->json(['success' => false, 'error' => 'Event blocked', 'reasons' => $result['reasons']], 422);
-        }
 
         $userId = Auth::id();
-
-        // Ensure impression exists before recording click
-        $hasImpression = AdImpression::where('ad_campaign_id', $campaign->id)
-            ->when(
-                $userId,
-                fn($q) => $q->where('user_id', $userId),
-                fn($q) => $q->where('ip_address', $request->ip())
-            )
-            ->exists();
-
-        if (!$hasImpression) {
-            // Auto-record impression first
-            AdImpression::create([
-                'ad_campaign_id' => $campaign->id,
-                'user_id' => $userId,
-                'ip_address' => $request->ip(),
-                'user_agent' => $request->userAgent(),
-                'viewed_at' => now(),
-            ]);
-            $campaign->increment('current_impressions');
-            $this->applySpend($campaign);
+        if (!$userId) {
+            return response()->json(['success' => false, 'error' => 'Unauthenticated'], 401);
         }
 
-        $recent = AdClick::where('ad_campaign_id', $campaign->id)
-            ->where('clicked_at', '>=', now()->subMinutes(10))
-            ->when(
-                $userId,
-                fn($q) => $q->where('user_id', $userId),
-                fn($q) => $q->where('ip_address', $request->ip())
-            )
-            ->exists();
+        // Classify event based on fraud evaluation
+        $eventStatus = $result['blocked'] ? 'rejected' : 'validated';
 
-        if ($recent) {
+        // Database-level idempotency via canonical key
+        $idempotencyKey = AdRewardEvent::generateIdempotencyKey('click', $userId, $campaign->id);
+
+        // Explicit check for idempotency (use raw query to avoid model/caching issues)
+        $existingExists = DB::connection()->table('ad_reward_events')
+            ->where('idempotency_key', $idempotencyKey)
+            ->exists();
+        if ($existingExists) {
             return response()->json(['success' => false, 'error' => 'Click already recorded'], 422);
         }
 
+        try {
+            $rewardEvent = AdRewardEvent::create([
+                'ad_campaign_id' => $campaign->id,
+                'user_id' => $userId,
+                'report_id' => $report?->id,
+                'event_type' => 'click',
+                'event_status' => $eventStatus,
+                'idempotency_key' => $idempotencyKey,
+                'event_time' => now(),
+                'gross_amount' => 0,
+                'user_share' => 0,
+                'admin_share' => 0,
+                'coins_credited' => 0,
+                'coin_to_npr_rate' => 1,
+                'user_share_percent' => 47,
+            ]);
+        } catch (\Illuminate\Database\QueryException|\Illuminate\Database\UniqueConstraintViolationException $e) {
+            return response()->json(['success' => false, 'error' => 'Click already recorded'], 422);
+        }
+
+        // Always record raw click for analytics
         AdClick::create([
             'ad_campaign_id' => $campaign->id,
             'user_id' => $userId,
@@ -333,41 +409,96 @@ class AdController extends Controller
             'clicked_at' => now(),
         ]);
 
-        $campaign->increment('current_clicks');
-        $this->applySpend($campaign);
-
-        // Calculate gross amount for this click
-        $grossAmount = $this->calculateGrossAmount($campaign, 'click');
-
-        // Credit coins to report owner (report screen only)
-        $coinService = app(CoinService::class);
-        $coinTransaction = null;
-
-        if ($isReportScreen && $report) {
-            $reportOwner = \App\Models\User::find($report->user_id);
-            if ($reportOwner) {
-                $coinTransaction = $coinService->creditClick($reportOwner, $campaign, $report);
-            }
+        // Rejected events: recorded for audit, but return 422 (backward compatible)
+        if ($eventStatus === 'rejected') {
+            return response()->json([
+                'success' => false,
+                'error' => 'Event blocked',
+                'reasons' => $result['reasons'] ?? [],
+            ], 422);
         }
 
-        // Record revenue in ledger
-        $userSharePercent = (float) CoinSetting::getValue('user_share_percent', 70);
-        $userShare = $isReportScreen ? round($grossAmount * ($userSharePercent / 100), 4) : 0;
-        $adminShare = $grossAmount - $userShare;
+        // VALIDATED: atomic financial settlement
+        $coinsCredited = 0;
+        DB::transaction(function () use (
+            $campaign, $userId, $report, $isReportScreen, $context,
+            $request, $rewardEvent, &$coinsCredited
+        ) {
+            // 1. Ensure impression exists for this click
+            $hasImpression = AdImpression::where('ad_campaign_id', $campaign->id)
+                ->when(
+                    $userId,
+                    fn($q) => $q->where('user_id', $userId),
+                    fn($q) => $q->where('ip_address', $request->ip())
+                )
+                ->exists();
 
-        AdRevenueLedger::create([
-            'ad_campaign_id' => $campaign->id,
-            'report_id' => $report?->id,
-            'context' => $context,
-            'gross_amount' => $grossAmount,
-            'user_share' => $userShare,
-            'admin_share' => $adminShare,
-            'event_type' => 'click',
-        ]);
+            if (!$hasImpression) {
+                // Synthetic impression: record for analytics and billing consistency
+                AdImpression::create([
+                    'ad_campaign_id' => $campaign->id,
+                    'user_id' => $userId,
+                    'ip_address' => $request->ip(),
+                    'user_agent' => $request->userAgent(),
+                    'viewed_at' => now(),
+                ]);
+                $campaign->increment('current_impressions');
+            }
+
+            // 2. Campaign billing — increment click counter and recalculate spend
+            $campaign->increment('current_clicks');
+            $campaign->refresh();
+            $this->applySpend($campaign);
+
+            // 3. Calculate gross amount for this click
+            $grossAmount = $this->calculateGrossAmount($campaign, 'click');
+
+            // 4. Credit coins to report owner (report screen only)
+            $coinTransaction = null;
+            if ($isReportScreen && $report) {
+                $reportOwner = \App\Models\User::find($report->user_id);
+                if ($reportOwner) {
+                    $coinTransaction = app(CoinService::class)->creditClick($reportOwner, $campaign, $report);
+                }
+            }
+
+            // 5. Revenue ledger — user_share only when coins were actually credited
+            $userSharePercent = (float) CoinSetting::getValue('user_share_percent', 47);
+            $coinsCredited = $coinTransaction ? (float) $coinTransaction->amount : 0;
+            $userShare = ($isReportScreen && $coinsCredited > 0)
+                ? round($grossAmount * ($userSharePercent / 100), 4)
+                : 0;
+            $adminShare = $grossAmount - $userShare;
+
+            AdRevenueLedger::create([
+                'ad_campaign_id' => $campaign->id,
+                'report_id' => $report?->id,
+                'context' => $context,
+                'gross_amount' => $grossAmount,
+                'user_share' => $userShare,
+                'admin_share' => $adminShare,
+                'event_type' => 'click',
+            ]);
+
+            // 6. Finalize reward event with financial data
+            $coinToNprRate = (float) CoinSetting::getValue('coin_to_npr_rate', 1);
+            $rewardEvent->update([
+                'gross_amount' => $grossAmount,
+                'user_share' => $userShare,
+                'admin_share' => $adminShare,
+                'coins_credited' => $coinsCredited,
+                'coin_to_npr_rate' => $coinToNprRate,
+                'user_share_percent' => $userSharePercent,
+                'metadata' => [
+                    'ip_address' => $request->ip(),
+                    'report_screen' => $isReportScreen,
+                ],
+            ]);
+        });
 
         return response()->json([
             'success' => true,
-            'coins_earned' => $coinTransaction ? (float) $coinTransaction->amount : 0,
+            'coins_earned' => $coinsCredited,
         ]);
     }
 
@@ -384,7 +515,7 @@ class AdController extends Controller
         } else {
             $cpc = (float) $campaign->cost_per_click > 0
                 ? (float) $campaign->cost_per_click
-                : (float) \App\Models\GameSetting::getValue('ad_cpc', 10);
+                : (float) \App\Models\GameSetting::getValue('ad_cpc', 0.50);
             return round($cpc, 4);
         }
     }

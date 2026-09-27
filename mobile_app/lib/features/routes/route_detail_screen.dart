@@ -27,6 +27,7 @@ class _RouteDetailScreenState extends State<RouteDetailScreen> {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       context.read<RouteProvider>().fetchRouteDetail(widget.routeId);
+      context.read<RouteProvider>().fetchRouteGeometry(widget.routeId);
     });
   }
 
@@ -65,6 +66,8 @@ class _RouteDetailScreenState extends State<RouteDetailScreen> {
 
   Widget _buildContent(BuildContext context, CuratedRouteModel route) {
     final track = route.track;
+    final provider = context.watch<RouteProvider>();
+    final geometry = provider.selectedGeometry;
 
     return ListView(
       padding: const EdgeInsets.all(16),
@@ -162,9 +165,24 @@ class _RouteDetailScreenState extends State<RouteDetailScreen> {
             borderRadius: BorderRadius.circular(16),
             child: SizedBox(
               height: 280,
-              child: _buildMap(track),
+              child: _buildMap(track, geometry),
             ),
           ),
+          if (geometry != null && geometry.segments.any((s) => s.isApproximate)) ...[
+            const SizedBox(height: 6),
+            Row(
+              children: [
+                Icon(Icons.info_outline, size: 14, color: Colors.grey.shade500),
+                const SizedBox(width: 4),
+                Expanded(
+                  child: Text(
+                    context.t('Approximate trekking path — actual trail may differ'),
+                    style: TextStyle(color: Colors.grey.shade500, fontSize: 11),
+                  ),
+                ),
+              ],
+            ),
+          ],
           const SizedBox(height: 20),
         ],
 
@@ -224,8 +242,41 @@ class _RouteDetailScreenState extends State<RouteDetailScreen> {
     );
   }
 
-  Widget _buildMap(List<RouteTrackPoint> track) {
+  Widget _buildMap(List<RouteTrackPoint> track, RouteGeometryResponse? geometry) {
     final latlngs = track.map((p) => LatLng(p.lat, p.lng)).toList();
+
+    final List<Polyline> polylines = [];
+
+    if (geometry != null && geometry.segments.isNotEmpty) {
+      for (final seg in geometry.segments) {
+        if (seg.points.length < 2) continue;
+        final points = seg.points.map((p) => LatLng(p.lat, p.lng)).toList();
+
+        if (seg.status == 'routed') {
+          polylines.add(Polyline(
+            points: points,
+            color: AppTheme.primaryColor.withOpacity(0.9),
+            strokeWidth: 4,
+          ));
+        } else if (seg.status == 'approximate') {
+          polylines.add(Polyline(
+            points: points,
+            color: AppTheme.primaryColor.withOpacity(0.5),
+            strokeWidth: 3,
+            pattern: StrokePattern.dashed(segments: const [10.0, 8.0]),
+          ));
+        }
+      }
+    }
+
+    if (polylines.isEmpty && latlngs.length > 1) {
+      polylines.add(Polyline(
+        points: latlngs,
+        color: AppTheme.primaryColor.withOpacity(0.5),
+        strokeWidth: 3,
+        pattern: StrokePattern.dashed(segments: const [10.0, 8.0]),
+      ));
+    }
 
     return FlutterMap(
       mapController: _mapController,
@@ -240,15 +291,7 @@ class _RouteDetailScreenState extends State<RouteDetailScreen> {
           userAgentPackageName: 'np.com.nepalsmarttravel',
           maxZoom: 19,
         ),
-        PolylineLayer(
-          polylines: [
-            Polyline(
-              points: latlngs,
-              color: AppTheme.primaryColor.withOpacity(0.9),
-              strokeWidth: 4,
-            ),
-          ],
-        ),
+        PolylineLayer(polylines: polylines),
         MarkerLayer(
           markers: [
             for (int i = 0; i < track.length; i++)

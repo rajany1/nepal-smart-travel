@@ -29,6 +29,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
   bool _initialLoadDone = false;
   bool _reportsLoaded = false;
   late final ProfileProvider _profileProvider;
+  // Pull-to-refresh cooldown
+  DateTime? _lastRefreshTime;
+  static const _refreshCooldown = Duration(seconds: 10);
 
   @override
   void initState() {
@@ -37,7 +40,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
     _profileProvider = context.read<ProfileProvider>();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _loadProfileData();
-      _profileProvider.startAutoRefresh();
     });
   }
 
@@ -66,6 +68,15 @@ class _ProfileScreenState extends State<ProfileScreen> {
       // Always fetch fresh data from server
       await profileProv.loadProfile(forceRefresh: true);
     }
+  }
+
+  Future<void> _onRefresh() async {
+    final now = DateTime.now();
+    if (_lastRefreshTime != null && now.difference(_lastRefreshTime!) < _refreshCooldown) {
+      return; // Cooldown active — skip API call
+    }
+    _lastRefreshTime = now;
+    await _profileProvider.refreshAll();
   }
 
   void _loadMyReports() {
@@ -239,27 +250,15 @@ class _ProfileScreenState extends State<ProfileScreen> {
                         ),
                       ),
 
-                      // Privacy Policy
+                      // Legal & Policies
                       _buildMenuTile(
-                        icon: Icons.privacy_tip_rounded,
+                        icon: Icons.balance_rounded,
                         iconColor: const Color(0xFF4FACFE),
-                        title: context.t('Privacy Policy'),
-                        subtitle: 'How we protect your data',
+                        title: context.t('Legal & Policies'),
+                        subtitle: 'Terms, privacy and all policies',
                         onTap: () {
                           Navigator.pop(ctx);
-                          Navigator.of(context).pushNamed('/legal', arguments: 'privacy_policy');
-                        },
-                      ),
-
-                      // Terms & Conditions
-                      _buildMenuTile(
-                        icon: Icons.gavel_rounded,
-                        iconColor: const Color(0xFFFFB74D),
-                        title: context.t('Terms & Conditions'),
-                        subtitle: 'Service agreement',
-                        onTap: () {
-                          Navigator.pop(ctx);
-                          Navigator.of(context).pushNamed('/legal', arguments: 'terms_conditions');
+                          Navigator.of(context).pushNamed('/legal-policies');
                         },
                       ),
 
@@ -471,7 +470,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
           _loadMyReports();
 
           return RefreshIndicator(
-            onRefresh: () => profileProv.refreshAll(),
+            onRefresh: _onRefresh,
             child: SingleChildScrollView(
               physics: const AlwaysScrollableScrollPhysics(),
               padding: const EdgeInsets.all(16),

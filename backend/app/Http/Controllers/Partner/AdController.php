@@ -233,7 +233,19 @@ class AdController extends Controller
 
         DB::beginTransaction();
         try {
-            $wallet->debit($amount);
+            $ledger = app(\App\Services\FinancialLedgerService::class);
+            $ledger->debitPartnerWallet(
+                partnerId: $this->partner()->id,
+                amount: $amount,
+                type: 'ad_spend',
+                description: "Ad campaign payment from wallet",
+                referenceType: 'AdCampaign',
+                referenceId: $adCampaign->id,
+                metadata: [
+                    'campaign_name' => $adCampaign->name,
+                ],
+                idempotencyKey: "ad-pay:{$adCampaign->id}",
+            );
 
             $adCampaign->payments()->create([
                 'business_id' => $this->partner()->id,
@@ -352,7 +364,7 @@ class AdController extends Controller
             'target_district' => 'nullable|string|max:100',
             'target_category' => 'nullable|string|max:100',
             'contexts' => 'nullable|array',
-            'contexts.*' => 'in:home,explore,nearby,place_detail,report,hotels,restaurants,attractions,cafes,activities',
+            'contexts.*' => 'in:home,explore,nearby,place_detail,report,hotels,restaurants,attractions,cafes,activities,route',
             'budget' => 'required|numeric|min:100',
             'max_impressions' => 'nullable|integer|min:0',
             'starts_at' => 'nullable|date',

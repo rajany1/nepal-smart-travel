@@ -7,16 +7,20 @@ class RouteProvider extends ChangeNotifier {
 
   List<CuratedRouteModel> _routes = [];
   CuratedRouteModel? _selectedRoute;
+  RouteGeometryResponse? _selectedGeometry;
   bool _isLoading = false;
   bool _isLoadingDetail = false;
+  bool _isLoadingGeometry = false;
   String? _errorMessage;
   String? _activeTypeFilter;
   String? _activeDifficultyFilter;
 
   List<CuratedRouteModel> get routes => _routes;
   CuratedRouteModel? get selectedRoute => _selectedRoute;
+  RouteGeometryResponse? get selectedGeometry => _selectedGeometry;
   bool get isLoading => _isLoading;
   bool get isLoadingDetail => _isLoadingDetail;
+  bool get isLoadingGeometry => _isLoadingGeometry;
   String? get errorMessage => _errorMessage;
   String? get activeTypeFilter => _activeTypeFilter;
   String? get activeDifficultyFilter => _activeDifficultyFilter;
@@ -65,9 +69,28 @@ class RouteProvider extends ChangeNotifier {
     notifyListeners();
   }
 
+  Future<void> fetchRouteGeometry(int id) async {
+    _isLoadingGeometry = true;
+    notifyListeners();
+
+    try {
+      final res = await _api.getRouteGeometry(id);
+      final data = res.data['geometry'] as Map<String, dynamic>?;
+      _selectedGeometry =
+          data != null ? RouteGeometryResponse.fromJson(data) : null;
+    } catch (e) {
+      debugPrint('RouteProvider: fetch geometry failed: $e');
+      _selectedGeometry = null;
+    }
+
+    _isLoadingGeometry = false;
+    notifyListeners();
+  }
+
   void clear() {
     _routes = [];
     _selectedRoute = null;
+    _selectedGeometry = null;
     _errorMessage = null;
     notifyListeners();
   }

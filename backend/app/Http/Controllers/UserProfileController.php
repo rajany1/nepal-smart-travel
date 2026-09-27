@@ -52,6 +52,10 @@ class UserProfileController extends Controller
                 'created_at' => $r->created_at,
             ]);
 
+        // Fraud status for public profile (no sensitive details)
+        $fraudProfile = $user->fraudProfile;
+        $isSuspicious = $fraudProfile && $fraudProfile->is_suspicious;
+
         return response()->json([
             'success' => true,
             'data' => [
@@ -74,6 +78,9 @@ class UserProfileController extends Controller
                 'total_reports' => $totalReports,
                 'approved_reports' => $approvedReports,
                 'approval_rate' => $approvalRate,
+
+                'is_suspicious' => $isSuspicious,
+                'fraud_level' => $isSuspicious ? 'high' : (($fraudProfile && $fraudProfile->fraud_score >= 50) ? 'medium' : 'none'),
 
                 'badges' => $badges,
                 'recent_reports' => $recentReports,

@@ -18,6 +18,7 @@ import '../../core/services/offline_db_service.dart';
 import '../../core/services/offline_tile_provider.dart';
 import '../../core/services/app_settings_service.dart';
 import '../../core/services/proximity_alert_service.dart';
+import '../../core/services/nepal_boundary_service.dart';
 import '../../core/models/place.dart';
 import '../../core/models/route_model.dart';
 import '../../core/api/api_client.dart';
@@ -74,17 +75,16 @@ class _NearbyMapScreenState extends State<NearbyMapScreen>
       DraggableScrollableController();
   final TextEditingController _searchController = TextEditingController();
   final OfflineDbService _offlineDb = OfflineDbService.instance;
-  // Standard (OSM/Carto) map layer. Bypasses the on-device tile cache because
-  // that cache can hold blanks/corrupt tiles (OSM valid-but-empty PNGs) which
-  // otherwise show as a permanent gray basemap. Satellite keeps its own cache.
-  final OfflineTileProvider _offlineTiles =
-      OfflineTileProvider(bypassNetworkCache: true);
+  final OfflineTileProvider _offlineTiles = OfflineTileProvider();
   final OfflineTileProvider _satelliteTiles =
-      OfflineTileProvider(tileType: 'satellite');
+      OfflineTileProvider(tileType: 'satellite_v2');
+  final OfflineTileProvider _labelTiles =
+      OfflineTileProvider(tileType: 'labels');
 
   double? _lat;
   double? _lng;
   double _currentZoom = AppConstants.defaultMapZoom;
+  double _previousZoom = AppConstants.defaultMapZoom;
   bool _isTracking = true;
   bool _isLoadingPlaces = false;
   bool _isFetchingPlaces = false;
@@ -121,6 +121,18 @@ class _NearbyMapScreenState extends State<NearbyMapScreen>
   // Compass rotation (degrees, clockwise positive)
   final ValueNotifier<double> _rotationNotifier = ValueNotifier<double>(0);
 
+  // Camera-state notifier: incremented on every map move/zoom so FlutterMap
+  // rebuilds via ValueListenableBuilder without a full-widget setState.
+  final ValueNotifier<int> _camVersion = ValueNotifier(0);
+
+  // Heading notifier: updated on compass/GPS-heading change so only the
+  // blue-dot rebuilds — not the entire FlutterMap or screen.
+  final ValueNotifier<double?> _headingNotifier = ValueNotifier(null);
+
+  // Search text notifier: drives the suffix-icon (clear button) via
+  // ValueListenableBuilder instead of a full-widget setState on every keystroke.
+  final ValueNotifier<String> _searchTextNotifier = ValueNotifier('');
+
   // Route / Directions (multi-route)
   List<Map<String, dynamic>> _routes = [];
   bool _isLoadingRoute = false;
@@ -151,10 +163,8 @@ class _NearbyMapScreenState extends State<NearbyMapScreen>
   int _lastPlacesHash = 0;
   List<_LabelAssignment> _lastLabelAssignments = [];
 
-  // Grid clustering state (Nepal-wide pins at low zoom)
-  static const int _clusterMinCount = 120;
-  static const double _clusterMaxZoom = 12.0;
-  static const int _clusterMaxPins = 400;
+  // Screen-space marker clustering (cell ~48px = marker 32 + 16px buffer)
+  static const double _markerGridCell = 48.0;
 
   // Smooth camera glide (last-known -> fresh GPS fix)
   late final AnimationController _cameraAnimController = AnimationController(
@@ -162,6 +172,7 @@ class _NearbyMapScreenState extends State<NearbyMapScreen>
     duration: const Duration(milliseconds: 700),
   );
   VoidCallback? _cameraAnimListener;
+  bool _isAnimating = false;
 
   // Location button cycling state: 0=default recenter, 1=compass follow + tilt
   int _locationTapState = 0;
@@ -187,7 +198,16 @@ class _NearbyMapScreenState extends State<NearbyMapScreen>
     ProximityAlertService.instance.onProximityAlert = _showProximityBanner;
     _pollSyncCount();
     _initCompass();
+    _searchController.addListener(() {
+      _searchTextNotifier.value = _searchController.text;
+    });
+    NepalBoundaryService.instance.onLoaded(_onBoundaryLoaded);
+    NepalBoundaryService.instance.load();
     WidgetsBinding.instance.addPostFrameCallback((_) => _initMap());
+  }
+
+  void _onBoundaryLoaded() {
+    if (mounted) _camVersion.value++;
   }
 
   /// In-app banner when the user walks into an alert zone while
@@ -224,19 +244,19 @@ class _NearbyMapScreenState extends State<NearbyMapScreen>
       final h360 = (h % 360 + 360) % 360;
       final prev = _compassHeading;
       if (prev != null && _shortestArc(prev, h360).abs() < 1) return;
-      setState(() {
-        _compassHeading = h360;
-        // When GPS bearing is stale (standing still), let the compass drive
-        // the light so it follows the phone's rotation.
-        if (DateTime.now().difference(_lastGpsHeadingAt).inSeconds > 4) {
-          _useGpsHeading = false;
-        }
-      });
+      _compassHeading = h360;
+      // When GPS bearing is stale (standing still), let the compass drive
+      // the light so it follows the phone's rotation.
+      if (DateTime.now().difference(_lastGpsHeadingAt).inSeconds > 4) {
+        _useGpsHeading = false;
+      }
+      _headingNotifier.value = _heading;
     });
   }
 
   @override
   void dispose() {
+    NepalBoundaryService.instance.removeOnLoaded(_onBoundaryLoaded);
     ProximityAlertService.instance.stopNavigationMonitoring();
     _debounceTimer?.cancel();
     _autoDownloadTimer?.cancel();
@@ -247,6 +267,9 @@ class _NearbyMapScreenState extends State<NearbyMapScreen>
     _weatherDebounceTimer?.cancel();
     _sosRefreshTimer?.cancel();
     _rotationNotifier.dispose();
+    _camVersion.dispose();
+    _headingNotifier.dispose();
+    _searchTextNotifier.dispose();
     _sheetController.dispose();
     _searchController.dispose();
     _cameraAnimController.dispose();
@@ -261,8 +284,12 @@ class _NearbyMapScreenState extends State<NearbyMapScreen>
     // Instant map: Nepal-wide dataset loads in parallel with GPS lookup —
     // markers paint immediately (from SQLite cache or the 10-min Redis-backed
     // /places/all), and the map recenters when GPS arrives.
+    // NOTE: setNepalCachedPlaces() populates from SQLite instantly (fast),
+    // but fetchNepalPlaces() MUST use force=true to ensure fresh API data
+    // is always fetched — the SQLite cache may be stale if new places were
+    // added since the last cache write.
     unawaited(provider.setNepalCachedPlaces());
-    unawaited(provider.fetchNepalPlaces());
+    unawaited(provider.fetchNepalPlaces(force: true));
 
     if (widget.focusLat != null && widget.focusLng != null) {
       // Focus mode: open centered on a given point (e.g. an SOS location from
@@ -361,24 +388,42 @@ class _NearbyMapScreenState extends State<NearbyMapScreen>
     });
   }
 
-  /// Smoothly glide the camera to [target] (ease-in-out ~700ms).
-  void _smoothMoveTo(LatLng target) {
+  /// Smoothly glide the camera to [target] with optional zoom change.
+  ///
+  /// Uses [_cameraAnimController] with [curve] over [duration].
+  /// Sets [_isAnimating] to prevent [_onMapMoved] from disabling tracking
+  /// or running expensive per-frame work during the animation.
+  void _smoothMoveTo(
+    LatLng target, {
+    Duration duration = const Duration(milliseconds: 400),
+    double? targetZoom,
+    Curve curve = Curves.easeInOut,
+  }) {
     if (!_mapReady) return;
-    final start = _mapController.camera.center;
-    final zoom = _mapController.camera.zoom;
-    final oldListener = _cameraAnimListener;
-    if (oldListener != null) {
-      _cameraAnimController.removeListener(oldListener);
+    // Cancel any in-progress animation cleanly
+    if (_cameraAnimController.isAnimating) {
+      final oldListener = _cameraAnimListener;
+      if (oldListener != null) {
+        _cameraAnimController.removeListener(oldListener);
+      }
+      _cameraAnimController.stop();
     }
+
+    final start = _mapController.camera.center;
+    final startZoom = _mapController.camera.zoom;
+    final endZoom = targetZoom ?? startZoom;
+    _cameraAnimController.duration = duration;
+    _isAnimating = true;
+
     final listener = () {
-      final t = Curves.easeInOut.transform(_cameraAnimController.value);
+      final t = curve.transform(_cameraAnimController.value);
       try {
         _mapController.move(
           LatLng(
             start.latitude + (target.latitude - start.latitude) * t,
             start.longitude + (target.longitude - start.longitude) * t,
           ),
-          zoom,
+          startZoom + (endZoom - startZoom) * t,
         );
       } catch (e) {
         debugPrint('Smooth camera move failed: $e');
@@ -386,9 +431,19 @@ class _NearbyMapScreenState extends State<NearbyMapScreen>
     };
     _cameraAnimListener = listener;
     _cameraAnimController.addListener(listener);
+
     _cameraAnimController
       ..reset()
-      ..forward();
+      ..forward().then((_) {
+        // Animation complete — clean up and run one final update
+        _cameraAnimController.removeListener(listener);
+        _cameraAnimListener = null;
+        _isAnimating = false;
+        // Final viewport update after animation settles
+        if (mounted && _mapReady) {
+          _onMapMoved(_mapController.camera);
+        }
+      });
   }
 
   /// flutter_map 7 MapController has no `hasMaps` getter — reading the
@@ -407,28 +462,29 @@ class _NearbyMapScreenState extends State<NearbyMapScreen>
         .getPositionStream(intervalMs: 3000, distanceFilterM: 5)
         .listen((position) {
       final loc = LatLng(position.latitude, position.longitude);
-      if (mounted) {
-        setState(() {
-          _currentLocation = loc;
-          _accuracyM = position.accuracy;
-          final gpsH = position.heading;
-          if (gpsH != null && gpsH > 0) {
-            _gpsHeading = (gpsH % 360 + 360) % 360;
-            _lastGpsHeadingAt = DateTime.now();
-            _useGpsHeading = true;
-          } else {
-            // No bearing (stationary) - compass takes over.
-            _useGpsHeading = false;
-          }
-        });
-      }
       if (!mounted) return;
       _checkArrival(loc);
-      if (!_isTracking) return;
+      // Merge GPS heading + location into a single setState to avoid
+      // two consecutive full-widget rebuilds per GPS fix.
+      final gpsH = position.heading;
       setState(() {
-        _lat = position.latitude;
-        _lng = position.longitude;
+        _currentLocation = loc;
+        _accuracyM = position.accuracy;
+        if (gpsH != null && gpsH > 0) {
+          _gpsHeading = (gpsH % 360 + 360) % 360;
+          _lastGpsHeadingAt = DateTime.now();
+          _useGpsHeading = true;
+        } else {
+          // No bearing (stationary) - compass takes over.
+          _useGpsHeading = false;
+        }
+        if (_isTracking) {
+          _lat = position.latitude;
+          _lng = position.longitude;
+        }
       });
+      _headingNotifier.value = _heading;
+      if (!_isTracking) return;
       if (_routes.isNotEmpty) {
         // A route is displayed: keep it in view instead of dragging the
         // camera to the user. Only re-fit (route + user) when they walk
@@ -514,6 +570,10 @@ class _NearbyMapScreenState extends State<NearbyMapScreen>
     }
   }
 
+  /// Maximum bbox dimension (degrees) the client will request from the API.
+  /// Prevents zooming out from generating a country-spanning query.
+  static const double _maxBboxDim = 15.0;
+
   _ViewportBounds _getViewportBounds() {
     if (_lat == null || _lng == null) {
       return _ViewportBounds(
@@ -528,23 +588,41 @@ class _NearbyMapScreenState extends State<NearbyMapScreen>
     final viewLatSpan = 180.0 / math.pow(2, zoom) * 0.8;
     final viewLngSpan = 360.0 / math.pow(2, zoom) * 0.8;
 
+    // Cap span so the bbox never exceeds _maxBboxDim degrees in either axis.
+    final cappedLatSpan = math.min(viewLatSpan, _maxBboxDim / 2);
+    final cappedLngSpan = math.min(viewLngSpan, _maxBboxDim / 2);
+
     return _ViewportBounds(
-      minLat: math.max(_lat! - viewLatSpan, _nepalMinLat),
-      maxLat: math.min(_lat! + viewLatSpan, _nepalMaxLat),
-      minLng: math.max(_lng! - viewLngSpan, _nepalMinLng),
-      maxLng: math.min(_lng! + viewLngSpan, _nepalMaxLng),
+      minLat: math.max(_lat! - cappedLatSpan, _nepalMinLat),
+      maxLat: math.min(_lat! + cappedLatSpan, _nepalMaxLat),
+      minLng: math.max(_lng! - cappedLngSpan, _nepalMinLng),
+      maxLng: math.min(_lng! + cappedLngSpan, _nepalMaxLng),
     );
   }
 
   void _onMapMoved(MapCamera camera) {
-    setState(() {
+    final wasTracking = _isTracking;
+    // During programmatic animation, preserve tracking state — the animation
+    // is moving the camera, not the user dragging.
+    if (!_isAnimating) {
       _isTracking = false;
-      _currentZoom = camera.zoom;
-      // Update lat/lng to the center of the visible map viewport
-      // so place fetching uses the correct map area, not the stale device location
-      _lat = camera.center.latitude;
-      _lng = camera.center.longitude;
-    });
+    }
+    _currentZoom = camera.zoom;
+    // Update lat/lng to the center of the visible map viewport
+    // so place fetching uses the correct map area, not the stale device location
+    _lat = camera.center.latitude;
+    _lng = camera.center.longitude;
+    // Bump _camVersion only when crossing polygon zoom thresholds (7, 9).
+    // This toggles province/district layers without rebuilding on every pan.
+    final prev = _previousZoom;
+    final now = _currentZoom;
+    final crossedThreshold =
+        (prev < 7 && now >= 7) || (prev >= 7 && now < 7) ||
+        (prev < 9 && now >= 9) || (prev >= 9 && now < 9);
+    _previousZoom = now;
+    if (crossedThreshold) _camVersion.value++;
+    // Trigger one lightweight rebuild when tracking state changes (FAB color).
+    if (wasTracking && !_isAnimating) setState(() {});
 
     // Throttle place fetching on map move - 300ms delay after movement stops
     _debounceTimer?.cancel();
@@ -584,9 +662,65 @@ class _NearbyMapScreenState extends State<NearbyMapScreen>
 
     final provider = context.read<PlaceProvider>();
 
-    // Fast path (default): the Nepal-wide dataset is already on device —
-    // nearest-first viewport list computed client-side. Instant, offline-safe,
-    // and never shows the "Updating places..." overlay.
+    // ── Viewport bbox calculation with 40% prefetch buffer ──────────────
+    // Request a larger area than the visible viewport so panning within
+    // the buffered region is instant (no API call needed).
+    final vp = _getViewportBounds();
+    final latSpan = vp.maxLat - vp.minLat;
+    final lngSpan = vp.maxLng - vp.minLng;
+    final bufLat = latSpan * 0.4;
+    final bufLng = lngSpan * 0.4;
+    final bboxMinLat = vp.minLat - bufLat;
+    final bboxMaxLat = vp.maxLat + bufLat;
+    final bboxMinLng = vp.minLng - bufLng;
+    final bboxMaxLng = vp.maxLng + bufLng;
+
+    // ── Smart skip: if previous bbox covers current viewport, no API call ──
+    if (search == null &&
+        _cachedBoundsNorth != null &&
+        _cachedBoundsSouth != null &&
+        _cachedBoundsEast != null &&
+        _cachedBoundsWest != null &&
+        vp.minLat >= _cachedBoundsSouth! &&
+        vp.maxLat <= _cachedBoundsNorth! &&
+        vp.minLng >= _cachedBoundsWest! &&
+        vp.maxLng <= _cachedBoundsEast!) {
+      return; // Viewport is inside previously loaded area
+    }
+
+    // ── Fast path: bbox API (primary data source) ───────────────────────
+    if (search == null && _currentZoom >= 8) {
+      if (_isFetchingPlaces) return;
+      _isFetchingPlaces = true;
+
+      try {
+        await provider.fetchViewportPlaces(
+          minLat: bboxMinLat,
+          maxLat: bboxMaxLat,
+          minLng: bboxMinLng,
+          maxLng: bboxMaxLng,
+          zoom: _currentZoom.round(),
+          category: _activeFilter?.categoryId != null
+              ? _getCategoryName(_activeFilter!.categoryId!)
+              : null,
+        );
+
+        // Update cached bounds for smart skip
+        _cachedBoundsNorth = bboxMaxLat;
+        _cachedBoundsSouth = bboxMinLat;
+        _cachedBoundsEast = bboxMaxLng;
+        _cachedBoundsWest = bboxMinLng;
+
+        _checkOsmSubmissionStatuses();
+      } catch (e) {
+        debugPrint('bbox API failed, falling back to nepalPlaces: $e');
+      }
+
+      _isFetchingPlaces = false;
+      return;
+    }
+
+    // ── Fallback: client-side from nepalPlaces (offline / search / cold start) ──
     if (provider.nepalPlaces.isNotEmpty) {
       final filtered = _applyPlaceFilters(provider.nepalPlaces);
       final center = LatLng(_lat!, _lng!);
@@ -601,32 +735,20 @@ class _NearbyMapScreenState extends State<NearbyMapScreen>
               ))
           .toList()
         ..sort((a, b) => (a.distanceKm ?? 0).compareTo(b.distanceKm ?? 0));
-      provider.setViewportPlaces(sorted.take(60).toList());
+      provider.setViewportPlacesDirect(sorted.take(200).toList());
       _checkOsmSubmissionStatuses();
       return;
     }
 
-    // Cold start (offline, nothing cached yet): legacy network fallback.
+    // ── Legacy cold start: nearby-combined API ──────────────────────────
     if (_currentZoom < 10) return;
     if (_isFetchingPlaces) return;
 
     final radius = _zoomToRadius(_currentZoom);
-
-    // BBox cache check: if current viewport is inside cached area, skip API call
-    if (search == null &&
-        _cachedBoundsNorth != null &&
-        _lat! <= _cachedBoundsNorth! &&
-        _lat! >= _cachedBoundsSouth! &&
-        _lng! <= _cachedBoundsEast! &&
-        _lng! >= _cachedBoundsWest!) {
-      return;
-    }
-
     _isFetchingPlaces = true;
     setState(() => _isLoadingPlaces = true);
 
     try {
-      // Fetch 2x the visible radius so panning within cached area is instant
       final fetchRadius = radius * 2;
       await provider.fetchNearbyPlaces(
         lat: _lat!,
@@ -640,41 +762,18 @@ class _NearbyMapScreenState extends State<NearbyMapScreen>
       _lastFetchLng = _lng;
       _lastFetchRadius = radius;
 
-      // Save BBox for cache check
       final latKm = 111.32;
       final lngKm = 111.32 * math.cos(_lat! * math.pi / 180);
       _cachedBoundsNorth = _lat! + (fetchRadius / latKm);
       _cachedBoundsSouth = _lat! - (fetchRadius / latKm);
       _cachedBoundsEast = _lng! + (fetchRadius / lngKm);
       _cachedBoundsWest = _lng! - (fetchRadius / lngKm);
-
-      // Cache the fetched places offline
-      final placesJson = provider.places.map((p) => {
-            'id': p.id.toString(),
-            'name': p.name,
-            'description': p.description,
-            'latitude': p.latitude,
-            'longitude': p.longitude,
-            'category': p.category,
-            'source': p.source,
-            'is_verified': p.isVerified,
-            'is_featured': p.isFeatured,
-            'average_rating': p.averageRating,
-            'total_reviews': p.totalReviews,
-            'distance_km': p.distanceKm,
-            'images': p.images,
-          }).toList();
-
-      await _offlineDb.cachePlacesBulk(placesJson);
     } catch (e) {
-      debugPrint('Failed to fetch places for viewport: $e');
+      debugPrint('Legacy viewport fetch failed: $e');
     }
 
     _isFetchingPlaces = false;
-    if (mounted) {
-      setState(() => _isLoadingPlaces = false);
-      _checkOsmSubmissionStatuses();
-    }
+    if (mounted) setState(() => _isLoadingPlaces = false);
   }
 
   double _zoomToRadius(double zoom) {
@@ -832,7 +931,12 @@ class _NearbyMapScreenState extends State<NearbyMapScreen>
   void _onPlaceTap(PlaceModel place) async {
     setState(() => _selectedPlace = place);
     try {
-      _mapController.move(LatLng(place.latitude, place.longitude), 15.0);
+      _smoothMoveTo(
+        LatLng(place.latitude, place.longitude),
+        duration: const Duration(milliseconds: 400),
+        targetZoom: 15.0,
+        curve: Curves.easeInOut,
+      );
       _sheetController.animateTo(
         0.25,
         duration: const Duration(milliseconds: 300),
@@ -1031,13 +1135,20 @@ class _NearbyMapScreenState extends State<NearbyMapScreen>
         body: Stack(
         children: [
           // Map with tile mode switch (single map, single controller)
-          Consumer<MapViewProvider>(
-            builder: (context, mapView, _) {
-              return _buildFlutterMap(
-                isSatellite: mapView.isSatellite,
-                placesVisible: mapView.showPlaces,
-                showWeather: mapView.showWeather,
-                showRoutes: mapView.showRoutes,
+          // _camVersion only bumps on zoom-threshold crossings (7/9) and
+          // boundary load. Camera pans no longer trigger full rebuilds.
+          ValueListenableBuilder<int>(
+            valueListenable: _camVersion,
+            builder: (context, _, __) {
+              return Consumer<MapViewProvider>(
+                builder: (context, mapView, _) {
+                  return _buildFlutterMap(
+                    isSatellite: mapView.isSatellite,
+                    placesVisible: mapView.showPlaces,
+                    showWeather: mapView.showWeather,
+                    showRoutes: mapView.showRoutes,
+                  );
+                },
               );
             },
           ),
@@ -1225,11 +1336,11 @@ class _NearbyMapScreenState extends State<NearbyMapScreen>
             _lng ?? AppConstants.defaultLongitude),
         initialZoom: AppConstants.defaultMapZoom,
         maxZoom: AppConstants.maxMapZoom,
-        minZoom: 6.0,
+        minZoom: 7.0,
         cameraConstraint: CameraConstraint.contain(
           bounds: LatLngBounds(
-            const LatLng(26.0, 79.5),
-            const LatLng(31.0, 89.0),
+            const LatLng(_nepalMinLat - 1.0, _nepalMinLng - 1.0),
+            const LatLng(_nepalMaxLat + 1.0, _nepalMaxLng + 1.0),
           ),
         ),
         interactionOptions: const InteractionOptions(
@@ -1250,28 +1361,18 @@ class _NearbyMapScreenState extends State<NearbyMapScreen>
       children: [
         if (isSatellite) ...[
           TileLayer(
-            urlTemplate: 'https://mt1.google.com/vt/lyrs=s&x={x}&y={y}&z={z}',
-            fallbackUrl:
+            urlTemplate:
                 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
             userAgentPackageName: 'np.com.nepalsmarttravel',
             maxZoom: 19,
             tileProvider: _satelliteTiles,
           ),
-          ColorFiltered(
-            colorFilter: const ColorFilter.matrix(<double>[
-              1, 0, 0, 0, 0,
-              0, 1, 0, 0, 0,
-              0, 0, 1, 0, 0,
-              -1.0/3.0, -1.0/3.0, -1.0/3.0, 1, 0,
-            ]),
-            child: TileLayer(
-              urlTemplate:
-                  'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-              userAgentPackageName: 'np.com.nepalsmarttravel',
-              minZoom: 6.0,
-              maxZoom: 20,
-              // tileProvider: _offlineTiles,
-            ),
+          TileLayer(
+            urlTemplate:
+                'https://{s}.basemaps.cartocdn.com/light_only_labels/{z}/{x}/{y}.png',
+            userAgentPackageName: 'np.com.nepalsmarttravel',
+            maxZoom: 19,
+            tileProvider: _labelTiles,
           ),
         ] else
           TileLayer(
@@ -1280,10 +1381,20 @@ class _NearbyMapScreenState extends State<NearbyMapScreen>
             urlTemplate:
                 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
             userAgentPackageName: 'np.com.nepalsmarttravel',
-            minZoom: 6.0,
+            minZoom: 7.0,
             maxZoom: 19,
-            // tileProvider: _offlineTiles,
+            tileProvider: _offlineTiles,
           ),
+        // Nepal boundary + provinces + districts
+        if (NepalBoundaryService.instance.nepalBoundary.isNotEmpty) ...[
+          PolygonLayer(polygons: NepalBoundaryService.instance.buildNepalMask()),
+          if (_currentZoom >= 7)
+            PolygonLayer(polygons: NepalBoundaryService.instance.buildProvincePolygons()),
+          if (_currentZoom >= 9)
+            PolygonLayer(polygons: NepalBoundaryService.instance.buildDistrictPolygons()),
+          if (_currentZoom >= 9)
+            MarkerLayer(markers: NepalBoundaryService.instance.buildDistrictLabels()),
+        ],
         if (showWeather && _weatherGrid.isNotEmpty)
           PolygonLayer(polygons: _buildWeatherPolygons()),
         if (_routes.isNotEmpty)
@@ -1311,9 +1422,12 @@ class _NearbyMapScreenState extends State<NearbyMapScreen>
                   Polyline(
                     points: r.track.map((p) => LatLng(p.lat, p.lng)).toList(),
                     color: r.isTrekking
-                        ? const Color(0xFFB45309).withOpacity(0.9)
+                        ? const Color(0xFFB45309).withOpacity(0.5)
                         : AppTheme.primaryColor.withOpacity(0.9),
-                    strokeWidth: 4,
+                    strokeWidth: r.isTrekking ? 3 : 4,
+                    pattern: r.isTrekking
+                        ? StrokePattern.dashed(segments: const [10.0, 8.0])
+                        : const StrokePattern.solid(),
                   ),
             ],
           ),
@@ -1339,6 +1453,8 @@ class _NearbyMapScreenState extends State<NearbyMapScreen>
             ],
           ),
         // "You are here" indicator - always visible regardless of places toggle
+        // Heading isolated via ValueListenableBuilder — compass changes only
+        // rebuild the blue dot, not the entire FlutterMap.
         if (_currentLocation != null)
           MarkerLayer(
             markers: [
@@ -1347,11 +1463,16 @@ class _NearbyMapScreenState extends State<NearbyMapScreen>
                 width: 200,
                 height: 200,
                 alignment: Alignment.center,
-                child: MapBlueDot(
-                  heading: _heading,
-                  accuracyMeters: _accuracyM,
-                  zoom: _currentZoom,
-                  latitude: _currentLocation!.latitude,
+                child: ValueListenableBuilder<double?>(
+                  valueListenable: _headingNotifier,
+                  builder: (context, heading, _) {
+                    return MapBlueDot(
+                      heading: heading,
+                      accuracyMeters: _accuracyM,
+                      zoom: _currentZoom,
+                      latitude: _currentLocation!.latitude,
+                    );
+                  },
                 ),
               ),
             ],
@@ -1410,8 +1531,10 @@ class _NearbyMapScreenState extends State<NearbyMapScreen>
         if (placesVisible)
           Consumer<PlaceProvider>(
             builder: (context, provider, _) {
+              final viewportPlaces = _markerPlacesForViewport(provider);
+              final mapMarkers = _buildMarkers(viewportPlaces);
               return MarkerLayer(
-                markers: _buildMarkers(_markerPlacesForViewport(provider)),
+                markers: mapMarkers,
               );
             },
           ),
@@ -1700,22 +1823,31 @@ class _NearbyMapScreenState extends State<NearbyMapScreen>
 
     // Cycle: 0 -> 1 -> 0 (only two states)
     if (_locationTapState == 0) {
-      // State 1: Recenter + compass follow + slight zoom-out for tilt feel
+      // State 1: Smooth recenter + compass follow
       setState(() {
         _locationTapState = 1;
         _isTracking = true;
       });
-      _mapController.move(loc, 15.0);
+      _smoothMoveTo(
+        loc,
+        duration: const Duration(milliseconds: 400),
+        targetZoom: 15.0,
+        curve: Curves.easeInOut,
+      );
       _startCompassFollow();
     } else {
-      // State 0: Default — recenter, no rotation
+      // State 0: Smooth recenter, no rotation
       setState(() {
         _locationTapState = 0;
         _isTracking = true;
       });
       _stopCompassFollow();
       _mapController.rotate(0);
-      _mapController.move(loc, _currentZoom);
+      _smoothMoveTo(
+        loc,
+        duration: const Duration(milliseconds: 400),
+        curve: Curves.easeInOut,
+      );
     }
   }
 
@@ -1937,17 +2069,23 @@ class _NearbyMapScreenState extends State<NearbyMapScreen>
           hintStyle: TextStyle(color: Colors.grey.shade500, fontSize: AppTheme.textBase),
           prefixIcon:
               Icon(Icons.search, color: AppTheme.primaryColor, size: 22),
-          suffixIcon: _searchController.text.isNotEmpty
-              ? IconButton(
-                  icon: const Icon(Icons.clear, size: 20),
-                  onPressed: () {
-                    _searchController.clear();
-                    _debounceTimer?.cancel();
-                    _lastFetchLat = null;
-                    _fetchPlacesForViewport();
-                  },
-                )
-              : null,
+          suffixIcon: ValueListenableBuilder<String>(
+              valueListenable: _searchTextNotifier,
+              builder: (context, text, _) {
+                return text.isNotEmpty
+                    ? IconButton(
+                        icon: const Icon(Icons.clear, size: 20),
+                        onPressed: () {
+                          _searchController.clear();
+                          _searchTextNotifier.value = '';
+                          _debounceTimer?.cancel();
+                          _lastFetchLat = null;
+                          _fetchPlacesForViewport();
+                        },
+                      )
+                    : const SizedBox.shrink();
+              },
+            ),
           filled: true,
           fillColor: Colors.white,
           contentPadding: const EdgeInsets.symmetric(vertical: 12),
@@ -1967,7 +2105,7 @@ class _NearbyMapScreenState extends State<NearbyMapScreen>
         style: const TextStyle(fontSize: AppTheme.textBase),
         textInputAction: TextInputAction.search,
         onChanged: (value) {
-          setState(() {});
+          // No-op: suffix icon is driven by _searchTextNotifier via controller listener.
         },
         onSubmitted: (value) {
           _debounceTimer?.cancel();
@@ -1986,6 +2124,13 @@ class _NearbyMapScreenState extends State<NearbyMapScreen>
         return _buildBottomSheetContent(provider);
       },
     );
+  }
+
+  String? _getCategoryName(int categoryId) {
+    for (final c in context.read<PlaceProvider>().categories) {
+      if (c.id == categoryId) return c.name;
+    }
+    return null;
   }
 
   List<PlaceModel> _applyPlaceFilters(List<PlaceModel> places) {
@@ -2907,12 +3052,24 @@ class _NearbyMapScreenState extends State<NearbyMapScreen>
   /// marker/label work stays proportional to what's on screen. When no
   /// Nepal data is available yet (cold start), falls back to the nearby list.
   List<PlaceModel> _markerPlacesForViewport(PlaceProvider provider) {
-    final source = provider.nepalPlaces.isNotEmpty
-        ? provider.nepalPlaces
-        : provider.places;
+    // Priority: viewportPlaces (from bbox API) > nepalPlaces (offline/cold) > places (legacy)
+    final source = provider.viewportPlaces.isNotEmpty
+        ? provider.viewportPlaces
+        : provider.nepalPlaces.isNotEmpty
+            ? provider.nepalPlaces
+            : provider.places;
+
     var filtered = _applyPlaceFilters(source);
     if (filtered.isEmpty) return filtered;
 
+    // When using nepalPlaces (not bbox), apply client-side viewport filter
+    // to avoid showing all 11,825 places as markers.
+    if (provider.viewportPlaces.isNotEmpty) {
+      // bbox API already returned only viewport places — no extra filter needed
+      return filtered;
+    }
+
+    // Fallback: client-side viewport filter for nepalPlaces/places
     final vp = _getViewportBounds();
     const margin = 0.15;
     return filtered
@@ -2922,51 +3079,6 @@ class _NearbyMapScreenState extends State<NearbyMapScreen>
             p.longitude >= vp.minLng - margin &&
             p.longitude <= vp.maxLng + margin)
         .toList();
-  }
-
-  /// Grid clustering: group pins by map tile at the current zoom, show one
-  /// count badge per cell. Tap zooms in, re-clustering at a finer grain.
-  List<Marker> _buildClusteredMarkers(List<PlaceModel> places) {
-    // Pre-GPS (whole Nepal in view at any zoom) the cells stay coarse so
-    // badges, not pin soup, are shown until the map centers on the user.
-    final cellDeg = 360.0 / math.pow(2, math.min(_currentZoom, 9.0));
-    final groups = <int, List<PlaceModel>>{};
-    for (final p in places) {
-      final cx = ((p.longitude + 180.0) / cellDeg).floor();
-      final cy = ((p.latitude + 90.0) / cellDeg).floor();
-      final key = cx * 100003 + cy;
-      groups.putIfAbsent(key, () => []).add(p);
-    }
-
-    final markers = <Marker>[];
-    groups.forEach((_, group) {
-      if (group.length == 1) {
-        final p = group.first;
-        markers.add(Marker(
-          point: LatLng(p.latitude, p.longitude),
-          width: 32,
-          height: 32 * 1.4,
-          alignment: const Alignment(0, 0.7),
-          rotate: true,
-          child: _buildPinChild(p, 32.0, false),
-        ));
-        return;
-      }
-      // Anchor the badge on the cell's best (first/featured) place so the
-      // cluster always sits on real coordinates.
-      final anchor = group.first;
-      markers.add(Marker(
-        point: LatLng(anchor.latitude, anchor.longitude),
-        width: 44,
-        height: 44,
-        alignment: Alignment.center,
-        child: GestureDetector(
-          onTap: () => _zoomIntoCluster(anchor.latitude, anchor.longitude),
-          child: _buildClusterBadge(group.length),
-        ),
-      ));
-    });
-    return markers;
   }
 
   Widget _buildClusterBadge(int count) {
@@ -2993,9 +3105,11 @@ class _NearbyMapScreenState extends State<NearbyMapScreen>
 
   void _zoomIntoCluster(double lat, double lng) {
     try {
-      _mapController.move(
+      _smoothMoveTo(
         LatLng(lat, lng),
-        math.min(_currentZoom + 3, 15.0),
+        duration: const Duration(milliseconds: 350),
+        targetZoom: math.min(_currentZoom + 3, 15.0),
+        curve: Curves.easeInOut,
       );
     } catch (e) {
       debugPrint('Cluster zoom failed: $e');
@@ -3020,8 +3134,7 @@ class _NearbyMapScreenState extends State<NearbyMapScreen>
             // Pin body (circle with icon)
             Positioned(
               top: 0,
-              child: AnimatedContainer(
-                duration: const Duration(milliseconds: 250),
+              child: Container(
                 width: markerSize,
                 height: markerSize,
                 decoration: BoxDecoration(
@@ -3081,53 +3194,138 @@ class _NearbyMapScreenState extends State<NearbyMapScreen>
   }
 
   List<Marker> _buildMarkers(List<PlaceModel> places) {
-    // Grid clustering: group pins by map tile at the current zoom, show one
-    // count badge per cell. Clusters sit ON a real place (the first/featured
-    // pin of the cell) — never on the group average, which floats in empty
-    // terrain between towns. Tap zooms in, re-clustering at a finer grain.
-    final forceCluster = _lat == null || _lng == null;
-    final tooManyPins = places.length > _clusterMaxPins;
-    final denseLowZoom =
-        places.length > _clusterMinCount && _currentZoom < _clusterMaxZoom;
-    if (forceCluster || tooManyPins || denseLowZoom) {
-      return _buildClusteredMarkers(places);
-    }
-
     final markers = <Marker>[];
-
     if (places.isEmpty) return markers;
 
+    final camera = _mapController.camera;
+    final viewport = MediaQuery.of(context).size;
+
+    // ── Step 1: Screen-space grid clustering ────────────────────────────
+    // Grid-cell spatial hash → adjacent-cell neighbor check → BFS connected
+    // components. Handles transitive chains across cell boundaries.
+    // The selected place is always excluded so it renders as an individual
+    // marker and is never hidden inside a cluster badge.
+    final radius = _markerGridCell;
+    final selectedId = _selectedPlace?.id.toString();
+
+    // 1a. Compute screen positions and assign grid cells
+    final screenPts = <Offset>[];
+    final cellMap = <String, List<int>>{};
+    for (var i = 0; i < places.length; i++) {
+      final pt = camera.latLngToScreenPoint(
+        LatLng(places[i].latitude, places[i].longitude),
+      );
+      screenPts.add(Offset(pt.x, pt.y));
+      final cx = (pt.x / radius).floor();
+      final cy = (pt.y / radius).floor();
+      cellMap.putIfAbsent('$cx,$cy', () => []).add(i);
+    }
+
+    // 1b. Build neighbor graph — for each place, find all places within
+    //     `radius` px in the same cell or 8 adjacent cells.
+    final neighbors = <int, Set<int>>{};
+    for (var i = 0; i < places.length; i++) {
+      neighbors[i] = {};
+    }
+    for (final entry in cellMap.entries) {
+      final parts = entry.key.split(',');
+      final cx = int.parse(parts[0]);
+      final cy = int.parse(parts[1]);
+
+      // Collect candidates from this cell + 8 adjacent cells
+      final candidateIdxs = <int>[];
+      for (var dx = -1; dx <= 1; dx++) {
+        for (var dy = -1; dy <= 1; dy++) {
+          final adj = cellMap['${cx + dx},${cy + dy}'];
+          if (adj != null) candidateIdxs.addAll(adj);
+        }
+      }
+
+      for (final i in entry.value) {
+        // Skip selected place — never cluster it
+        if (places[i].id.toString() == selectedId) continue;
+        final pi = screenPts[i];
+        for (final j in candidateIdxs) {
+          if (i == j) continue;
+          if (places[j].id.toString() == selectedId) continue;
+          final dist = (pi - screenPts[j]).distance;
+          if (dist < radius) {
+            neighbors[i]!.add(j);
+            neighbors[j]!.add(i);
+          }
+        }
+      }
+    }
+
+    // 1c. BFS connected components
+    final used = <bool>[for (final _ in places) false];
+    final individualPlaces = <PlaceModel>[];
+    final clusterGroups = <List<PlaceModel>>[];
+
+    for (var i = 0; i < places.length; i++) {
+      if (used[i]) continue;
+      // Selected place always goes to individual (no neighbors by design)
+      if (places[i].id.toString() == selectedId) {
+        used[i] = true;
+        individualPlaces.add(places[i]);
+        continue;
+      }
+      final queue = [i];
+      used[i] = true;
+      final group = <int>[];
+      while (queue.isNotEmpty) {
+        final curr = queue.removeLast();
+        group.add(curr);
+        for (final nb in neighbors[curr]!) {
+          if (!used[nb]) {
+            used[nb] = true;
+            queue.add(nb);
+          }
+        }
+      }
+      if (group.length == 1) {
+        individualPlaces.add(places[group[0]]);
+      } else {
+        clusterGroups.add(group.map((idx) => places[idx]).toList());
+      }
+    }
+
+    // ── Step 2: Cluster badges (no labels) ─────────────────────────────
+    for (final group in clusterGroups) {
+      final anchor = group.first;
+      markers.add(Marker(
+        point: LatLng(anchor.latitude, anchor.longitude),
+        width: 44,
+        height: 44,
+        alignment: Alignment.center,
+        child: GestureDetector(
+          onTap: () => _zoomIntoCluster(anchor.latitude, anchor.longitude),
+          child: _buildClusterBadge(group.length),
+        ),
+      ));
+    }
+
+    // ── Step 3: Label collision for individual markers only ─────────────
     final showAddress = _currentZoom >= 16;
     final highZoom = _currentZoom >= 16;
     final midZoom = _currentZoom >= 14;
-
-    // Phase 0: Check if label assignment needs recomputation
-    final camera = _mapController.camera;
-    final viewport = MediaQuery.of(context).size;
-    final stateKey = '${_currentZoom}|${camera.center.latitude}|${camera.center.longitude}|${camera.rotation}|${_selectedPlace?.id}';
-    final placesHash = Object.hashAll(places.map((p) => p.id));
+    final placesHash = Object.hashAll(individualPlaces.map((p) => p.id));
+    final stateKey = '${_currentZoom}|${camera.center.latitude}|${camera.center.longitude}|${camera.rotation}|$selectedId|$placesHash';
 
     if (stateKey != _lastLabelStateKey || placesHash != _lastPlacesHash) {
-      _lastLabelAssignments = _computeLabelAssignments(places, showAddress, highZoom, midZoom, camera, viewport);
+      _lastLabelAssignments = _computeLabelAssignments(
+        individualPlaces, showAddress, highZoom, midZoom, camera, viewport,
+      );
       _lastLabelStateKey = stateKey;
       _lastPlacesHash = placesHash;
     }
 
-    // Phase 1: Build marker widgets
-    for (int i = 0; i < places.length; i++) {
-      final place = places[i];
+    // ── Step 4: Build individual marker widgets with labels ─────────────
+    const markerSize = 32.0;
+    for (int i = 0; i < individualPlaces.length; i++) {
+      final place = individualPlaces[i];
       final assignment = _lastLabelAssignments[i];
-      final isSelected = _selectedPlace?.id.toString() == place.id.toString();
-      final markerSize = isSelected ? 44.0 : 32.0;
-
-      final markerChild = Stack(
-        clipBehavior: Clip.none,
-        children: [
-          _buildPinChild(place, markerSize, isSelected),
-          if (assignment.side != null)
-            _buildLabel(place, assignment.side!, assignment.labelWidth, markerSize, showAddress),
-        ],
-      );
+      final isSelected = selectedId == place.id.toString();
 
       markers.add(Marker(
         point: LatLng(place.latitude, place.longitude),
@@ -3135,7 +3333,14 @@ class _NearbyMapScreenState extends State<NearbyMapScreen>
         height: markerSize * 1.4,
         alignment: const Alignment(0, 0.7),
         rotate: true,
-        child: markerChild,
+        child: Stack(
+          clipBehavior: Clip.none,
+          children: [
+            _buildPinChild(place, markerSize, isSelected),
+            if (assignment.side != null)
+              _buildLabel(place, assignment.side!, assignment.labelWidth, markerSize, showAddress),
+          ],
+        ),
       ));
     }
 
@@ -3145,28 +3350,49 @@ class _NearbyMapScreenState extends State<NearbyMapScreen>
   Widget _buildLabel(PlaceModel place, _LabelSide side, double labelWidth, double markerSize, bool showAddress) {
     final labelH = showAddress && place.address != null ? 42.0 : 24.0;
     final m2 = markerSize / 2;
+    const gap = 6.0; // label-to-marker gap
 
     double left, right, top, bottom;
     switch (side) {
       case _LabelSide.right:
-        left = markerSize + 4;
+        left = markerSize + gap;
         top = m2 - labelH / 2;
         right = double.infinity;
         bottom = double.infinity;
       case _LabelSide.left:
-        right = markerSize + 4;
+        right = markerSize + gap;
         top = m2 - labelH / 2;
         left = double.infinity;
         bottom = double.infinity;
       case _LabelSide.top:
         left = m2 - labelWidth / 2;
-        bottom = markerSize + 4;
+        bottom = markerSize + gap;
         top = double.infinity;
         right = double.infinity;
       case _LabelSide.bottom:
         left = m2 - labelWidth / 2;
-        top = markerSize + 4;
+        top = markerSize + gap;
         right = double.infinity;
+        bottom = double.infinity;
+      case _LabelSide.topRight:
+        left = markerSize / 2 + gap;
+        bottom = markerSize / 2 + gap;
+        top = double.infinity;
+        right = double.infinity;
+      case _LabelSide.topLeft:
+        right = markerSize / 2 + gap;
+        bottom = markerSize / 2 + gap;
+        left = double.infinity;
+        top = double.infinity;
+      case _LabelSide.bottomRight:
+        left = markerSize / 2 + gap;
+        top = markerSize / 2 + gap;
+        right = double.infinity;
+        bottom = double.infinity;
+      case _LabelSide.bottomLeft:
+        right = markerSize / 2 + gap;
+        top = markerSize / 2 + gap;
+        left = double.infinity;
         bottom = double.infinity;
     }
 
@@ -3220,12 +3446,15 @@ class _NearbyMapScreenState extends State<NearbyMapScreen>
     List<PlaceModel> places, bool showAddress, bool highZoom, bool midZoom,
     MapCamera camera, Size viewport,
   ) {
+    // ── Phase 1: Build label info for all places ──────────────────────
     final infos = <_LabelInfo>[];
+    const markerSize = 32.0;
     for (final place in places) {
       final isSelected = _selectedPlace?.id.toString() == place.id.toString();
       final isFeatured = place.isFeatured;
-      final showName = highZoom || (midZoom && (isFeatured || isSelected));
-      final markerSize = isSelected ? 44.0 : 32.0;
+      // Show labels at zoom >= 12 for featured/selected, zoom >= 14 for all
+      final showName = highZoom || (midZoom && (isFeatured || isSelected)) ||
+          (_currentZoom >= 12 && (isFeatured || isSelected));
 
       if (!showName) {
         infos.add(_LabelInfo(placeId: place.id, showLabel: false, markerSize: markerSize));
@@ -3234,72 +3463,96 @@ class _NearbyMapScreenState extends State<NearbyMapScreen>
 
       final pt = camera.latLngToScreenPoint(LatLng(place.latitude, place.longitude));
       final labelW = _measureLabelWidth(place);
-      infos.add(_LabelInfo(placeId: place.id, showLabel: true, markerSize: markerSize, screenPt: Offset(pt.x, pt.y), labelWidth: labelW));
+      final labelH = (showAddress && place.address != null) ? 42.0 : 24.0;
+
+      infos.add(_LabelInfo(
+        placeId: place.id,
+        showLabel: true,
+        markerSize: markerSize,
+        screenPt: Offset(pt.x, pt.y),
+        labelWidth: labelW,
+        labelHeight: labelH,
+      ));
     }
 
-    // Sort: selected first, featured, then regular
-    final sortedInfos = List<_LabelInfo>.from(infos);
-    sortedInfos.sort((a, b) {
-      final aSelected = _selectedPlace?.id.toString() == a.placeId.toString();
-      final bSelected = _selectedPlace?.id.toString() == b.placeId.toString();
-      if (aSelected != bSelected) return aSelected ? -1 : 1;
-      final aF = places.firstWhere((p) => p.id.toString() == a.placeId.toString()).isFeatured;
-      final bF = places.firstWhere((p) => p.id.toString() == b.placeId.toString()).isFeatured;
-      if (aF != bF) return aF ? -1 : 1;
-      return 0;
-    });
+    // ── Phase 2: Assign priority scores (deterministic) ───────────────
+    final viewCenter = Offset(viewport.width / 2, viewport.height / 2);
+    for (final info in infos) {
+      if (!info.showLabel) continue;
+      final place = places.firstWhere((p) => p.id.toString() == info.placeId.toString());
+      final isSelected = _selectedPlace?.id.toString() == info.placeId.toString();
+      double priority = 0;
+      if (isSelected) priority += 10000;
+      if (place.isFeatured) priority += 5000;
+      priority += _categoryPriority(place.category) * 100;
+      // Screen-center distance tiebreaker (closer = higher priority)
+      final distFromCenter = (info.screenPt - viewCenter).distance;
+      final maxDist = viewport.shortestSide / 2;
+      priority += (1.0 - (distFromCenter / maxDist).clamp(0.0, 1.0)) * 50;
+      // Deterministic tiebreaker from place ID
+      priority += (info.placeId.hashCode & 0xFFFF) / 65536.0;
+      info.priority = priority;
+    }
 
+    // ── Phase 3: Sort by priority (highest first) ─────────────────────
+    final labelledInfos = infos.where((i) => i.showLabel).toList();
+    labelledInfos.sort((a, b) => b.priority.compareTo(a.priority));
+
+    // ── Phase 4: Zoom-based label cap ─────────────────────────────────
+    final maxLabels = _maxLabelsForZoom(_currentZoom);
+    final cappedInfos = labelledInfos.take(maxLabels).toList();
+    final hiddenInfos = labelledInfos.skip(maxLabels).toList();
+    for (final info in hiddenInfos) {
+      info.side = null;
+    }
+
+    // ── Phase 5: Priority-first placement with global collision ───────
     final placedRects = <Rect>[];
-    final allPts = infos.where((i) => i.showLabel).map((i) => i.screenPt).toList();
+    final placedMarkerRects = <Rect>[];
 
-    for (final info in sortedInfos) {
-      if (!info.showLabel) {
-        info.side = null;
-        continue;
-      }
+    // Pre-compute marker rectangles for all visible places
+    for (final info in labelledInfos) {
+      placedMarkerRects.add(Rect.fromCenter(
+        center: info.screenPt,
+        width: info.markerSize + 12,
+        height: info.markerSize + 12,
+      ));
+    }
 
+    for (final info in cappedInfos) {
       final pt = info.screenPt;
       final r = info.markerSize / 2;
       final lw = info.labelWidth;
-      final lh = (showAddress && places.firstWhere((p) => p.id.toString() == info.placeId.toString()).address != null) ? 42.0 : 24.0;
-      info.labelHeight = lh;
+      final lh = info.labelHeight;
+      const offset = 7.0; // label-to-marker offset
 
-      // 4 candidate positions in screen coordinates
+      // 8 candidate positions in screen coordinates
       final candidates = <_LabelSide, Rect>{
-        _LabelSide.right: Rect.fromLTWH(pt.dx + r + 4, pt.dy - lh / 2, lw, lh),
-        _LabelSide.left: Rect.fromLTWH(pt.dx - r - 4 - lw, pt.dy - lh / 2, lw, lh),
-        _LabelSide.top: Rect.fromLTWH(pt.dx - lw / 2, pt.dy - r - 4 - lh, lw, lh),
-        _LabelSide.bottom: Rect.fromLTWH(pt.dx - lw / 2, pt.dy + r + 4, lw, lh),
+        _LabelSide.right: Rect.fromLTWH(pt.dx + r + offset, pt.dy - lh / 2, lw, lh),
+        _LabelSide.left: Rect.fromLTWH(pt.dx - r - offset - lw, pt.dy - lh / 2, lw, lh),
+        _LabelSide.top: Rect.fromLTWH(pt.dx - lw / 2, pt.dy - r - offset - lh, lw, lh),
+        _LabelSide.bottom: Rect.fromLTWH(pt.dx - lw / 2, pt.dy + r + offset, lw, lh),
+        _LabelSide.topRight: Rect.fromLTWH(pt.dx + r / 2 + offset, pt.dy - r - offset - lh, lw, lh),
+        _LabelSide.topLeft: Rect.fromLTWH(pt.dx - r / 2 - offset - lw, pt.dy - r - offset - lh, lw, lh),
+        _LabelSide.bottomRight: Rect.fromLTWH(pt.dx + r / 2 + offset, pt.dy + r + offset, lw, lh),
+        _LabelSide.bottomLeft: Rect.fromLTWH(pt.dx - r / 2 - offset - lw, pt.dy + r + offset, lw, lh),
       };
 
-      // Stability: keep previous side if still valid
+      final isSelected = _selectedPlace?.id.toString() == info.placeId.toString();
+
+      // Stability: try to keep previous side if still HARD-valid
       final prev = _lastLabelAssignments.where((a) => a.placeId == info.placeId).firstOrNull;
-      if (prev?.side != null) {
-        final prevRect = candidates[prev!.side!]!;
+      if (prev?.side != null && candidates.containsKey(prev!.side)) {
+        final prevRect = candidates[prev.side!]!;
         final clampedPrev = _clampToViewport(prevRect, viewport);
-        bool stable = true;
-        if (clampedPrev.left < 0 || clampedPrev.right > viewport.width ||
-            clampedPrev.top < 0 || clampedPrev.bottom > viewport.height) stable = false;
-        else {
-          for (final placed in placedRects) {
-            if (clampedPrev.overlaps(placed.inflate(6))) { stable = false; break; }
-          }
-          if (stable) {
-            for (final otherPt in allPts) {
-              if (otherPt == pt) continue;
-              final markerRect = Rect.fromCenter(center: otherPt, width: 44, height: 44);
-              if (clampedPrev.overlaps(markerRect.inflate(4))) { stable = false; break; }
-            }
-          }
-        }
-        if (stable) {
+        if (_isValidLabelPosition(clampedPrev, viewport, placedRects, placedMarkerRects, pt)) {
           info.side = prev.side;
           placedRects.add(clampedPrev);
           continue;
         }
       }
 
-      // Score all 4 positions
+      // Score all 8 positions — HARD collision reject, then soft score
       _LabelSide? bestSide;
       double bestScore = double.infinity;
       Rect? bestClamped;
@@ -3307,24 +3560,40 @@ class _NearbyMapScreenState extends State<NearbyMapScreen>
       for (final entry in candidates.entries) {
         final side = entry.key;
         final clamped = _clampToViewport(entry.value, viewport);
+
+        // HARD CONSTRAINT: label-label collision → reject immediately
+        bool labelCollision = false;
+        for (final placed in placedRects) {
+          if (_rectsOverlap(clamped, placed, 10)) {
+            labelCollision = true;
+            break;
+          }
+        }
+        if (labelCollision) continue;
+
+        // HARD CONSTRAINT: label-marker collision → reject immediately
+        bool markerCollision = false;
+        for (final otherMarker in placedMarkerRects) {
+          if (otherMarker.center == pt) continue;
+          if (_rectsOverlap(clamped, otherMarker, 6)) {
+            markerCollision = true;
+            break;
+          }
+        }
+        if (markerCollision) continue;
+
+        // Soft scoring among collision-free candidates only
         double score = _sideRank(side);
 
-        // Label-label overlap (6px gap)
-        for (final placed in placedRects) {
-          if (clamped.overlaps(placed.inflate(6))) score += 100;
-        }
-
-        // Label-marker overlap (4px gap)
-        for (final otherPt in allPts) {
-          if (otherPt == pt) continue;
-          final markerRect = Rect.fromCenter(center: otherPt, width: 44, height: 44);
-          if (clamped.overlaps(markerRect.inflate(4))) score += 150;
-        }
-
-        // Offscreen penalty
+        // Off-screen penalty (soft — still valid, just less preferred)
         if (clamped.left < 0 || clamped.right > viewport.width ||
             clamped.top < 0 || clamped.bottom > viewport.height) {
           score += 500;
+        }
+
+        // Stability bonus: prefer previous side
+        if (prev?.side != null && side == prev!.side) {
+          score -= 35;
         }
 
         if (score < bestScore) {
@@ -3334,15 +3603,27 @@ class _NearbyMapScreenState extends State<NearbyMapScreen>
         }
       }
 
-      if (bestSide != null) {
+      if (isSelected) {
+        // Selected place: always place. If all 8 candidates have hard
+        // collisions, force the one with the lowest soft score.
+        if (bestSide != null) {
+          info.side = bestSide;
+          placedRects.add(bestClamped!);
+        } else {
+          // All candidates collide — find least-bad one
+          _forceBestCandidate(candidates, viewport, placedRects, placedMarkerRects, pt, info);
+        }
+      } else if (bestSide != null) {
+        // Normal label: only place if a collision-free candidate was found
         info.side = bestSide;
         placedRects.add(bestClamped!);
       } else {
+        // No collision-free candidate → hide
         info.side = null;
       }
     }
 
-    // Map assignments back to original order
+    // ── Phase 6: Map assignments back to original order ───────────────
     final assignmentMap = <Object, _LabelAssignment>{};
     for (final info in infos) {
       assignmentMap[info.placeId] = _LabelAssignment(
@@ -3352,6 +3633,108 @@ class _NearbyMapScreenState extends State<NearbyMapScreen>
       );
     }
     return places.map((p) => assignmentMap[p.id] ?? _LabelAssignment(placeId: p.id)).toList();
+  }
+
+  /// Maximum number of labels to show at each zoom level.
+  int _maxLabelsForZoom(double zoom) {
+    if (zoom >= 17) return 50;
+    if (zoom >= 16) return 40;
+    if (zoom >= 15) return 30;
+    if (zoom >= 14) return 20;
+    if (zoom >= 12) return 8;
+    return 0;
+  }
+
+  /// Category importance score for label priority (higher = more important).
+  int _categoryPriority(String? category) {
+    switch (category?.toLowerCase()) {
+      case 'hospital':
+      case 'clinic':
+      case 'health':
+        return 9;
+      case 'transport':
+      case 'bus':
+      case 'airport':
+        return 8;
+      case 'hotel':
+      case 'accommodation':
+        return 7;
+      case 'restaurant':
+      case 'food':
+        return 6;
+      case 'attraction':
+      case 'monument':
+      case 'museum':
+        return 5;
+      case 'shopping':
+        return 4;
+      case 'bank':
+      case 'atm':
+        return 3;
+      case 'nature':
+      case 'park':
+        return 2;
+      default:
+        return 1;
+    }
+  }
+
+  /// Check if a label position is valid (no overlap with placed labels or markers).
+  bool _isValidLabelPosition(Rect rect, Size viewport, List<Rect> placedLabels,
+      List<Rect> placedMarkers, Offset selfPt) {
+    if (rect.left < -10 || rect.right > viewport.width + 10 ||
+        rect.top < -10 || rect.bottom > viewport.height + 10) {
+      return false;
+    }
+    for (final placed in placedLabels) {
+      if (_rectsOverlap(rect, placed, 10)) return false;
+    }
+    for (final marker in placedMarkers) {
+      if (marker.center == selfPt) continue;
+      if (_rectsOverlap(rect, marker, 6)) return false;
+    }
+    return true;
+  }
+
+  /// Hard collision check: do two rectangles overlap when each is inflated
+  /// by [padding] pixels? Used as a HARD constraint — overlapping candidates
+  /// are rejected, not merely penalised.
+  static bool _rectsOverlap(Rect a, Rect b, double padding) {
+    return a.inflate(padding).overlaps(b.inflate(padding));
+  }
+
+  /// Force the best available candidate for the selected place when ALL 8
+  /// candidates have hard collisions. Picks the candidate with the fewest
+  /// label-label overlaps (minimum damage).
+  void _forceBestCandidate(
+    Map<_LabelSide, Rect> candidates, Size viewport,
+    List<Rect> placedLabels, List<Rect> placedMarkers,
+    Offset selfPt, _LabelInfo info,
+  ) {
+    _LabelSide? bestSide;
+    int fewestOverlaps = 999;
+    Rect? bestClamped;
+
+    for (final entry in candidates.entries) {
+      final clamped = _clampToViewport(entry.value, viewport);
+      int overlapCount = 0;
+      for (final placed in placedLabels) {
+        if (_rectsOverlap(clamped, placed, 10)) overlapCount++;
+      }
+      for (final marker in placedMarkers) {
+        if (marker.center == selfPt) continue;
+        if (_rectsOverlap(clamped, marker, 6)) overlapCount++;
+      }
+      if (overlapCount < fewestOverlaps) {
+        fewestOverlaps = overlapCount;
+        bestSide = entry.key;
+        bestClamped = clamped;
+      }
+    }
+    if (bestSide != null) {
+      info.side = bestSide;
+      placedLabels.add(bestClamped!);
+    }
   }
 
   Rect _clampToViewport(Rect r, Size vp) {
@@ -3370,6 +3753,10 @@ class _NearbyMapScreenState extends State<NearbyMapScreen>
       case _LabelSide.left: return 1;
       case _LabelSide.top: return 2;
       case _LabelSide.bottom: return 3;
+      case _LabelSide.topRight: return 4;
+      case _LabelSide.topLeft: return 5;
+      case _LabelSide.bottomRight: return 6;
+      case _LabelSide.bottomLeft: return 7;
     }
   }
 
@@ -3630,7 +4017,7 @@ class _NearbyMapScreenState extends State<NearbyMapScreen>
   }
 }
 
-enum _LabelSide { right, left, top, bottom }
+enum _LabelSide { right, left, top, bottom, topLeft, topRight, bottomLeft, bottomRight }
 
 class _LabelAssignment {
   final dynamic placeId;
@@ -3647,7 +4034,8 @@ class _LabelInfo {
   double markerSize;
   Offset screenPt;
   double labelWidth;
-  double labelHeight = 0;
+  double labelHeight;
+  double priority = 0;
 
   _LabelInfo({
     required this.placeId,
@@ -3655,6 +4043,7 @@ class _LabelInfo {
     required this.markerSize,
     this.screenPt = Offset.zero,
     this.labelWidth = 0,
+    this.labelHeight = 24.0,
   });
 }
 

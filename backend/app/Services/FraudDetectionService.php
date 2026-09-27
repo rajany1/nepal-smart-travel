@@ -39,13 +39,19 @@ class FraudDetectionService
         'per_day' => 15,
     ];
 
+    // Stricter limits for users with suspicious image submissions
+    private const SUSPICIOUS_REPORT_VELOCITY_LIMITS = [
+        'per_hour' => 2,
+        'per_day' => 5,
+    ];
+
     private const REVIEW_VELOCITY_LIMITS = [
         'per_hour' => 3,
         'per_day' => 10,
     ];
 
     private const CTR_ANOMALY_THRESHOLD = 15.0;
-    private const CTR_MIN_IMPRESSIONS = 100;
+    private const CTR_MIN_IMPRESSIONS = 5;
     private const BURST_WINDOW_MINUTES = 2;
     private const BURST_LIMIT = 5;
     private const FRAUD_SCORE_THRESHOLD = 80;
@@ -76,8 +82,13 @@ class FraudDetectionService
             $reasons[] = 'self_click';
         }
 
+        if ($this->isClicksExceedImpressions($campaign)) {
+            $reasons[] = 'clicks_exceed_impressions';
+        }
+
         if (!empty($reasons)) {
             $this->logFraud($campaign, 'impression', $reasons, $ip, $userAgent);
+            $this->updateUserFraudScore($userId, $reasons, $ip, $userAgent);
             $this->updateFraudScore($campaign, $reasons);
             return ['blocked' => true, 'reasons' => $reasons];
         }
@@ -109,12 +120,17 @@ class FraudDetectionService
             $reasons[] = 'self_click';
         }
 
+        if ($this->isClicksExceedImpressions($campaign)) {
+            $reasons[] = 'clicks_exceed_impressions';
+        }
+
         if ($this->isCTRFraud($campaign)) {
             $reasons[] = 'ctr_anomaly';
         }
 
         if (!empty($reasons)) {
             $this->logFraud($campaign, 'click', $reasons, $ip, $userAgent);
+            $this->updateUserFraudScore($userId, $reasons, $ip, $userAgent);
             $this->updateFraudScore($campaign, $reasons);
             return ['blocked' => true, 'reasons' => $reasons];
         }
@@ -133,8 +149,16 @@ class FraudDetectionService
             $reasons[] = 'bot_detected';
         }
 
-        if ($this->isReportVelocityBreach($user->id, $ip)) {
-            $reasons[] = 'velocity_breach';
+        // Use stricter velocity limits for users with suspicious image history
+        $isSuspicious = $this->isReportImageAbuser($user->id);
+        if ($isSuspicious) {
+            if ($this->isReportVelocityBreachStrict($user->id, $ip)) {
+                $reasons[] = 'velocity_breach';
+            }
+        } else {
+            if ($this->isReportVelocityBreach($user->id, $ip)) {
+                $reasons[] = 'velocity_breach';
+            }
         }
 
         if ($this->isReportDuplicate($user->id, $request->input('description', ''))) {
@@ -190,12 +214,6 @@ class FraudDetectionService
         }
 
         return ['blocked' => false];
-    }
-
-    public function isUserSuspicious(int $userId): bool
-    {
-        $profile = UserFraudProfile::where('user_id', $userId)->first();
-        return $profile && $profile->fraud_score >= self::USER_FRAUD_THRESHOLD;
     }
 
     private function isBot(string $userAgent): bool
@@ -274,6 +292,51 @@ class FraudDetectionService
         return false;
     }
 
+    /**
+     * Stricter velocity check for users with a history of suspicious image submissions.
+     */
+    private function isReportVelocityBreachStrict(int $userId, ?string $ip): bool
+    {
+        $hourCount = Report::where('user_id', $userId)
+            ->where('created_at', '>=', now()->subHour())
+            ->count();
+
+        if ($hourCount >= self::SUSPICIOUS_REPORT_VELOCITY_LIMITS['per_hour']) {
+            return true;
+        }
+
+        $dayCount = Report::where('user_id', $userId)
+            ->where('created_at', '>=', now()->startOfDay())
+            ->count();
+
+        if ($dayCount >= self::SUSPICIOUS_REPORT_VELOCITY_LIMITS['per_day']) {
+            return true;
+        }
+
+        return false;
+    }
+
+    /**
+     * Check if a user has a history of suspicious image submissions
+     * (security logs with image-related reasons).
+     */
+    private function isReportImageAbuser(int $userId): bool
+    {
+        try {
+            return DB::table('report_security_logs')
+                ->where('user_id', $userId)
+                ->where('created_at', '>=', now()->subDays(7))
+                ->whereIn('reason', [
+                    'image_validation_failed',
+                    'screenshot_no_camera',
+                    'repeat_offender_blocked',
+                ])
+                ->count() >= 3;
+        } catch (\Throwable $e) {
+            return false;
+        }
+    }
+
     private function isReviewVelocityBreach(int $userId, ?string $ip): bool
     {
         $hourCount = PlaceReview::where('user_id', $userId)
@@ -306,7 +369,8 @@ class FraudDetectionService
             return false;
         }
 
-        return $partner->users()->where('users.id', $userId)->exists();
+        // Check if the viewing user IS the partner's account user
+        return $partner->user_id === $userId;
     }
 
     private function isSelfReview(int $userId, int $placeId): bool
@@ -372,6 +436,22 @@ class FraudDetectionService
         return $campaign->ctr() > self::CTR_ANOMALY_THRESHOLD;
     }
 
+    private function isClicksExceedImpressions(AdCampaign $campaign): bool
+    {
+        return $campaign->current_clicks > $campaign->current_impressions
+            && $campaign->current_impressions > 0;
+    }
+
+    /**
+     * Check if a user is flagged as suspicious (for ad serving).
+     * Returns true if user should NOT see ads.
+     */
+    public function isUserSuspicious(int $userId): bool
+    {
+        $profile = \App\Models\UserFraudProfile::where('user_id', $userId)->first();
+        return $profile && $profile->is_suspicious;
+    }
+
     private function logFraud(AdCampaign $campaign, string $type, array $reasons, ?string $ip, ?string $userAgent): void
     {
         DB::table('ad_fraud_logs')->insert([
@@ -402,6 +482,10 @@ class FraudDetectionService
             'self_review' => 20,
             'quality_gate' => 10,
             'multi_account' => 35,
+            'image_validation_failed' => 20,
+            'screenshot_submission' => 15,
+            'repeat_image_abuse' => 30,
+            'fingerprint_near_duplicate' => 10,
         ];
 
         $addPoints = 0;
@@ -430,6 +514,51 @@ class FraudDetectionService
         ]);
     }
 
+    /**
+     * Update user fraud score from ad tracking (user-level, not campaign-level).
+     * Blocks the user from seeing ads, does NOT pause the campaign.
+     */
+    private function updateUserFraudScore(?int $userId, array $reasons, ?string $ip, ?string $userAgent): void
+    {
+        if (!$userId) return;
+
+        $profile = UserFraudProfile::getForUser($userId);
+
+        $pointsMap = [
+            'bot_detected' => 30,
+            'velocity_breach' => 20,
+            'self_click' => 15,
+            'burst_detected' => 20,
+            'clicks_exceed_impressions' => 40,
+            'ctr_anomaly' => 25,
+        ];
+
+        $addPoints = 0;
+        foreach ($reasons as $reason) {
+            $addPoints += $pointsMap[$reason] ?? 10;
+        }
+
+        $newScore = min(100, $profile->fraud_score + $addPoints);
+        $flags = $profile->fraud_flags ?? [];
+        foreach ($reasons as $reason) {
+            $flags[] = [
+                'reason' => $reason,
+                'type' => 'ad_tracking',
+                'at' => now()->toIso8601String(),
+                'ip' => $ip,
+            ];
+        }
+
+        $profile->update([
+            'fraud_score' => $newScore,
+            'fraud_flags' => $flags,
+            'is_suspicious' => $newScore >= self::USER_FRAUD_THRESHOLD,
+            'suspicious_reason' => $newScore >= self::USER_FRAUD_THRESHOLD
+                ? 'Auto-flagged: ad fraud score ' . $newScore . ' (' . implode(', ', $reasons) . ')'
+                : $profile->suspicious_reason,
+        ]);
+    }
+
     private function updateFraudScore(AdCampaign $campaign, array $reasons): void
     {
         $pointsMap = [
@@ -438,6 +567,7 @@ class FraudDetectionService
             'ctr_anomaly' => 25,
             'self_click' => 15,
             'burst_detected' => 20,
+            'clicks_exceed_impressions' => 40,
         ];
 
         $addPoints = 0;

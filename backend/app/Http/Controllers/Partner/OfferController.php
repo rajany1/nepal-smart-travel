@@ -178,8 +178,20 @@ $data = $this->validated($request) + ['price_xp' => $this->priceXp($request->dis
             ]);
 
             if ((float) ($redemption->partner_earnings ?? 0) > 0) {
-                $wallet = PartnerWallet::getForPartner($this->partner()->id);
-                $wallet->credit((float) $redemption->partner_earnings);
+                $ledger = app(\App\Services\FinancialLedgerService::class);
+                $ledger->creditPartnerWallet(
+                    partnerId: $this->partner()->id,
+                    amount: (float) $redemption->partner_earnings,
+                    type: 'offer_earning',
+                    description: "Offer code marked as used",
+                    referenceType: 'OfferRedemption',
+                    referenceId: $redemption->id,
+                    metadata: [
+                        'offer_id' => $redemption->offer_id,
+                        'user_id' => $redemption->user_id,
+                    ],
+                    idempotencyKey: "offer-used:{$redemption->id}",
+                );
             }
 
             DB::commit();

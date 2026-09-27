@@ -3,12 +3,13 @@
 namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class TravelPartner extends Model
 {
     protected $fillable = [
-        'name', 'type', 'description', 'logo', 'phone', 'email',
+        'name', 'type', 'type_label', 'description', 'logo', 'phone', 'email',
         'website', 'address', 'district', 'commission_rate',
         'commission_fixed', 'value_npr', 'is_active',
         'user_id', 'verification_status', 'rejected_reason', 'suspended_reason', 'verified_at',
@@ -25,7 +26,7 @@ class TravelPartner extends Model
         ];
     }
 
-    public function user(): \Illuminate\Database\Eloquent\Relations\BelongsTo
+    public function user(): BelongsTo
     {
         return $this->belongsTo(User::class);
     }
@@ -38,6 +39,15 @@ class TravelPartner extends Model
     public function scopeActive($query)
     {
         return $query->where('is_active', true);
+    }
+
+    public function typeDisplay(): string
+    {
+        if ($this->type === 'other' && $this->type_label) {
+            return $this->type_label;
+        }
+
+        return ucwords(str_replace('_', ' ', (string) $this->type));
     }
 
     public function bookings(): HasMany
@@ -64,7 +74,7 @@ class TravelPartner extends Model
     {
         return (float) OfferRedemption::whereIn('offer_id', $this->offers()->pluck('id'))
             ->where('status', 'used')
-            ->whereHas('offer', fn($q) => $q->where('price_xp', '>', 0))
+            ->whereHas('offer', fn ($q) => $q->where('price_xp', '>', 0))
             ->sum('partner_earnings');
     }
 

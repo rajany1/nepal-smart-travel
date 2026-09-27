@@ -63,6 +63,13 @@ class Place extends Model
             if (empty($place->uuid)) {
                 $place->uuid = (string) Str::uuid();
             }
+            // Reject places outside Nepal boundary
+            if ($place->latitude && $place->longitude) {
+                if ($place->latitude < 26.35 || $place->latitude > 30.45 ||
+                    $place->longitude < 80.05 || $place->longitude > 88.60) {
+                    throw new \Exception('Place coordinates are outside Nepal边界');
+                }
+            }
         });
     }
 

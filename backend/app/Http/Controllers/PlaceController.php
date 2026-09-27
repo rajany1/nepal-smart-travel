@@ -154,6 +154,13 @@ class PlaceController extends Controller
         ], 201);
     }
 
+    /**
+     * Viewport bounding-box query — the primary endpoint for map place loading.
+     *
+     * Returns only active places inside the requested bounding box, with
+     * zoom-aware density limiting and Redis caching (5 min TTL, grid-keyed).
+     * Privacy filter applied per-request. Response shape matches /places/all.
+     */
     public function bboxQuery(Request $request)
     {
         $request->validate([
@@ -161,57 +168,119 @@ class PlaceController extends Controller
             'max_lat' => 'required|numeric|between:-90,90',
             'min_lng' => 'required|numeric|between:-180,180',
             'max_lng' => 'required|numeric|between:-180,180',
+            'zoom'    => 'nullable|numeric|min:1|max:20',
             'category' => 'nullable|string|max:100',
-            'limit' => 'nullable|integer|min:1|max:200',
+            'limit'   => 'nullable|integer|min:1|max:1000',
         ]);
 
-        $minLat = $request->min_lat;
-        $maxLat = $request->max_lat;
-        $minLng = $request->min_lng;
-        $maxLng = $request->max_lng;
-        $limit = $request->limit ?? 100;
+        $minLat = (float) $request->min_lat;
+        $maxLat = (float) $request->max_lat;
+        $minLng = (float) $request->min_lng;
+        $maxLng = (float) $request->max_lng;
+        $zoom   = (int) ($request->zoom ?? 14);
 
-        $query = Place::with(['category', 'images'])->active()
-            ->whereBetween('latitude', [$minLat, $maxLat])
-            ->whereBetween('longitude', [$minLng, $maxLng]);
-
-        $this->applyShowOnMapFilter($query, $request->user()?->id);
-
-        if ($request->filled('category')) {
-            $query->whereHas('category', function ($q) use ($request) {
-                $q->where('name', 'like', '%' . $request->category . '%');
-            });
+        // Reject bboxes wider than 20° — prevents low-zoom hammering
+        if (($maxLat - $minLat) > 20 || ($maxLng - $minLng) > 20) {
+            return response()->json([
+                'success' => false,
+                'error'   => 'Bounding box too large. Max 20° per axis.',
+            ], 422);
         }
 
-        $places = $query->orderBy('is_featured', 'desc')
-            ->orderBy('average_rating', 'desc')
-            ->limit($limit)
-            ->get();
+        // Zoom-aware limit: denser at high zoom, lighter at low zoom
+        $defaultLimit = match(true) {
+            $zoom >= 16 => 500,
+            $zoom >= 14 => 300,
+            $zoom >= 12 => 150,
+            $zoom >= 10 => 80,
+            default     => 50,
+        };
+        $limit = min((int) ($request->limit ?? $defaultLimit), 1000);
 
-        $data = $places->map(fn($place) => [
-            'id' => $place->id,
-            'uuid' => $place->uuid,
-            'name' => $place->name,
-            'description' => $place->description,
-            'address' => $place->address,
-            'district' => $place->district,
-            'latitude' => (float)$place->latitude,
-            'longitude' => (float)$place->longitude,
-            'phone' => $place->phone,
-            'average_rating' => $place->average_rating !== null ? (float)$place->average_rating : null,
-            'total_reviews' => $place->total_reviews,
-            'category' => $place->category ? $place->category->name : null,
-            'is_verified' => $place->is_verified,
-            'is_featured' => $place->is_featured,
-            'source' => $place->source ?? 'admin',
-            'images' => $this->placeImageUrls($place->images),
-        ])->toArray();
+        // Redis cache — grid-normalized key so nearby pans share cache
+        $cacheKey = \App\Services\PlacesCache::bboxKey($minLat, $maxLat, $minLng, $maxLng, $zoom);
+        $ttl      = \App\Services\PlacesCache::BBOX_TTL;
 
-        $data = TranslationService::attachToPlaces($data);
+        $data = Cache::remember($cacheKey, $ttl, function () use ($minLat, $maxLat, $minLng, $maxLng) {
+            $raw = Place::with(['category', 'images'])->active()
+                ->whereBetween('latitude', [$minLat, $maxLat])
+                ->whereBetween('longitude', [$minLng, $maxLng])
+                ->orderBy('is_featured', 'desc')
+                ->orderBy('average_rating', 'desc')
+                ->orderBy('total_reviews', 'desc')
+                ->orderBy('name')
+                ->get()
+                ->map(fn($place) => [
+                    'id'             => $place->id,
+                    'uuid'           => $place->uuid,
+                    'created_by'     => $place->created_by !== null ? (int) $place->created_by : null,
+                    'name'           => $place->name,
+                    'description'    => $place->description,
+                    'address'        => $place->address,
+                    'district'       => $place->district,
+                    'latitude'       => (float) $place->latitude,
+                    'longitude'      => (float) $place->longitude,
+                    'phone'          => $place->phone,
+                    'category'       => $place->category ? $place->category->name : null,
+                    'source'         => $place->source ?? 'admin',
+                    'osm_id'         => $place->osm_id,
+                    'average_rating' => $place->average_rating !== null ? (float) $place->average_rating : null,
+                    'total_reviews'  => $place->total_reviews,
+                    'is_verified'    => $place->is_verified,
+                    'is_featured'    => $place->is_featured,
+                    'image'          => $this->placeImageUrls($place->images)[0] ?? null,
+                ])
+                ->values()
+                ->toArray();
+
+            // Strip null/empty fields (same as all())
+            return array_map(fn($place) => array_filter(
+                $place,
+                fn($v, $k) => $k === 'created_by' || ($v !== null && $v !== ''),
+                ARRAY_FILTER_USE_BOTH
+            ), $raw);
+        });
+
+        // Per-request privacy filter (not cached — depends on viewer)
+        $viewerId = $request->user()?->id;
+        $hiddenAuthorIds = Cache::remember('places:hidden_authors', \App\Services\PlacesCache::ALL_TTL, function () {
+            return \App\Models\User::whereRaw("JSON_EXTRACT(settings, '$.show_on_map') = 'false'")
+                ->pluck('id')
+                ->map(fn($v) => (int) $v)
+                ->all();
+        });
+        $filtered = array_values(array_filter($data, function ($place) use ($hiddenAuthorIds, $viewerId) {
+            if ($place['created_by'] === null) return true;
+            if ($viewerId !== null && (int) $place['created_by'] === (int) $viewerId) return true;
+            return !in_array((int) $place['created_by'], $hiddenAuthorIds, true);
+        }));
+
+        // Category filter
+        if ($request->filled('category')) {
+            $needle = mb_strtolower($request->category);
+            $filtered = array_values(array_filter($filtered, fn($place) => $place['category'] !== null
+                && mb_strpos(mb_strtolower($place['category']), $needle) !== false));
+        }
+
+        $result = array_slice($filtered, 0, $limit);
+
+        $result = TranslationService::attachToPlaces($result);
+        foreach ($result as &$item) {
+            $item['translated_name'] = $item['name_ne'] ?? $item['name'] ?? '';
+            $item['rating'] = $item['average_rating'];
+            $item['review_count'] = $item['total_reviews'];
+            $item['featured'] = $item['is_featured'];
+        }
+        unset($item);
 
         return response()->json([
             'success' => true,
-            'data' => $data,
+            'data'    => $result,
+            'meta'    => [
+                'total_in_bbox' => count($filtered),
+                'returned'      => count($result),
+                'zoom'          => $zoom,
+            ],
         ]);
     }
 
@@ -223,7 +292,7 @@ class PlaceController extends Controller
     public function all(Request $request)
     {
         $request->validate([
-            'limit' => 'nullable|integer|min:1|max:1000',
+            'limit' => 'nullable|integer|min:1|max:15000',
             'category' => 'nullable|string|max:100',
         ]);
 
@@ -234,13 +303,12 @@ class PlaceController extends Controller
         // show-on-map privacy filter is applied per request afterwards,
         // because it depends on the requesting viewer.
         $places = Cache::remember(\App\Services\PlacesCache::allKey(), \App\Services\PlacesCache::ALL_TTL, function () {
-            return Place::with(['category', 'images'])->active()
+            $raw = Place::with(['category', 'images'])->active()
                 ->whereIn('source', ['admin', 'osm', 'user_submitted'])
                 ->orderBy('is_featured', 'desc')
                 ->orderBy('average_rating', 'desc')
                 ->orderBy('total_reviews', 'desc')
                 ->orderBy('name')
-                ->limit(1000)
                 ->get()
                 ->map(fn($place) => [
                     'id' => $place->id,
@@ -263,14 +331,24 @@ class PlaceController extends Controller
                 ])
                 ->values()
                 ->toArray();
+
+            // Strip null/empty string fields to reduce Redis + response size (~30% smaller)
+            // Keep all numeric fields (including 0), booleans, and created_by (needed for privacy filter)
+            return array_map(fn($place) => array_filter(
+                $place,
+                fn($v, $k) => $k === 'created_by' || ($v !== null && $v !== ''),
+                ARRAY_FILTER_USE_BOTH
+            ), $raw);
         });
 
-        // Per-request "Show on Map" privacy filter (mirrors applyShowOnMapFilter).
+        // Per-request "Show on Map" privacy filter (cached 10 min in Redis)
         $viewerId = $request->user()?->id;
-        $hiddenAuthorIds = \App\Models\User::whereRaw("JSON_EXTRACT(settings, '$.show_on_map') = 'false'")
-            ->pluck('id')
-            ->map(fn($v) => (int) $v)
-            ->all();
+        $hiddenAuthorIds = Cache::remember('places:hidden_authors', \App\Services\PlacesCache::ALL_TTL, function () {
+            return \App\Models\User::whereRaw("JSON_EXTRACT(settings, '$.show_on_map') = 'false'")
+                ->pluck('id')
+                ->map(fn($v) => (int) $v)
+                ->all();
+        });
         $filtered = array_values(array_filter($places, function ($place) use ($hiddenAuthorIds, $viewerId) {
             if ($place['created_by'] === null) return true;
             if ($viewerId !== null && (int) $place['created_by'] === (int) $viewerId) return true;

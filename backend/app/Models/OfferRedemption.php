@@ -30,11 +30,11 @@ class OfferRedemption extends Model
         'used_at' => 'datetime',
         'applied_at' => 'datetime',
         'consumed_at' => 'datetime',
-        'discount_amount' => 'float',
-        'value_npr' => 'float',
-        'commission_percent' => 'float',
-        'admin_commission' => 'float',
-        'partner_earnings' => 'float',
+        'discount_amount' => 'decimal:2',
+        'value_npr' => 'decimal:2',
+        'commission_percent' => 'decimal:2',
+        'admin_commission' => 'decimal:2',
+        'partner_earnings' => 'decimal:2',
     ];
 
     public function offer(): BelongsTo

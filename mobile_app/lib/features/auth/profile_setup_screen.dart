@@ -3,7 +3,6 @@ import "../../core/services/localization_service.dart";
 import 'package:provider/provider.dart';
 import '../../config/themes/app_theme.dart';
 import '../../providers/auth_provider.dart';
-import '../../core/api/api_client.dart';
 
 class ProfileSetupScreen extends StatefulWidget {
   const ProfileSetupScreen({super.key});
@@ -67,9 +66,18 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
       if (_selectedGender != null) data['gender'] = _selectedGender;
       if (_selectedInterest != null) data['interest'] = _selectedInterest;
 
-      final api = ApiClient.instance;
-      await api.updateProfile(data);
-      await context.read<AuthProvider>().updateProfile(data);
+      final auth = context.read<AuthProvider>();
+      await auth.updateProfile(data);
+
+      // Check if the provider reported an error
+      if (auth.errorMessage != null) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Error saving profile: ${auth.errorMessage}')),
+          );
+        }
+        return;
+      }
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(

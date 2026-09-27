@@ -13,9 +13,9 @@
 @endphp
 
 <div class="max-w-2xl mx-auto">
-    <div class="bg-white rounded-2xl shadow-xl p-8">
-        <h2 class="text-2xl font-bold text-slate-800 mb-1">{{ $offer->exists ? 'Edit Offer' : 'Create New Offer' }}</h2>
-        <p class="text-sm text-slate-500 mb-6">New and edited offers require admin approval before going live.</p>
+    <div class="bg-white rounded-2xl shadow-xl border border-slate-100 p-5 sm:p-8">
+        <h2 class="text-xl sm:text-2xl font-bold text-slate-800 mb-1">{{ $offer->exists ? 'Edit Offer' : 'Create New Offer' }}</h2>
+        <p class="text-sm text-slate-500 mb-5">New and edited offers require admin approval before going live.</p>
 
         @if($errors->any())
             <div class="bg-red-50 border border-red-200 text-red-700 text-sm rounded-xl px-4 py-3 mb-4">

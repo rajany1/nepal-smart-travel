@@ -102,16 +102,32 @@ class PartnerPayment extends Model
             return false;
         }
 
-        $this->update([
-            'status' => 'completed',
-            'scanned_at' => now(),
-            'scanned_by' => $scannedBy->id,
-        ]);
+        return \Illuminate\Support\Facades\DB::transaction(function () use ($scannedBy) {
+            $this->update([
+                'status' => 'completed',
+                'scanned_at' => now(),
+                'scanned_by' => $scannedBy->id,
+            ]);
 
-        // Credit partner wallet
-        $wallet = PartnerWallet::getForPartner($this->partner_id);
-        $wallet->credit((float) $this->partner_amount);
+            // Credit partner wallet via FinancialLedgerService (atomic + ledger-backed)
+            $ledger = app(\App\Services\FinancialLedgerService::class);
+            $ledger->creditPartnerWallet(
+                partnerId: $this->partner_id,
+                amount: (float) $this->partner_amount,
+                type: 'offer_earning',
+                description: "Offer payment completed",
+                referenceType: 'PartnerPayment',
+                referenceId: $this->id,
+                metadata: [
+                    'commission_percent' => $this->commission_percent,
+                    'commission_amount' => $this->commission_amount,
+                    'user_id' => $this->user_id,
+                ],
+                idempotencyKey: "partner-payment:{$this->id}",
+                actorId: $scannedBy->id,
+            );
 
-        return true;
+            return true;
+        });
     }
 }

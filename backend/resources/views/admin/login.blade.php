@@ -33,9 +33,7 @@
     <div class="w-full max-w-md">
         <!-- Logo -->
         <div class="text-center mb-8">
-            <div class="w-16 h-16 bg-white/10 rounded-2xl flex items-center justify-center mx-auto mb-4">
-                <i class="fas fa-shield-alt text-white text-3xl"></i>
-            </div>
+            <img src="{{ asset('images/oripori_logo_wordmark.png') }}" alt="Oripori" class="h-12 w-auto mx-auto mb-4">
             <h1 class="text-2xl font-bold text-white">Admin Panel</h1>
             <p class="text-accent-200 text-sm mt-1">{{ config('app.name') }}</p>
         </div>

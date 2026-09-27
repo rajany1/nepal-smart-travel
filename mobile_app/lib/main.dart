@@ -27,6 +27,7 @@ import 'providers/partner_payment_provider.dart';
 import 'providers/around_me_provider.dart';
 import 'providers/sos_provider.dart';
 import 'providers/support_provider.dart';
+import 'providers/travel_context_provider.dart';
 import 'core/services/app_settings_service.dart';
 
 import 'features/auth/login_screen.dart';
@@ -41,6 +42,7 @@ import 'features/profile/profile_completion_screen.dart';
 import 'features/profile/settings_screen.dart';
 import 'features/profile/policies_screen.dart';
 import 'features/profile/legal_document_screen.dart';
+import 'features/profile/legal_policies_screen.dart';
 
 import 'features/auth/splash_screen.dart';
 import 'core/api/api_client.dart';
@@ -54,6 +56,7 @@ import 'features/assistant/assistant_screen.dart';
 import 'features/profile/profile_screen.dart';
 import 'features/alerts/alerts_screen.dart';
 import 'features/leaderboard/leaderboard_screen.dart';
+import 'features/travel/travel_context_screen.dart';
 
 // Consumer feature screens
 import 'features/subscriptions/subscription_plans_screen.dart';
@@ -179,10 +182,72 @@ class NepalSmartTravelApp extends StatelessWidget {
         ChangeNotifierProvider(create: (_) => AroundMeProvider()),
         ChangeNotifierProvider(create: (_) => SosProvider()),
         ChangeNotifierProvider(create: (_) => SupportProvider()),
+        ChangeNotifierProvider(create: (_) => TravelContextProvider()),
         ChangeNotifierProvider<LocalizationService>.value(value: localizationService),
       ],
-      child: Consumer<ThemeProvider>(
-        builder: (context, themeProvider, _) {
+      child: _AuthTravelRouteSync(
+        child: _AppChrome(navigatorKey: navigatorKey),
+      ),
+    );
+  }
+}
+
+/// Bridges AuthProvider ↔ TravelContextProvider session lifecycle:
+/// login/restore → persist route; logout → drop disk snapshot only.
+class _AuthTravelRouteSync extends StatefulWidget {
+  final Widget child;
+  const _AuthTravelRouteSync({required this.child});
+
+  @override
+  State<_AuthTravelRouteSync> createState() => _AuthTravelRouteSyncState();
+}
+
+class _AuthTravelRouteSyncState extends State<_AuthTravelRouteSync> {
+  AuthProvider? _auth;
+  bool? _prevAuth;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final auth = context.read<AuthProvider>();
+    if (_auth != null) return;
+    _auth = auth;
+    _prevAuth = auth.isAuthenticated;
+    auth.addListener(_onAuthChanged);
+  }
+
+  void _onAuthChanged() {
+    final auth = _auth;
+    if (auth == null || !mounted) return;
+    final now = auth.isAuthenticated;
+    if (now == _prevAuth) return;
+    _prevAuth = now;
+    final travel = context.read<TravelContextProvider>();
+    if (now) {
+      unawaited(travel.handleLoggedIn());
+    } else {
+      unawaited(travel.handleLoggedOut());
+    }
+  }
+
+  @override
+  void dispose() {
+    _auth?.removeListener(_onAuthChanged);
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => widget.child;
+}
+
+class _AppChrome extends StatelessWidget {
+  final GlobalKey<NavigatorState> navigatorKey;
+  const _AppChrome({required this.navigatorKey});
+
+  @override
+  Widget build(BuildContext context) {
+    return Consumer<ThemeProvider>(
+      builder: (context, themeProvider, _) {
           // Update status bar icons based on theme
           SystemChrome.setSystemUIOverlayStyle(SystemUiOverlayStyle(
             statusBarIconBrightness: themeProvider.isDarkMode ? Brightness.light : Brightness.dark,
@@ -230,6 +295,8 @@ class NepalSmartTravelApp extends StatelessWidget {
                     return MaterialPageRoute(builder: (_) => const NearbyMapScreen(), settings: settings);
                   case '/routes':
                     return MaterialPageRoute(builder: (_) => const RoutesScreen(), settings: settings);
+                  case '/travel-context':
+                    return MaterialPageRoute(builder: (_) => const TravelContextScreen(), settings: settings);
                   case '/reports':
                     return MaterialPageRoute(builder: (_) => const ReportsListScreen(), settings: settings);
                   case '/emergency':
@@ -258,6 +325,8 @@ class NepalSmartTravelApp extends StatelessWidget {
                   case '/legal':
                     final type = settings.arguments as String? ?? 'privacy_policy';
                     return MaterialPageRoute(builder: (_) => LegalDocumentScreen(type: type), settings: settings);
+                  case '/legal-policies':
+                    return MaterialPageRoute(builder: (_) => const LegalPoliciesScreen(), settings: settings);
                   case '/legal-re-acceptance':
                     return MaterialPageRoute(builder: (_) => const LegalReAcceptanceScreen(), settings: settings);
                   default:
@@ -267,7 +336,6 @@ class NepalSmartTravelApp extends StatelessWidget {
             ),
           );
         },
-      ),
-    );
+      );
   }
 }

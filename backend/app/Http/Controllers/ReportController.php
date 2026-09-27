@@ -17,6 +17,7 @@ use App\Models\AiAgentTask;
 use App\Services\AchievementService;
 use App\Services\Ai\AgentOrchestrator;
 use App\Services\ExifGpsVerificationService;
+use App\Services\ImageValidationService;
 use App\Services\ModeratorService;
 use App\Services\ReportAutoClassifyService;
 use App\Services\TranslationService;
@@ -75,6 +76,346 @@ class ReportController extends Controller
         return response()->json([
             'success' => true,
             'data' => $config,
+        ]);
+    }
+
+    /**
+     * Get all report categories organized by group with options and form fields.
+     * Used for the "More Categories" explorer screen.
+     */
+    public function categoriesDetailed(Request $request)
+    {
+        $groups = ReportCategoryGroup::where('is_active', true)
+            ->orderBy('sort_order')
+            ->with([
+                'activeCategories' => function ($q) {
+                    $q->with([
+                        'options' => function ($oq) {
+                            $oq->orderBy('sort_order');
+                        },
+                        'fields' => function ($fq) {
+                            $fq->orderBy('sort_order');
+                        },
+                    ])->orderBy('sort_order');
+                },
+            ])
+            ->get();
+
+        $data = $groups->map(function ($group) {
+            return [
+                'id' => $group->id,
+                'name' => $group->name,
+                'slug' => $group->slug,
+                'name_ne' => $group->name_ne,
+                'description' => $group->description,
+                'description_ne' => $group->description_ne,
+                'icon' => $group->icon,
+                'icon_type' => $group->icon_type,
+                'icon_color' => $group->icon_color,
+                'icon_background' => $group->icon_background,
+                'is_emergency_group' => $group->is_emergency_group,
+                'categories' => $group->activeCategories->map(function ($cat) {
+                    return [
+                        'id' => $cat->id,
+                        'name' => $cat->name,
+                        'slug' => $cat->slug,
+                        'name_ne' => $cat->name_ne,
+                        'description' => $cat->description,
+                        'description_ne' => $cat->description_ne,
+                        'icon' => $cat->icon,
+                        'icon_type' => $cat->icon_type,
+                        'icon_color' => $cat->icon_color,
+                        'icon_background' => $cat->icon_background,
+                        'is_featured' => $cat->is_featured,
+                        'is_emergency' => $cat->is_emergency,
+                        'usage_count' => $cat->usage_count,
+                        'options' => $cat->options->map(function ($opt) {
+                            return [
+                                'id' => $opt->id,
+                                'name' => $opt->name,
+                                'slug' => $opt->slug,
+                                'name_ne' => $opt->name_ne,
+                                'description' => $opt->description,
+                                'description_ne' => $opt->description_ne,
+                                'icon' => $opt->icon,
+                                'icon_type' => $opt->icon_type,
+                                'requires_photo' => $opt->requires_photo,
+                                'requires_location' => $opt->requires_location,
+                            ];
+                        }),
+                        'fields' => $cat->fields->map(function ($field) {
+                            return [
+                                'name' => $field->name,
+                                'label' => $field->label,
+                                'label_ne' => $field->label_ne,
+                                'placeholder' => $field->placeholder,
+                                'placeholder_ne' => $field->placeholder_ne,
+                                'type' => $field->type,
+                                'required' => $field->required,
+                                'sort_order' => $field->sort_order,
+                                'options' => $field->getOptionsArray(),
+                                'validation' => $field->validation,
+                                'help_text' => $field->help_text,
+                                'help_text_ne' => $field->help_text_ne,
+                                'show_in_preview' => $field->show_in_preview,
+                            ];
+                        }),
+                    ];
+                }),
+            ];
+        });
+
+        return response()->json([
+            'success' => true,
+            'data' => $data,
+        ]);
+    }
+
+    /**
+     * Get featured / most-used categories for the initial report bottom sheet.
+     * Priority: 1) Admin featured, 2) Safety-critical, 3) Usage count, 4) sort_order
+     */
+    public function featuredCategories(Request $request)
+    {
+        $limit = (int) $request->input('limit', 6);
+
+        // Priority 1: Admin featured categories
+        $featured = ReportCategorie::where('is_active', true)
+            ->where('is_featured', true)
+            ->with(['options', 'fields'])
+            ->orderBy('sort_order')
+            ->limit($limit)
+            ->get();
+
+        // If we don't have enough featured, fill with safety-critical (emergency)
+        if ($featured->count() < $limit) {
+            $emergency = ReportCategorie::where('is_active', true)
+                ->where('is_emergency', true)
+                ->whereNotIn('id', $featured->pluck('id'))
+                ->with(['options', 'fields'])
+                ->orderBy('sort_order')
+                ->limit($limit - $featured->count())
+                ->get();
+            $featured = $featured->concat($emergency);
+        }
+
+        // If still not enough, fill with usage-based ranking
+        if ($featured->count() < $limit) {
+            $popular = ReportCategorie::where('is_active', true)
+                ->whereNotIn('id', $featured->pluck('id'))
+                ->with(['options', 'fields'])
+                ->orderByDesc('usage_count')
+                ->orderBy('sort_order')
+                ->limit($limit - $featured->count())
+                ->get();
+            $featured = $featured->concat($popular);
+        }
+
+        $data = $featured->map(function ($cat) {
+            return [
+                'id' => $cat->id,
+                'name' => $cat->name,
+                'slug' => $cat->slug,
+                'name_ne' => $cat->name_ne,
+                'description' => $cat->description,
+                'description_ne' => $cat->description_ne,
+                'icon' => $cat->icon,
+                'icon_type' => $cat->icon_type,
+                'icon_color' => $cat->icon_color,
+                'icon_background' => $cat->icon_background,
+                'is_featured' => $cat->is_featured,
+                'is_emergency' => $cat->is_emergency,
+                'usage_count' => $cat->usage_count,
+                'options' => $cat->options->map(function ($opt) {
+                    return [
+                        'id' => $opt->id,
+                        'name' => $opt->name,
+                        'slug' => $opt->slug,
+                        'name_ne' => $opt->name_ne,
+                        'description' => $opt->description,
+                        'description_ne' => $opt->description_ne,
+                        'icon' => $opt->icon,
+                        'icon_type' => $opt->icon_type,
+                        'requires_photo' => $opt->requires_photo,
+                        'requires_location' => $opt->requires_location,
+                    ];
+                }),
+                'fields' => $cat->fields->map(function ($field) {
+                    return [
+                        'name' => $field->name,
+                        'label' => $field->label,
+                        'label_ne' => $field->label_ne,
+                        'placeholder' => $field->placeholder,
+                        'placeholder_ne' => $field->placeholder_ne,
+                        'type' => $field->type,
+                        'required' => $field->required,
+                        'sort_order' => $field->sort_order,
+                        'options' => $field->getOptionsArray(),
+                        'validation' => $field->validation,
+                        'help_text' => $field->help_text,
+                        'help_text_ne' => $field->help_text_ne,
+                        'show_in_preview' => $field->show_in_preview,
+                    ];
+                }),
+            ];
+        });
+
+        return response()->json([
+            'success' => true,
+            'data' => $data,
+        ]);
+    }
+
+    /**
+     * Get a single category with full configuration for form rendering.
+     */
+    public function categoryFormConfig(Request $request, $id)
+    {
+        $category = ReportCategorie::with(['options', 'fields', 'group'])->findOrFail($id);
+
+        // Increment usage count for ranking
+        $category->incrementUsage();
+
+        $data = [
+            'id' => $category->id,
+            'name' => $category->name,
+            'slug' => $category->slug,
+            'name_ne' => $category->name_ne,
+            'description' => $category->description,
+            'description_ne' => $category->description_ne,
+            'icon' => $category->icon,
+            'icon_type' => $category->icon_type,
+            'icon_color' => $category->icon_color,
+            'icon_background' => $category->icon_background,
+            'is_featured' => $category->is_featured,
+            'is_emergency' => $category->is_emergency,
+            'group' => $category->group ? [
+                'id' => $category->group->id,
+                'name' => $category->group->name,
+                'slug' => $category->group->slug,
+                'name_ne' => $category->group->name_ne,
+                'icon' => $category->group->icon,
+            ] : null,
+            'options' => $category->options->map(function ($opt) {
+                return [
+                    'id' => $opt->id,
+                    'name' => $opt->name,
+                    'slug' => $opt->slug,
+                    'name_ne' => $opt->name_ne,
+                    'description' => $opt->description,
+                    'description_ne' => $opt->description_ne,
+                    'icon' => $opt->icon,
+                    'icon_type' => $opt->icon_type,
+                    'requires_photo' => $opt->requires_photo,
+                    'requires_location' => $opt->requires_location,
+                ];
+            }),
+            'fields' => $category->fields->map(function ($field) {
+                return [
+                    'name' => $field->name,
+                    'label' => $field->label,
+                    'label_ne' => $field->label_ne,
+                    'placeholder' => $field->placeholder,
+                    'placeholder_ne' => $field->placeholder_ne,
+                    'type' => $field->type,
+                    'required' => $field->required,
+                    'sort_order' => $field->sort_order,
+                    'options' => $field->getOptionsArray(),
+                    'validation' => $field->validation,
+                    'help_text' => $field->help_text,
+                    'help_text_ne' => $field->help_text_ne,
+                    'show_in_preview' => $field->show_in_preview,
+                ];
+            }),
+            'submit_button_text' => 'Submit Report',
+            'notice' => 'Fill in the details and submit your report.',
+        ];
+
+        return response()->json([
+            'success' => true,
+            'data' => $data,
+        ]);
+    }
+
+    /**
+     * Search categories by name, description, group.
+     */
+    public function searchCategories(Request $request)
+    {
+        $request->validate([
+            'q' => 'required|string|min:1|max:100',
+            'limit' => 'nullable|integer|min:1|max:50',
+        ]);
+
+        $query = $request->input('q');
+        $limit = (int) $request->input('limit', 20);
+
+        $categories = ReportCategorie::where('is_active', true)
+            ->where(function ($q) use ($query) {
+                $q->where('name', 'like', "%{$query}%")
+                    ->orWhere('name_ne', 'like', "%{$query}%")
+                    ->orWhere('description', 'like', "%{$query}%")
+                    ->orWhere('description_ne', 'like', "%{$query}%")
+                    ->orWhere('slug', 'like', "%{$query}%")
+                    ->orWhereHas('group', function ($gq) use ($query) {
+                        $gq->where('name', 'like', "%{$query}%")
+                            ->orWhere('name_ne', 'like', "%{$query}%")
+                            ->orWhere('slug', 'like', "%{$query}%");
+                    });
+            })
+            ->with(['options', 'fields', 'group'])
+            ->orderBy('is_featured', 'desc')
+            ->orderBy('is_emergency', 'desc')
+            ->orderByDesc('usage_count')
+            ->orderBy('sort_order')
+            ->limit($limit)
+            ->get();
+
+        $data = $categories->map(function ($cat) {
+            return [
+                'id' => $cat->id,
+                'name' => $cat->name,
+                'slug' => $cat->slug,
+                'name_ne' => $cat->name_ne,
+                'description' => $cat->description,
+                'description_ne' => $cat->description_ne,
+                'icon' => $cat->icon,
+                'icon_type' => $cat->icon_type,
+                'icon_color' => $cat->icon_color,
+                'icon_background' => $cat->icon_background,
+                'is_featured' => $cat->is_featured,
+                'is_emergency' => $cat->is_emergency,
+                'usage_count' => $cat->usage_count,
+                'group' => $cat->group ? [
+                    'id' => $cat->group->id,
+                    'name' => $cat->group->name,
+                    'slug' => $cat->group->slug,
+                    'name_ne' => $cat->group->name_ne,
+                ] : null,
+                'options' => $cat->options->map(function ($opt) {
+                    return [
+                        'id' => $opt->id,
+                        'name' => $opt->name,
+                        'slug' => $opt->slug,
+                        'name_ne' => $opt->name_ne,
+                    ];
+                }),
+                'fields' => $cat->fields->map(function ($field) {
+                    return [
+                        'name' => $field->name,
+                        'label' => $field->label,
+                        'label_ne' => $field->label_ne,
+                        'type' => $field->type,
+                        'required' => $field->required,
+                        'options' => $field->getOptionsArray(),
+                    ];
+                }),
+            ];
+        });
+
+        return response()->json([
+            'success' => true,
+            'data' => $data,
         ]);
     }
 
@@ -264,9 +605,16 @@ class ReportController extends Controller
     /**
      * Submit a new report
      * 
-     * Anti-fake-report protection:
-     * 1. EXIF GPS verification - validates photo GPS matches report location
-     * 2. Only in-app camera captures are accepted (no gallery uploads)
+     * Server-side security controls (bypass-proof):
+     * 1. Image validation: MIME, dimensions, format integrity (finfo + getimagesize)
+     * 2. Exact duplicate detection: SHA-256 hash blocks re-uploads
+     * 3. Fingerprint near-duplicate: soft signal, sets provenance='suspicious'
+     * 4. EXIF GPS verification: photo GPS vs report location (500m tolerance)
+     * 5. Provenance tracking: server-assigned, never trusted from client
+     * 
+     * Camera provenance CANNOT be cryptographically proven after upload.
+     * The is_live_capture field is client metadata for analytics only —
+     * a cracked APK can send is_live_capture=true with any image.
      */
     public function store(Request $request)
     {
@@ -308,17 +656,20 @@ class ReportController extends Controller
             'longitude' => 'required|numeric|between:-180,180',
             'district' => 'nullable|string|max:100',
             'image' => 'required|image|max:5120', // 5MB max, now REQUIRED
-            'is_live_capture' => 'required|boolean', // Must be true - in-app camera only
+            'is_live_capture' => 'required|boolean', // Client metadata — NOT a trust signal
             'photo_captured_at' => 'nullable|date',
             'capture_latitude' => 'nullable|numeric|between:-90,90',
             'capture_longitude' => 'nullable|numeric|between:-180,180',
         ]);
 
-        // Layer 1: Enforce in-app camera capture (no gallery uploads)
-        if (!$request->boolean('is_live_capture')) {
+        // Layer 1: Server-side image validation (NEVER trust client metadata)
+        // The is_live_capture flag from the client is a WEAK signal — a cracked APK
+        // can send is_live_capture=true with any image. Instead, we validate the
+        // image itself server-side and check for duplicates immediately.
+        if (!$request->hasFile('image')) {
             return response()->json([
                 'success' => false,
-                'message' => 'Only in-app camera captures are allowed. Gallery uploads are not permitted.',
+                'message' => 'No image provided. A live photo is required.',
             ], 422);
         }
 
@@ -339,9 +690,20 @@ class ReportController extends Controller
         $validated['title'] = (string) $request->input('title');
         $validated['category_id'] = (int) $request->input('category_id');
         $validated['priority'] = (string) $request->input('priority');
+
+        // Provenance: NEVER trust is_live_capture from the client. A cracked APK
+        // can send is_live_capture=true with any gallery image. Instead, we assign
+        // provenance based on server-side signals.
+        // - 'unverified_client': default for all user-submitted images
+        // - 'suspicious': when soft signals (no EXIF, screenshot dims, etc.) are present
+        // - 'system': for BIPAD/system reports (set in BipadSyncService)
+        $validated['provenance'] = 'unverified_client';
+
         // Only include `is_live_capture` if the column exists in DB (some setups may not have run migrations)
         if (Schema::hasColumn('reports', 'is_live_capture')) {
-            $validated['is_live_capture'] = true;
+            // Do NOT trust the client value — store the coerced value but it must
+            // never be used as a trust signal. We keep it for analytics only.
+            $validated['is_live_capture'] = $coercedIsLive;
         } else {
             unset($validated['is_live_capture']);
         }
@@ -380,20 +742,109 @@ class ReportController extends Controller
         }
 
         $gpsVerificationResult = null;
+        $imageMetadata = [];
 
         // Handle image upload
         if ($request->hasFile('image')) {
             $file = $request->file('image');
 
-            // Content validation - verify actual file type
-            $finfo = new \finfo(FILEINFO_MIME_TYPE);
-            $mimeType = $finfo->buffer(file_get_contents($file->getRealPath()));
-            $allowedTypes = ['image/jpeg', 'image/png', 'image/webp'];
-            if (!in_array($mimeType, $allowedTypes)) {
+            // === SERVER-SIDE IMAGE VALIDATION ===
+            // This is the real security boundary. A modified APK cannot bypass these checks.
+            $imageValidator = app(ImageValidationService::class);
+            $validation = $imageValidator->validate($file);
+
+            if (!$validation['valid']) {
+                // Log the rejection for security audit
+                $imageValidator->logSuspicious(
+                    userId: $request->user()->id,
+                    reportId: null,
+                    reason: 'image_validation_failed',
+                    metadata: array_merge($validation['metadata'], ['errors' => $validation['errors']]),
+                    ip: $request->ip(),
+                    userAgent: $request->userAgent(),
+                );
+
                 return response()->json([
                     'success' => false,
-                    'message' => 'Invalid image type. Only JPEG, PNG, and WebP are allowed.',
+                    'message' => 'Image validation failed.',
+                    'errors' => $validation['errors'],
                 ], 422);
+            }
+
+            // Block repeat offenders (configurable threshold, default 10 per 24h)
+            if ($imageValidator->isRepeatOffender($request->user()->id)) {
+                $imageValidator->logSuspicious(
+                    userId: $request->user()->id,
+                    reportId: null,
+                    reason: 'repeat_offender_blocked',
+                    metadata: $validation['metadata'],
+                    ip: $request->ip(),
+                    userAgent: $request->userAgent(),
+                );
+
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Report submission temporarily restricted due to repeated suspicious activity.',
+                ], 429);
+            }
+
+            // Log warnings (suspicious patterns that don't block submission)
+            // and escalate provenance to 'suspicious' so AI never auto-approves.
+            if (!empty($validation['warnings'])) {
+                $validated['provenance'] = 'suspicious';
+                $imageValidator->logSuspicious(
+                    userId: $request->user()->id,
+                    reportId: null,
+                    reason: 'image_warnings',
+                    metadata: array_merge($validation['metadata'], ['warnings' => $validation['warnings']]),
+                    ip: $request->ip(),
+                    userAgent: $request->userAgent(),
+                );
+            }
+
+            $imageMetadata = $validation['metadata'];
+
+            // === SYNCHRONOUS DUPLICATE DETECTION ===
+            // Exact SHA-256 match blocks submission (hard reject).
+            // Fingerprint near-duplicate is a soft signal (logged, does NOT block).
+            $duplicateCheck = $imageValidator->checkDuplicates($file);
+            if ($duplicateCheck['duplicate']) {
+                // Hard reject: exact duplicate
+                $imageValidator->logSuspicious(
+                    userId: $request->user()->id,
+                    reportId: null,
+                    reason: 'duplicate_image_blocked',
+                    metadata: array_merge($validation['metadata'], [
+                        'match_type'     => $duplicateCheck['match_type'],
+                        'matched_report' => $duplicateCheck['matched_report'],
+                        'content_hash'   => $duplicateCheck['content_hash'],
+                    ]),
+                    ip: $request->ip(),
+                    userAgent: $request->userAgent(),
+                );
+
+                return response()->json([
+                    'success'  => false,
+                    'message'  => 'This image appears to have been used in a recent report. Please submit a new, original photo.',
+                    'match_type' => $duplicateCheck['match_type'],
+                ], 422);
+            }
+
+            // Soft signal: fingerprint near-duplicate (logged, does NOT block)
+            if (($duplicateCheck['match_type'] ?? null) === 'fingerprint_near_duplicate') {
+                $validated['provenance'] = 'suspicious';
+                $imageValidator->logSuspicious(
+                    userId: $request->user()->id,
+                    reportId: null,
+                    reason: 'fingerprint_near_duplicate',
+                    metadata: array_merge($validation['metadata'], [
+                        'match_type'     => $duplicateCheck['match_type'],
+                        'matched_report' => $duplicateCheck['matched_report'],
+                        'warning'        => $duplicateCheck['warning'] ?? null,
+                    ]),
+                    ip: $request->ip(),
+                    userAgent: $request->userAgent(),
+                );
             }
 
             // Layer 2: EXIF GPS verification
@@ -427,8 +878,14 @@ class ReportController extends Controller
                 $validated['gps_verification_status'] = 'verified';
             } elseif ($gpsVerificationResult['photo_lat'] === null && $gpsVerificationResult['photo_lng'] === null) {
                 $validated['gps_verification_status'] = 'no_gps_data';
+                // No EXIF GPS + no capture GPS = weak provenance
+                if ($validated['provenance'] === 'unverified_client') {
+                    $validated['provenance'] = 'suspicious';
+                }
             } else {
                 $validated['gps_verification_status'] = 'mismatched';
+                // GPS mismatch = suspicious
+                $validated['provenance'] = 'suspicious';
             }
 
             // Store the image
@@ -450,18 +907,41 @@ class ReportController extends Controller
         }
         $safetyPayload = $safety->payload([$guardTitle, $guardDesc]);
 
-        dispatch(new AnalyzeReport($report->id));
+        // AnalyzeReport is dispatched AFTER the media row and the moderation-
+        // queue entry are created (see below): the decision engine reads
+        // report_media for image evidence and updates the moderation-queue
+        // row to the final action. Dispatching earlier loses both races —
+        // guaranteed under QUEUE_CONNECTION=sync, timing-dependent with the
+        // database queue.
         dispatch(new TranslateContent('report', $report->id, 'title'));
         dispatch(new TranslateContent('report', $report->id, 'description'));
 
         app(AchievementService::class)->checkAndAwardAchievements($request->user());
 
         if (isset($path)) {
+            $mediaHash = $imageMetadata['content_hash'] ?? hash_file('sha256', \Illuminate\Support\Facades\Storage::disk('public')->path($path));
             $report->media()->create([
                 'media_url' => $path,
                 'type' => 'image',
-                'media_hash' => hash_file('sha256', \Illuminate\Support\Facades\Storage::disk('public')->path($path)),
+                'media_hash' => $mediaHash,
+                'fingerprint_hash' => $imageMetadata['fingerprint_hash'] ?? null,
             ]);
+
+            // Log soft signals (for audit trail) and update provenance
+            if (!empty($imageMetadata['no_exif_signal']) || !empty($imageMetadata['software_stamp_signal'])
+                || !empty($imageMetadata['is_animated_webp'])) {
+                if ($validated['provenance'] === 'unverified_client') {
+                    $validated['provenance'] = 'suspicious';
+                }
+                app(ImageValidationService::class)->logSuspicious(
+                    userId: $request->user()->id,
+                    reportId: $report->id,
+                    reason: 'soft_signal_detected',
+                    metadata: $imageMetadata,
+                    ip: $request->ip(),
+                    userAgent: $request->userAgent(),
+                );
+            }
         }
 
         // Add to moderation queue
@@ -480,6 +960,10 @@ class ReportController extends Controller
         } catch (\Throwable $e) {
             // Non-fatal: queue failure shouldn't block report creation
         }
+
+        // All submission artifacts now exist (report row, media row,
+        // moderation-queue entry) — safe to start the automated decision.
+        dispatch(new AnalyzeReport($report->id));
 
         // Push notifications are intentionally NOT sent at submission time:
         // users only get notified once moderators/AI approve the report
@@ -579,6 +1063,19 @@ class ReportController extends Controller
                 'message' => 'Unauthorized to delete this report.',
             ], 403);
         }
+
+        // Delete media files from storage before deleting the report
+        $mediaFiles = $report->media;
+        foreach ($mediaFiles as $media) {
+            if ($media->media_url && \Illuminate\Support\Facades\Storage::disk('report-images')->exists($media->media_url)) {
+                \Illuminate\Support\Facades\Storage::disk('report-images')->delete($media->media_url);
+            }
+        }
+
+        // Delete related data
+        $report->comments()->delete();
+        $report->reactions()->delete();
+        $report->confirmations()->delete();
 
         $report->delete();
         \App\Support\LiveFeed::bump('reports', $id);

@@ -1,7 +1,9 @@
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import '../../providers/auth_provider.dart';
+import '../profile/legal_document_screen.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -27,7 +29,19 @@ class _LoginScreenState extends State<LoginScreen> {
   Future<void> _handleGoogleLogin() async {
     HapticFeedback.lightImpact();
     final provider = context.read<AuthProvider>();
-    final success = await provider.loginWithGoogle();
+
+    // Step 1: Native Google Sign-In popup → id_token
+    final idToken = await provider.getGoogleIdToken();
+    if (idToken == null || !mounted) return;
+
+    // Step 2: Auto-send consent — required by backend for new accounts,
+    // ignored for existing users. No separate consent screen.
+    final success = await provider.loginWithGoogle(
+      idToken: idToken,
+      termsAccepted: true,
+      privacyAccepted: true,
+      ageConfirmed: true,
+    );
     if (success && mounted) {
       Navigator.of(context).pushReplacementNamed('/home');
     }
@@ -388,6 +402,49 @@ class _LoginScreenState extends State<LoginScreen> {
                 ),
               ),
             ],
+          ),
+        ),
+      ),
+      // ── Legal footer pinned at screen bottom ──
+      bottomNavigationBar: SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(24, 4, 24, 12),
+          child: Text.rich(
+            TextSpan(
+              text: 'By continuing, you agree to our ',
+              style: TextStyle(color: Colors.grey.shade500, fontSize: 12),
+              children: [
+                TextSpan(
+                  text: 'Terms & Conditions',
+                  style: const TextStyle(
+                    color: Color(0xFF00695C),
+                    fontWeight: FontWeight.w600,
+                  ),
+                  recognizer: TapGestureRecognizer()
+                    ..onTap = () => Navigator.of(context).push(
+                          MaterialPageRoute(
+                            builder: (_) => const LegalDocumentScreen(type: 'terms_conditions'),
+                          ),
+                        ),
+                ),
+                const TextSpan(text: ' and '),
+                TextSpan(
+                  text: 'Privacy Policy',
+                  style: const TextStyle(
+                    color: Color(0xFF00695C),
+                    fontWeight: FontWeight.w600,
+                  ),
+                  recognizer: TapGestureRecognizer()
+                    ..onTap = () => Navigator.of(context).push(
+                          MaterialPageRoute(
+                            builder: (_) => const LegalDocumentScreen(type: 'privacy_policy'),
+                          ),
+                        ),
+                ),
+                const TextSpan(text: '.'),
+              ],
+            ),
+            textAlign: TextAlign.center,
           ),
         ),
       ),

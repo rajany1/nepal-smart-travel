@@ -1,7 +1,9 @@
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import '../../providers/auth_provider.dart';
+import '../profile/legal_document_screen.dart';
 
 class RegisterScreen extends StatefulWidget {
   const RegisterScreen({super.key});
@@ -19,6 +21,8 @@ class _RegisterScreenState extends State<RegisterScreen> {
   bool _obscurePassword = true;
   bool _obscureConfirm = true;
   bool _agreedToTerms = false;
+  bool _agreedToPrivacy = false;
+  bool _ageConfirmed = false;
   String _passwordStrength = '';
 
   @override
@@ -32,11 +36,11 @@ class _RegisterScreenState extends State<RegisterScreen> {
 
   String _evaluatePasswordStrength(String password) {
     if (password.isEmpty) return '';
-    if (password.length < 6) return 'weak';
-    if (password.length < 8) return 'medium';
-    if (RegExp(r'[A-Z]').hasMatch(password) &&
-        RegExp(r'[0-9]').hasMatch(password) &&
-        RegExp(r'[!@#$%^&*(),.?":{}|<>]').hasMatch(password)) return 'strong';
+    if (password.length < 8) return 'weak';
+    if (!RegExp(r'[a-z]').hasMatch(password) ||
+        !RegExp(r'[A-Z]').hasMatch(password) ||
+        !RegExp(r'[0-9]').hasMatch(password)) return 'medium';
+    if (RegExp(r'[!@#$%^&*(),.?":{}|<>]').hasMatch(password)) return 'strong';
     return 'medium';
   }
 
@@ -51,10 +55,10 @@ class _RegisterScreenState extends State<RegisterScreen> {
 
   Future<void> _handleRegister() async {
     if (!_formKey.currentState!.validate()) return;
-    if (!_agreedToTerms) {
+    if (!_agreedToTerms || !_agreedToPrivacy || !_ageConfirmed) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: const Text('Please agree to Terms & Conditions'),
+          content: const Text('Please agree to all required terms and confirm your age'),
           backgroundColor: const Color(0xFFF39C12),
           behavior: SnackBarBehavior.floating,
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
@@ -69,6 +73,9 @@ class _RegisterScreenState extends State<RegisterScreen> {
       email: _emailController.text.trim(),
       password: _passwordController.text,
       passwordConfirmation: _confirmPasswordController.text,
+      termsAccepted: true,
+      privacyAccepted: true,
+      ageConfirmed: true,
     );
     if (success && mounted) {
       final email = _emailController.text.trim();
@@ -232,9 +239,15 @@ class _RegisterScreenState extends State<RegisterScreen> {
                               setState(() => _passwordStrength = _evaluatePasswordStrength(v)),
                           validator: (v) => v == null || v.isEmpty
                               ? 'Enter a password'
-                              : v.length < 6
-                                  ? 'Password must be at least 6 characters'
-                                  : null,
+                              : v.length < 8
+                                  ? 'Password must be at least 8 characters'
+                                  : !RegExp(r'[a-z]').hasMatch(v)
+                                      ? 'Password must contain a lowercase letter'
+                                      : !RegExp(r'[A-Z]').hasMatch(v)
+                                          ? 'Password must contain an uppercase letter'
+                                          : !RegExp(r'[0-9]').hasMatch(v)
+                                              ? 'Password must contain a number'
+                                              : null,
                         ),
 
                         // Password strength
@@ -305,31 +318,37 @@ class _RegisterScreenState extends State<RegisterScreen> {
                         ),
                         const SizedBox(height: 16),
 
-                        // Terms checkbox
+                        // Age confirmation
+                        GestureDetector(
+                          onTap: () =>
+                              setState(() => _ageConfirmed = !_ageConfirmed),
+                          behavior: HitTestBehavior.opaque,
+                          child: Row(
+                            children: [
+                              _CheckboxIcon(checked: _ageConfirmed),
+                              const SizedBox(width: 10),
+                              Expanded(
+                                child: Text(
+                                  'I confirm that I am 18 years or older',
+                                  style: TextStyle(
+                                    color: Colors.grey.shade600,
+                                    fontSize: 13,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+
+                        // Terms checkbox — tappable row toggles checkbox
                         GestureDetector(
                           onTap: () =>
                               setState(() => _agreedToTerms = !_agreedToTerms),
+                          behavior: HitTestBehavior.opaque,
                           child: Row(
                             children: [
-                              Container(
-                                width: 22,
-                                height: 22,
-                                decoration: BoxDecoration(
-                                  color: _agreedToTerms
-                                      ? const Color(0xFF00695C)
-                                      : Colors.transparent,
-                                  borderRadius: BorderRadius.circular(6),
-                                  border: Border.all(
-                                    color: _agreedToTerms
-                                        ? const Color(0xFF00695C)
-                                        : Colors.grey.shade300,
-                                    width: 1.5,
-                                  ),
-                                ),
-                                child: _agreedToTerms
-                                    ? const Icon(Icons.check, color: Colors.white, size: 14)
-                                    : null,
-                              ),
+                              _CheckboxIcon(checked: _agreedToTerms),
                               const SizedBox(width: 10),
                               Expanded(
                                 child: Text.rich(
@@ -339,13 +358,59 @@ class _RegisterScreenState extends State<RegisterScreen> {
                                       color: Colors.grey.shade600,
                                       fontSize: 13,
                                     ),
-                                    children: const [
+                                    children: [
                                       TextSpan(
                                         text: 'Terms & Conditions',
-                                        style: TextStyle(
+                                        style: const TextStyle(
                                           color: Color(0xFF00695C),
                                           fontWeight: FontWeight.w700,
                                         ),
+                                        recognizer: TapGestureRecognizer()
+                                          ..onTap = () => Navigator.of(context).push(
+                                                MaterialPageRoute(
+                                                  builder: (_) => const LegalDocumentScreen(type: 'terms_conditions'),
+                                                ),
+                                              ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+
+                        // Privacy checkbox — tappable row toggles checkbox
+                        GestureDetector(
+                          onTap: () =>
+                              setState(() => _agreedToPrivacy = !_agreedToPrivacy),
+                          behavior: HitTestBehavior.opaque,
+                          child: Row(
+                            children: [
+                              _CheckboxIcon(checked: _agreedToPrivacy),
+                              const SizedBox(width: 10),
+                              Expanded(
+                                child: Text.rich(
+                                  TextSpan(
+                                    text: 'I agree to the ',
+                                    style: TextStyle(
+                                      color: Colors.grey.shade600,
+                                      fontSize: 13,
+                                    ),
+                                    children: [
+                                      TextSpan(
+                                        text: 'Privacy Policy',
+                                        style: const TextStyle(
+                                          color: Color(0xFF00695C),
+                                          fontWeight: FontWeight.w700,
+                                        ),
+                                        recognizer: TapGestureRecognizer()
+                                          ..onTap = () => Navigator.of(context).push(
+                                                MaterialPageRoute(
+                                                  builder: (_) => const LegalDocumentScreen(type: 'privacy_policy'),
+                                                ),
+                                              ),
                                       ),
                                     ],
                                   ),
@@ -467,6 +532,49 @@ class _RegisterScreenState extends State<RegisterScreen> {
           ),
         ),
       ),
+      // ── Legal footer pinned at screen bottom ──
+      bottomNavigationBar: SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(24, 4, 24, 12),
+          child: Text.rich(
+            TextSpan(
+              text: 'By creating an account, you agree to our ',
+              style: TextStyle(color: Colors.grey.shade500, fontSize: 12),
+              children: [
+                TextSpan(
+                  text: 'Terms & Conditions',
+                  style: const TextStyle(
+                    color: Color(0xFF00695C),
+                    fontWeight: FontWeight.w600,
+                  ),
+                  recognizer: TapGestureRecognizer()
+                    ..onTap = () => Navigator.of(context).push(
+                          MaterialPageRoute(
+                            builder: (_) => const LegalDocumentScreen(type: 'terms_conditions'),
+                          ),
+                        ),
+                ),
+                const TextSpan(text: ' and '),
+                TextSpan(
+                  text: 'Privacy Policy',
+                  style: const TextStyle(
+                    color: Color(0xFF00695C),
+                    fontWeight: FontWeight.w600,
+                  ),
+                  recognizer: TapGestureRecognizer()
+                    ..onTap = () => Navigator.of(context).push(
+                          MaterialPageRoute(
+                            builder: (_) => const LegalDocumentScreen(type: 'privacy_policy'),
+                          ),
+                        ),
+                ),
+                const TextSpan(text: '.'),
+              ],
+            ),
+            textAlign: TextAlign.center,
+          ),
+        ),
+      ),
     );
   }
 }
@@ -523,6 +631,31 @@ class _AuthTextField extends StatelessWidget {
         ),
         contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 15),
       ),
+    );
+  }
+}
+
+// ── Reusable checkbox icon ──
+class _CheckboxIcon extends StatelessWidget {
+  final bool checked;
+  const _CheckboxIcon({required this.checked});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 22,
+      height: 22,
+      decoration: BoxDecoration(
+        color: checked ? const Color(0xFF00695C) : Colors.transparent,
+        borderRadius: BorderRadius.circular(6),
+        border: Border.all(
+          color: checked ? const Color(0xFF00695C) : Colors.grey.shade300,
+          width: 1.5,
+        ),
+      ),
+      child: checked
+          ? const Icon(Icons.check, color: Colors.white, size: 14)
+          : null,
     );
   }
 }

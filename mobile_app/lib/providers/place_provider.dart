@@ -133,8 +133,10 @@ class PlaceProvider extends ChangeNotifier {
   List<PlaceModel> _places = [];
   List<PlaceModel> _featuredPlaces = [];
   List<PlaceModel> _nepalPlaces = [];
+  List<PlaceModel> _viewportPlaces = [];
   bool _isLoading = false;
   bool _isLoadingNepal = false;
+  bool _isLoadingViewport = false;
   String? _errorMessage;
   int _selectedCategoryId = 0;
 
@@ -145,8 +147,13 @@ class PlaceProvider extends ChangeNotifier {
   /// Nepal-wide places (admin + OSM + user submitted) — the instant map
   /// dataset. Kept separate from [_places] (viewport nearby query).
   List<PlaceModel> get nepalPlaces => _nepalPlaces;
+
+  /// Viewport-specific places from the bbox API. Primary source for markers
+  /// when available. Falls back to nepalPlaces for offline/initial load.
+  List<PlaceModel> get viewportPlaces => _viewportPlaces;
   bool get isLoading => _isLoading;
   bool get isLoadingNepal => _isLoadingNepal;
+  bool get isLoadingViewport => _isLoadingViewport;
   String? get errorMessage => _errorMessage;
   int get selectedCategoryId => _selectedCategoryId;
 
@@ -225,6 +232,11 @@ class PlaceProvider extends ChangeNotifier {
 
   /// Nepal-wide places (max 1000) — fired in parallel with GPS lookup so the
   /// map paints instantly. Falls back to the SQLite cache when offline.
+  ///
+  /// NOTE: Do NOT short-circuit when [_nepalPlaces] is already populated.
+  /// [setNepalCachedPlaces] populates from SQLite cache first (instant),
+  /// but this method must always attempt the network call to get fresh data.
+  /// The API may have newer places not yet in the local cache.
   Future<void> fetchNepalPlaces({bool force = false}) async {
     if (_isLoadingNepal) return;
     if (!force && _nepalPlaces.isNotEmpty) return;
@@ -232,12 +244,11 @@ class PlaceProvider extends ChangeNotifier {
     notifyListeners();
 
     try {
-      final response = await _api.getNepalPlaces(limit: 1000);
+      final response = await _api.getNepalPlaces(limit: 15000);
       final data = (response.data['data'] as List?) ?? [];
       final places = data.map((j) => PlaceModel.fromJson(j)).toList();
       if (places.isNotEmpty) {
         _nepalPlaces = places;
-        // Nepal-wide offline cache (single bulk insert)
         try {
           await _offlineDb.cachePlacesBulk(
             data.map((j) => Map<String, dynamic>.from(j)).toList(),
@@ -249,7 +260,7 @@ class PlaceProvider extends ChangeNotifier {
     } catch (e) {
       print('Failed to fetch Nepal places: $e');
       try {
-        final cached = await _offlineDb.getAllCachedPlaces(limit: 1000);
+        final cached = await _offlineDb.getAllCachedPlaces(limit: 15000);
         if (cached.isNotEmpty) {
           _nepalPlaces = cached.map((j) => PlaceModel.fromJson(j)).toList();
         }
@@ -267,7 +278,7 @@ class PlaceProvider extends ChangeNotifier {
   Future<void> setNepalCachedPlaces() async {
     if (_nepalPlaces.isNotEmpty) return;
     try {
-      final cached = await _offlineDb.getAllCachedPlaces(limit: 1000);
+      final cached = await _offlineDb.getAllCachedPlaces(limit: 15000);
       if (cached.isNotEmpty) {
         _nepalPlaces = cached.map((j) => PlaceModel.fromJson(j)).toList();
         notifyListeners();
@@ -275,6 +286,52 @@ class PlaceProvider extends ChangeNotifier {
     } catch (e) {
       print('Failed to load cached Nepal places: $e');
     }
+  }
+
+  /// Fetch places for a specific viewport bounding box from the server.
+  /// This is the primary data source for the map — returns only places
+  /// inside the requested bbox, with zoom-aware density limiting.
+  Future<void> fetchViewportPlaces({
+    required double minLat,
+    required double maxLat,
+    required double minLng,
+    required double maxLng,
+    int? zoom,
+    String? category,
+  }) async {
+    if (_isLoadingViewport) return;
+    _isLoadingViewport = true;
+    notifyListeners();
+
+    try {
+      final response = await _api.getPlacesInBBox(
+        minLat: minLat,
+        maxLat: maxLat,
+        minLng: minLng,
+        maxLng: maxLng,
+        zoom: zoom,
+        category: category,
+        limit: 500,
+      );
+      final data = (response.data['data'] as List?) ?? [];
+      final places = data.map((j) => PlaceModel.fromJson(j)).toList();
+      if (places.isNotEmpty) {
+        _viewportPlaces = places;
+        notifyListeners();
+      }
+    } catch (e) {
+      // Viewport fetch failed — nepalPlaces remains as fallback
+      debugPrint('fetchViewportPlaces failed: $e');
+    }
+
+    _isLoadingViewport = false;
+    notifyListeners();
+  }
+
+  /// Set viewport places directly (used for client-side fallback from nepalPlaces).
+  void setViewportPlacesDirect(List<PlaceModel> places) {
+    _viewportPlaces = places;
+    notifyListeners();
   }
 
   void setCategory(int categoryId) {

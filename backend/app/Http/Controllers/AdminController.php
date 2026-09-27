@@ -27,14 +27,17 @@ use Illuminate\Support\Str;
 use Carbon\Carbon;
 use App\Models\GameSetting;
 use App\Models\AdRevenueLedger;
+use App\Support\ImageIntegrityPresenter;
 
 class AdminController extends Controller
 {
     private ModeratorService $moderatorService;
+    private ImageIntegrityPresenter $imageIntegrityPresenter;
 
-    public function __construct(ModeratorService $moderatorService)
+    public function __construct(ModeratorService $moderatorService, ?ImageIntegrityPresenter $imageIntegrityPresenter = null)
     {
         $this->moderatorService = $moderatorService;
+        $this->imageIntegrityPresenter = $imageIntegrityPresenter ?? new ImageIntegrityPresenter();
     }
 
     private function requireAdmin(Request $request): void
@@ -235,6 +238,90 @@ class AdminController extends Controller
         );
         $healthStatus = $healthScore >= 80 ? 'Excellent' : ($healthScore >= 60 ? 'Stable' : 'Needs attention');
 
+        // Attention items: permission-aware pending counts for the task queue
+        $attentionItems = [];
+        if ($user->hasPermission('approve_reports') && $pendingReports > 0) {
+            $attentionItems[] = [
+                'label' => 'Reports Awaiting Review',
+                'count' => $pendingReports,
+                'route' => route('admin.reports', ['status' => 'pending']),
+                'color' => 'amber',
+                'icon' => 'flag',
+            ];
+        }
+        if ($user->hasPermission('manage_content_safety')) {
+            $todayViolations = \App\Models\ContentViolation::whereDate('created_at', today())->count();
+            if ($todayViolations > 0) {
+                $attentionItems[] = [
+                    'label' => 'Content Violations Today',
+                    'count' => $todayViolations,
+                    'route' => route('admin.moderation', ['tab' => 'violations']),
+                    'color' => 'rose',
+                    'icon' => 'shield-alt',
+                ];
+            }
+        }
+        if ($user->hasPermission('manage_withdrawals')) {
+            $pendingWithdrawals = \App\Models\Withdrawal::where('status', 'pending')->count();
+            if ($pendingWithdrawals > 0) {
+                $attentionItems[] = [
+                    'label' => 'Withdrawals Awaiting Approval',
+                    'count' => $pendingWithdrawals,
+                    'route' => route('admin.withdrawals', ['status' => 'pending']),
+                    'color' => 'sky',
+                    'icon' => 'wallet',
+                ];
+            }
+        }
+        if ($user->hasPermission('manage_payouts')) {
+            $pendingPayouts = \App\Models\Payout::where('status', 'pending')->count();
+            if ($pendingPayouts > 0) {
+                $attentionItems[] = [
+                    'label' => 'Payouts Awaiting Processing',
+                    'count' => $pendingPayouts,
+                    'route' => route('admin.payouts', ['status' => 'pending']),
+                    'color' => 'sky',
+                    'icon' => 'money-bill-wave',
+                ];
+            }
+        }
+        if ($user->hasPermission('verify_businesses')) {
+            $pendingPartners = \App\Models\TravelPartner::where('verification_status', 'pending')->count();
+            if ($pendingPartners > 0) {
+                $attentionItems[] = [
+                    'label' => 'Partner Requests Pending',
+                    'count' => $pendingPartners,
+                    'route' => route('admin.travel-partners'),
+                    'color' => 'violet',
+                    'icon' => 'handshake',
+                ];
+            }
+        }
+        if ($user->hasPermission('manage_places')) {
+            $pendingCorrections = \App\Models\PlaceCorrection::where('status', 'pending')->count();
+            if ($pendingCorrections > 0) {
+                $attentionItems[] = [
+                    'label' => 'Place Corrections Pending',
+                    'count' => $pendingCorrections,
+                    'route' => route('admin.places.corrections'),
+                    'color' => 'amber',
+                    'icon' => 'map-marker-alt',
+                ];
+            }
+        }
+        if ($user->hasPermission('manage_alerts')) {
+            $activeSos = \App\Models\SosAlert::where('status', 'active')->count();
+            if ($activeSos > 0) {
+                $attentionItems[] = [
+                    'label' => 'Active SOS Alerts',
+                    'count' => $activeSos,
+                    'route' => route('admin.sos'),
+                    'color' => 'red',
+                    'icon' => 'exclamation-triangle',
+                ];
+            }
+        }
+
         return [
             'total_users' => $totalUsers,
             'total_reports' => $totalReports,
@@ -268,6 +355,7 @@ class AdminController extends Controller
             'is_moderator' => $isModerator,
             'moderator_permissions' => $isModerator ? $this->moderatorService->getPermissions($user) : [],
             'recent_audit_logs' => AuditLog::with('user')->latest()->take(5)->get(),
+            'attention_items' => $attentionItems,
         ];
     }
 
@@ -353,19 +441,134 @@ class AdminController extends Controller
     public function reports(Request $request)
     {
         $this->requireAdmin($request);
-        $query = Report::with('user', 'category');
+        $query = $this->reportsListQuery($request)->with('user', 'category');
         $status = $request->input('status', 'pending');
-        if ($status !== 'all') {
-            $query->where('status', $status);
-        }
-        $reports = $query->latest()->paginate(15);
+        $listParams = $this->reportListParams($request);
+
+        $reports = $query->paginate(15)->withQueryString();
         $categories = ReportCategorie::all();
         $queueCounts = [
             'pending' => ModerationQueue::pending()->byType('report')->count(),
             'approved' => ModerationQueue::where('status', 'approved')->byType('report')->count(),
             'rejected' => ModerationQueue::where('status', 'rejected')->byType('report')->count(),
         ];
-        return view('admin.reports', compact('reports', 'status', 'categories', 'queueCounts'));
+        return view('admin.reports', compact('reports', 'status', 'categories', 'queueCounts', 'listParams'));
+    }
+
+    /**
+     * Single source of truth for the admin Reports list dataset: every filter,
+     * the default status tab, and the deterministic ordering (newest first,
+     * id DESC tiebreak). The list page and the report details Previous/Next
+     * navigation both run through this builder, so navigation always traverses
+     * exactly the filtered/sorted set the list shows — never raw id arithmetic.
+     */
+    private function reportsListQuery(Request $request)
+    {
+        $query = Report::query();
+        $status = $request->input('status', 'pending');
+        if ($status !== 'all') {
+            $query->where('status', $status);
+        }
+
+        // Priority filter
+        if ($request->filled('priority')) {
+            $query->where('priority', $request->priority);
+        }
+
+        // Category filter
+        if ($request->filled('category_id')) {
+            $query->where('category_id', $request->category_id);
+        }
+
+        // GPS verification filter
+        if ($request->filled('gps')) {
+            $query->where('gps_verification_status', $request->gps);
+        }
+
+        // Date range filter
+        if ($request->filled('date_range')) {
+            switch ($request->date_range) {
+                case 'today':
+                    $query->whereDate('created_at', today());
+                    break;
+                case '7days':
+                    $query->where('created_at', '>=', now()->subDays(7));
+                    break;
+                case '30days':
+                    $query->where('created_at', '>=', now()->subDays(30));
+                    break;
+            }
+        }
+
+        // Search by title or reporter
+        if ($request->filled('search')) {
+            $search = $request->search;
+            $query->where(function ($q) use ($search) {
+                $q->where('title', 'like', "%{$search}%")
+                  ->orWhereHas('user', function ($uq) use ($search) {
+                      $uq->where('name', 'like', "%{$search}%");
+                  });
+            });
+        }
+
+        return $query->latest()->orderBy('id', 'desc');
+    }
+
+    /**
+     * The list-context query parameters worth carrying between the list and a
+     * report details page (filters, search, current page). Anything else the
+     * request happens to carry (e.g. fragment) is dropped.
+     */
+    private function reportListParams(Request $request): array
+    {
+        return array_intersect_key(
+            $request->query(),
+            array_flip(['status', 'priority', 'category_id', 'gps', 'date_range', 'search', 'page'])
+        );
+    }
+
+    /**
+     * Previous/Next neighbours of $report inside the exact dataset the Reports
+     * list shows for the given request context. Returns [null, null] when the
+     * report is not part of that filtered set (no incorrect neighbours).
+     * Two single-row queries — the table is never fetched wholesale.
+     */
+    private function reportNeighbours(Request $request, Report $report): array
+    {
+        $base = $this->reportsListQuery($request);
+
+        // Current report must exist inside the filtered/sorted dataset first.
+        if (!(clone $base)->where('id', $report->id)->exists()) {
+            return [null, null];
+        }
+
+        // List order is created_at DESC, id DESC. Previous = nearest row that
+        // sorts before the current one (smallest row still "greater"), Next =
+        // nearest row that sorts after it (greatest row still "smaller").
+        $prev = (clone $base)
+            ->reorder()
+            ->orderBy('created_at', 'asc')
+            ->orderBy('id', 'asc')
+            ->where(function ($q) use ($report) {
+                $q->where('created_at', '>', $report->created_at)
+                    ->orWhere(function ($q2) use ($report) {
+                        $q2->where('created_at', $report->created_at)
+                            ->where('id', '>', $report->id);
+                    });
+            })
+            ->value('id');
+
+        $next = (clone $base)
+            ->where(function ($q) use ($report) {
+                $q->where('created_at', '<', $report->created_at)
+                    ->orWhere(function ($q2) use ($report) {
+                        $q2->where('created_at', $report->created_at)
+                            ->where('id', '<', $report->id);
+                    });
+            })
+            ->value('id');
+
+        return [$prev !== null ? (int) $prev : null, $next !== null ? (int) $next : null];
     }
 
     public function users(Request $request)
@@ -381,7 +584,11 @@ class AdminController extends Controller
             }
         }
         $status = $request->input('status', 'all');
-        if ($status !== 'all') {
+        if ($status === 'suspicious') {
+            $query->whereHas('fraudProfile', function ($q) {
+                $q->where('is_suspicious', true);
+            });
+        } elseif ($status !== 'all') {
             $query->where('status', $status);
         }
         $search = $request->input('search');
@@ -654,6 +861,11 @@ class AdminController extends Controller
 
         $this->logAction('report.approved', 'report', $report->id, "Approved report #{$report->id}: {$report->title}");
 
+        // Redirect to next pending report if available
+        $nextPending = Report::where('status', 'pending')->where('id', '>', $report->id)->orderBy('id')->first();
+        if ($nextPending) {
+            return redirect()->route('admin.reports.view', $nextPending->id)->with('success', 'Report #' . $report->id . ' approved');
+        }
         return back()->with('success', 'Report approved');
     }
 
@@ -683,6 +895,11 @@ class AdminController extends Controller
 
         $this->logAction('report.rejected', 'report', $report->id, "Rejected report #{$report->id}: {$report->title}");
 
+        // Redirect to next pending report if available
+        $nextPending = Report::where('status', 'pending')->where('id', '>', $report->id)->orderBy('id')->first();
+        if ($nextPending) {
+            return redirect()->route('admin.reports.view', $nextPending->id)->with('success', 'Report #' . $report->id . ' rejected');
+        }
         return back()->with('success', 'Report rejected');
     }
 
@@ -692,17 +909,64 @@ class AdminController extends Controller
         $this->requirePermission('delete_reports');
 
         $report = Report::findOrFail($id);
-        $report->delete();
-
-        \App\Support\LiveFeed::bump('reports', $id);
-
-        ModerationQueue::where('content_type', 'report')
-            ->where('content_id', $id)
-            ->delete();
-
-        $this->logAction('report.deleted', 'report', $id, "Deleted report #{$id}");
+        $this->performReportDeletion($report);
 
         return back()->with('success', 'Report deleted');
+    }
+
+    /**
+     * The one report-deletion routine — single delete and bulk delete both go
+     * through it so cleanup semantics are identical. Report-owned children
+     * (media/comments/reactions/confirmations) are deleted here in PHP because
+     * this schema runs MyISAM without foreign keys, so the cascades declared in
+     * the migrations do not exist at the DB level. The moderation-queue row is
+     * dropped, the live feed is bumped, and the action is audited. Financial
+     * rows (coin transactions, ad ledgers) are never deleted or altered.
+     */
+    private function performReportDeletion(Report $report): void
+    {
+        DB::table('report_media')->where('report_id', $report->id)->delete();
+        DB::table('report_comments')->where('report_id', $report->id)->delete();
+        DB::table('report_reactions')->where('report_id', $report->id)->delete();
+        DB::table('report_confirmations')->where('report_id', $report->id)->delete();
+
+        $report->delete();
+
+        \App\Support\LiveFeed::bump('reports', $report->id);
+
+        ModerationQueue::where('content_type', 'report')
+            ->where('content_id', $report->id)
+            ->delete();
+
+        $this->logAction('report.deleted', 'report', $report->id, "Deleted report #{$report->id}");
+    }
+
+    public function bulkDeleteReports(Request $request)
+    {
+        $this->requireAdmin($request);
+        $this->requirePermission('delete_reports');
+
+        // Server-side validation: array shape + every id must be a real report.
+        $validated = $request->validate([
+            'ids' => ['required', 'array'],
+            'ids.*' => ['integer', 'distinct', 'exists:reports,id'],
+        ]);
+
+        // Re-check against the database before touching anything.
+        $reports = Report::whereIn('id', array_map('intval', $validated['ids']))->get();
+        if ($reports->isEmpty()) {
+            return back()->with('error', 'No reports selected');
+        }
+
+        DB::transaction(function () use ($reports) {
+            foreach ($reports as $report) {
+                $this->performReportDeletion($report);
+            }
+        });
+
+        $deleted = $reports->count();
+
+        return back()->with('success', "{$deleted} reports deleted");
     }
 
     public function reportDetails(Request $request, $id)
@@ -712,7 +976,17 @@ class AdminController extends Controller
         $queueItem = ModerationQueue::where('content_type', 'report')
             ->where('content_id', $report->id)
             ->first();
-        return view('admin.report_details', compact('report', 'queueItem'));
+
+        // Previous/Next + Back all preserve the current Reports list context
+        // (status/category/priority/GPS/date/search filters and the page).
+        $listParams = $this->reportListParams($request);
+        [$prevReportId, $nextReportId] = $this->reportNeighbours($request, $report);
+
+        // Image Integrity: pure display transform of already-stored data.
+        // No AI calls, no image reads, no recomputation — observability only.
+        $imageIntegrity = $this->imageIntegrityPresenter->build($report);
+
+        return view('admin.report_details', compact('report', 'queueItem', 'prevReportId', 'nextReportId', 'imageIntegrity', 'listParams'));
     }
 
     // ============ USER ACTIONS ============
@@ -885,6 +1159,314 @@ class AdminController extends Controller
         $this->logAction('alert.deleted', 'alert', $id, "Deleted alert #{$id}: {$alert->title}");
 
         return back()->with('success', 'Alert deleted');
+    }
+
+    // ============ REPORT CATEGORY MANAGEMENT ============
+
+    public function reportCategories(Request $request)
+    {
+        $this->requireAdmin($request);
+        $this->requirePermission('manage_alerts');
+
+        $categories = ReportCategorie::with(['group', 'options', 'fields'])
+            ->orderBy('sort_order')
+            ->paginate(20);
+
+        $groups = ReportCategoryGroup::where('is_active', true)->orderBy('sort_order')->get();
+
+        return view('admin.report_categories', compact('categories', 'groups'));
+    }
+
+    public function reportCategoryGroups(Request $request)
+    {
+        $this->requireAdmin($request);
+        $this->requirePermission('manage_alerts');
+
+        $groups = ReportCategoryGroup::orderBy('sort_order')->paginate(20);
+
+        return view('admin.report_category_groups', compact('groups'));
+    }
+
+    public function createReportCategoryGroup(Request $request)
+    {
+        $this->requireAdmin($request);
+        $this->requirePermission('manage_alerts');
+
+        $validated = $request->validate([
+            'name' => 'required|string|max:255',
+            'slug' => 'required|string|max:255|unique:report_category_groups,slug',
+            'name_ne' => 'nullable|string|max:255',
+            'description' => 'nullable|string',
+            'description_ne' => 'nullable|string',
+            'icon' => 'nullable|string|max:100',
+            'icon_type' => 'nullable|string|max:50',
+            'icon_color' => 'nullable|string|max:20',
+            'icon_background' => 'nullable|string|max:20',
+            'sort_order' => 'nullable|integer|min:0',
+            'is_active' => 'nullable|boolean',
+            'is_emergency_group' => 'nullable|boolean',
+        ]);
+
+        $group = ReportCategoryGroup::create($validated);
+
+        $this->logAction('report_category_group.created', 'report_category_group', $group->id, "Created group: {$validated['name']}");
+
+        return back()->with('success', 'Category group created');
+    }
+
+    public function updateReportCategoryGroup(Request $request, $id)
+    {
+        $this->requireAdmin($request);
+        $this->requirePermission('manage_alerts');
+
+        $group = ReportCategoryGroup::findOrFail($id);
+
+        $validated = $request->validate([
+            'name' => 'required|string|max:255',
+            'slug' => 'required|string|max:255|unique:report_category_groups,slug,' . $id,
+            'name_ne' => 'nullable|string|max:255',
+            'description' => 'nullable|string',
+            'description_ne' => 'nullable|string',
+            'icon' => 'nullable|string|max:100',
+            'icon_type' => 'nullable|string|max:50',
+            'icon_color' => 'nullable|string|max:20',
+            'icon_background' => 'nullable|string|max:20',
+            'sort_order' => 'nullable|integer|min:0',
+            'is_active' => 'nullable|boolean',
+            'is_emergency_group' => 'nullable|boolean',
+        ]);
+
+        $group->update($validated);
+
+        $this->logAction('report_category_group.updated', 'report_category_group', $group->id, "Updated group: {$validated['name']}");
+
+        return back()->with('success', 'Category group updated');
+    }
+
+    public function deleteReportCategoryGroup(Request $request, $id)
+    {
+        $this->requireAdmin($request);
+        $this->requirePermission('manage_alerts');
+
+        $group = ReportCategoryGroup::findOrFail($id);
+        $name = $group->name;
+        $group->delete();
+
+        $this->logAction('report_category_group.deleted', 'report_category_group', $id, "Deleted group: {$name}");
+
+        return back()->with('success', 'Category group deleted');
+    }
+
+    public function createReportCategory(Request $request)
+    {
+        $this->requireAdmin($request);
+        $this->requirePermission('manage_alerts');
+
+        $validated = $request->validate([
+            'name' => 'required|string|max:255',
+            'slug' => 'required|string|max:255|unique:report_categories,slug',
+            'icon' => 'nullable|string|max:100',
+            'description' => 'nullable|string',
+            'description_ne' => 'nullable|string',
+            'category_group_id' => 'nullable|exists:report_category_groups,id',
+            'sort_order' => 'nullable|integer|min:0',
+            'is_active' => 'nullable|boolean',
+            'is_featured' => 'nullable|boolean',
+            'is_emergency' => 'nullable|boolean',
+        ]);
+
+        $category = ReportCategorie::create($validated);
+
+        $this->logAction('report_category.created', 'report_category', $category->id, "Created category: {$validated['name']}");
+
+        return back()->with('success', 'Report category created');
+    }
+
+    public function updateReportCategory(Request $request, $id)
+    {
+        $this->requireAdmin($request);
+        $this->requirePermission('manage_alerts');
+
+        $category = ReportCategorie::findOrFail($id);
+
+        $validated = $request->validate([
+            'name' => 'required|string|max:255',
+            'slug' => 'required|string|max:255|unique:report_categories,slug,' . $id,
+            'icon' => 'nullable|string|max:100',
+            'description' => 'nullable|string',
+            'description_ne' => 'nullable|string',
+            'category_group_id' => 'nullable|exists:report_category_groups,id',
+            'sort_order' => 'nullable|integer|min:0',
+            'is_active' => 'nullable|boolean',
+            'is_featured' => 'nullable|boolean',
+            'is_emergency' => 'nullable|boolean',
+        ]);
+
+        $category->update($validated);
+
+        $this->logAction('report_category.updated', 'report_category', $category->id, "Updated category: {$validated['name']}");
+
+        return back()->with('success', 'Report category updated');
+    }
+
+    public function deleteReportCategory(Request $request, $id)
+    {
+        $this->requireAdmin($request);
+        $this->requirePermission('manage_alerts');
+
+        $category = ReportCategorie::findOrFail($id);
+        $name = $category->name;
+        $category->delete();
+
+        $this->logAction('report_category.deleted', 'report_category', $id, "Deleted category: {$name}");
+
+        return back()->with('success', 'Report category deleted');
+    }
+
+    public function createReportCategoryOption(Request $request, $categoryId)
+    {
+        $this->requireAdmin($request);
+        $this->requirePermission('manage_alerts');
+
+        $category = ReportCategorie::findOrFail($categoryId);
+
+        $validated = $request->validate([
+            'name' => 'required|string|max:255',
+            'slug' => 'required|string|max:255|unique:report_category_options,slug',
+            'name_ne' => 'nullable|string|max:255',
+            'description' => 'nullable|string',
+            'description_ne' => 'nullable|string',
+            'icon' => 'nullable|string|max:100',
+            'icon_type' => 'nullable|string|max:50',
+            'sort_order' => 'nullable|integer|min:0',
+            'is_active' => 'nullable|boolean',
+            'requires_photo' => 'nullable|boolean',
+            'requires_location' => 'nullable|boolean',
+        ]);
+
+        $validated['category_id'] = $category->id;
+        $option = ReportCategoryOption::create($validated);
+
+        $this->logAction('report_category_option.created', 'report_category_option', $option->id, "Created option: {$validated['name']} for category {$category->name}");
+
+        return back()->with('success', 'Category option created');
+    }
+
+    public function updateReportCategoryOption(Request $request, $id)
+    {
+        $this->requireAdmin($request);
+        $this->requirePermission('manage_alerts');
+
+        $option = ReportCategoryOption::findOrFail($id);
+
+        $validated = $request->validate([
+            'name' => 'required|string|max:255',
+            'slug' => 'required|string|max:255|unique:report_category_options,slug,' . $id,
+            'name_ne' => 'nullable|string|max:255',
+            'description' => 'nullable|string',
+            'description_ne' => 'nullable|string',
+            'icon' => 'nullable|string|max:100',
+            'icon_type' => 'nullable|string|max:50',
+            'sort_order' => 'nullable|integer|min:0',
+            'is_active' => 'nullable|boolean',
+            'requires_photo' => 'nullable|boolean',
+            'requires_location' => 'nullable|boolean',
+        ]);
+
+        $option->update($validated);
+
+        $this->logAction('report_category_option.updated', 'report_category_option', $option->id, "Updated option: {$validated['name']}");
+
+        return back()->with('success', 'Category option updated');
+    }
+
+    public function deleteReportCategoryOption(Request $request, $id)
+    {
+        $this->requireAdmin($request);
+        $this->requirePermission('manage_alerts');
+
+        $option = ReportCategoryOption::findOrFail($id);
+        $name = $option->name;
+        $option->delete();
+
+        $this->logAction('report_category_option.deleted', 'report_category_option', $id, "Deleted option: {$name}");
+
+        return back()->with('success', 'Category option deleted');
+    }
+
+    public function createReportCategoryField(Request $request, $categoryId)
+    {
+        $this->requireAdmin($request);
+        $this->requirePermission('manage_alerts');
+
+        $category = ReportCategorie::findOrFail($categoryId);
+
+        $validated = $request->validate([
+            'name' => 'required|string|max:100',
+            'label' => 'required|string|max:255',
+            'label_ne' => 'nullable|string|max:255',
+            'placeholder' => 'nullable|string',
+            'placeholder_ne' => 'nullable|string',
+            'type' => 'required|string|in:single_select,multi_select,text,textarea,number,photo,location,severity,date,time,yes_no',
+            'required' => 'nullable|boolean',
+            'sort_order' => 'nullable|integer|min:0',
+            'options' => 'nullable|array',
+            'validation' => 'nullable|array',
+            'help_text' => 'nullable|string',
+            'help_text_ne' => 'nullable|string',
+            'show_in_preview' => 'nullable|boolean',
+        ]);
+
+        $validated['category_id'] = $category->id;
+        $field = ReportCategoryField::create($validated);
+
+        $this->logAction('report_category_field.created', 'report_category_field', $field->id, "Created field: {$validated['name']} for category {$category->name}");
+
+        return back()->with('success', 'Category field created');
+    }
+
+    public function updateReportCategoryField(Request $request, $id)
+    {
+        $this->requireAdmin($request);
+        $this->requirePermission('manage_alerts');
+
+        $field = ReportCategoryField::findOrFail($id);
+
+        $validated = $request->validate([
+            'name' => 'required|string|max:100',
+            'label' => 'required|string|max:255',
+            'label_ne' => 'nullable|string|max:255',
+            'placeholder' => 'nullable|string',
+            'placeholder_ne' => 'nullable|string',
+            'type' => 'required|string|in:single_select,multi_select,text,textarea,number,photo,location,severity,date,time,yes_no',
+            'required' => 'nullable|boolean',
+            'sort_order' => 'nullable|integer|min:0',
+            'options' => 'nullable|array',
+            'validation' => 'nullable|array',
+            'help_text' => 'nullable|string',
+            'help_text_ne' => 'nullable|string',
+            'show_in_preview' => 'nullable|boolean',
+        ]);
+
+        $field->update($validated);
+
+        $this->logAction('report_category_field.updated', 'report_category_field', $field->id, "Updated field: {$validated['name']}");
+
+        return back()->with('success', 'Category field updated');
+    }
+
+    public function deleteReportCategoryField(Request $request, $id)
+    {
+        $this->requireAdmin($request);
+        $this->requirePermission('manage_alerts');
+
+        $field = ReportCategoryField::findOrFail($id);
+        $name = $field->name;
+        $field->delete();
+
+        $this->logAction('report_category_field.deleted', 'report_category_field', $id, "Deleted field: {$name}");
+
+        return back()->with('success', 'Category field deleted');
     }
 
     public function sosAlerts(Request $request)
@@ -1226,12 +1808,15 @@ class AdminController extends Controller
         $validated = $request->validate([
             'title' => 'required|string|max:255',
             'description' => 'required|string',
+            'title_ne' => 'nullable|string|max:255',
+            'description_ne' => 'nullable|string',
             'alert_type' => 'required|string',
             'severity' => 'required|in:info,low,medium,high,critical',
             'affected_district' => 'required|string',
             'latitude' => 'nullable|numeric|between:-90,90',
             'longitude' => 'nullable|numeric|between:-180,180',
             'is_broadcast' => 'nullable|boolean',
+            'expires_at' => 'nullable|date',
         ]);
 
         // Broadcast alerts target everyone — location is not needed.
@@ -1253,6 +1838,138 @@ class AdminController extends Controller
         return back()->with('success', 'Alert created');
     }
 
+    public function translateAlert(Request $request)
+    {
+        $this->requireAdmin($request);
+        $this->requirePermission('manage_alerts');
+
+        $validated = $request->validate([
+            'title' => 'nullable|string|max:255',
+            'description' => 'nullable|string',
+            'source_language' => 'nullable|in:english,roman_nepali',
+        ]);
+
+        $title = $validated['title'] ?? '';
+        $description = $validated['description'] ?? '';
+        $sourceLanguage = $validated['source_language'] ?? 'roman_nepali';
+
+        if (empty($title) && empty($description)) {
+            return response()->json([
+                'success' => false,
+                'message' => 'No content provided for translation.',
+            ], 422);
+        }
+
+        $translator = app(\App\Services\RomanNepaliTranslationService::class);
+
+        try {
+            $results = $translator->translateAlert($title, $description);
+
+            $response = [
+                'success' => true,
+                'title_ne' => $results['title_ne'],
+                'description_ne' => $results['description_ne'],
+                'source_language' => $sourceLanguage,
+            ];
+
+            if (!empty($results['errors'])) {
+                $response['warnings'] = $results['errors'];
+            }
+
+            if (empty($results['title_ne']) && empty($results['description_ne'])) {
+                $response['success'] = false;
+                $response['message'] = 'Translation unavailable. The AI service may be temporarily unavailable or the content could not be translated. You can still manually enter Nepali text.';
+            }
+
+            return response()->json($response);
+        } catch (\App\Exceptions\AiRateLimitException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Translation service is rate limited. Please try again in a moment.',
+                'rate_limited' => true,
+            ], 429);
+        } catch (\Exception $e) {
+            \Log::error('Alert translation error: ' . $e->getMessage());
+            return response()->json([
+                'success' => false,
+                'message' => 'Translation failed due to a technical error. You can still manually enter Nepali text.',
+            ], 500);
+        }
+    }
+
+    public function previewAlert(Request $request)
+    {
+        $this->requireAdmin($request);
+        $this->requirePermission('manage_alerts');
+
+        $validated = $request->validate([
+            'title' => 'required|string|max:255',
+            'description' => 'required|string',
+            'alert_type' => 'required|string',
+            'severity' => 'required|in:info,low,medium,high,critical',
+            'affected_district' => 'nullable|string',
+            'title_ne' => 'nullable|string|max:255',
+            'description_ne' => 'nullable|string',
+            'language' => 'nullable|in:english,nepali',
+        ]);
+
+        $language = $validated['language'] ?? 'english';
+
+        $displayTitle = $language === 'nepali' && !empty($validated['title_ne'])
+            ? $validated['title_ne']
+            : $validated['title'];
+        $displayDescription = $language === 'nepali' && !empty($validated['description_ne'])
+            ? $validated['description_ne']
+            : $validated['description'];
+
+        $severityColors = [
+            'info' => 'bg-blue-100 text-blue-800 border-blue-200',
+            'low' => 'bg-green-100 text-green-800 border-green-200',
+            'medium' => 'bg-yellow-100 text-yellow-800 border-yellow-200',
+            'high' => 'bg-orange-100 text-orange-800 border-orange-200',
+            'critical' => 'bg-red-100 text-red-800 border-red-200',
+        ];
+
+        $severityIcons = [
+            'info' => 'fa-info-circle text-blue-600',
+            'low' => 'fa-bell text-green-600',
+            'medium' => 'fa-exclamation-triangle text-yellow-600',
+            'high' => 'fa-exclamation-circle text-orange-600',
+            'critical' => 'fa-skull-crossbones text-red-600',
+        ];
+
+        $alertTypeLabels = [
+            'earthquake' => 'Earthquake',
+            'flood' => 'Flood',
+            'landslide' => 'Landslide',
+            'weather' => 'Weather',
+            'strike' => 'Strike/Bandh',
+            'emergency' => 'Emergency',
+            'system' => 'System Notice',
+        ];
+
+        $severity = $validated['severity'];
+        $alertType = $validated['alert_type'];
+        $district = $validated['affected_district'] ?? 'All Areas';
+
+        $previewHtml = view('admin.partials.alert_preview', [
+            'title' => $displayTitle,
+            'description' => $displayDescription,
+            'alert_type' => $alertType,
+            'alert_type_label' => $alertTypeLabels[$alertType] ?? ucfirst($alertType),
+            'severity' => $severity,
+            'severity_class' => $severityColors[$severity] ?? $severityColors['info'],
+            'severity_icon' => $severityIcons[$severity] ?? $severityIcons['info'],
+            'district' => $district,
+            'language' => $language,
+        ])->render();
+
+        return response()->json([
+            'success' => true,
+            'html' => $previewHtml,
+        ]);
+    }
+
     public function settings(Request $request)
     {
         $this->requireAdmin($request);
@@ -1268,7 +1985,7 @@ class AdminController extends Controller
             'place_submit_xp' => GameSetting::getValue('place_submit_xp', 1),
             'xp_per_npr_ratio' => GameSetting::getValue('xp_per_npr_ratio', 1),
             'ad_cpm' => GameSetting::getValue('ad_cpm', 50),
-            'ad_cpc' => GameSetting::getValue('ad_cpc', 10),
+            'ad_cpc' => GameSetting::getValue('ad_cpc', 0.50),
             'ad_freq_cap' => GameSetting::getValue('ad_freq_cap', 3),
             'offer_commission_percent' => GameSetting::getValue('offer_commission_percent', 10),
             'payout_min_esewa' => GameSetting::getValue('payout_min_esewa', 100),
@@ -1648,6 +2365,9 @@ class AdminController extends Controller
         $reports = Report::whereIn('status', ['approved', 'pending'])
             ->whereNotNull('latitude')
             ->whereNotNull('longitude')
+            ->where('created_at', '>=', now()->subDays(7))
+            ->latest('created_at')
+            ->limit(200)
             ->get()
             ->map(function ($r) {
                 return [
@@ -1670,6 +2390,9 @@ class AdminController extends Controller
         })
             ->whereNotNull('latitude')
             ->whereNotNull('longitude')
+            ->where('created_at', '>=', now()->subDays(7))
+            ->latest('created_at')
+            ->limit(100)
             ->get()
             ->map(function ($a) {
                 return [
@@ -1699,59 +2422,25 @@ class AdminController extends Controller
         ]);
     }
 
-    public function liveMapPlaces(Request $request)
+    public function liveMapLandmarks(Request $request)
     {
-        // A full-Nepal load is large (~77k rows) — give this admin-only AJAX
-        // call headroom instead of crashing on the default 128M limit.
-        ini_set('memory_limit', '512M');
-        set_time_limit(120);
-
-        $district = trim((string) $request->query('district', 'all'));
-        $ids = $request->query('ids')
-            ? array_values(array_filter(array_map('intval', explode(',', (string) $request->query('ids')))))
-            : [];
-
-        $query = DB::table('places')
+        $places = DB::table('places')
             ->leftJoin('place_categories as c', 'c.id', '=', 'places.category_id')
             ->select([
-                'places.id',
-                'places.name',
-                'places.district',
-                'places.latitude',
-                'places.longitude',
-                'places.average_rating',
-                'places.total_reviews',
-                'places.is_verified',
-                'c.name as category',
-                'c.icon as icon',
+                'places.id', 'places.name', 'places.district',
+                'places.latitude', 'places.longitude',
+                'places.average_rating', 'places.total_reviews', 'places.is_verified',
+                'c.name as category', 'c.icon as icon',
             ])
             ->where('places.is_active', true)
             ->whereNotNull('places.latitude')
-            ->whereNotNull('places.longitude');
-
-        if ($district !== 'all') {
-            $query->where('places.district', $district);
-        }
-
-        if ($ids !== []) {
-            $query->whereIn('places.id', $ids);
-        }
-
-        $places = $query->get();
-
-        // Images only for single districts / small delta loads; skipped for full-Nepal.
-        $images = collect();
-        if ($district !== 'all' || $ids !== []) {
-            $images = DB::table('place_images')
-                ->whereIn('place_id', $places->pluck('id'))
-                ->select('place_id', 'image_url')
-                ->get()
-                ->groupBy('place_id');
-        }
+            ->whereNotNull('places.longitude')
+            ->whereIn('c.name', ['Attractions', 'Nature', 'Recreation'])
+            ->limit(500)
+            ->get();
 
         $urlPrefix = url('/admin/places/');
-        $result = $places->map(function ($p) use ($images, $urlPrefix) {
-            $img = $images->get($p->id)?->first();
+        $result = $places->map(function ($p) use ($urlPrefix) {
             return [
                 'id' => $p->id,
                 'type' => 'place',
@@ -1760,22 +2449,102 @@ class AdminController extends Controller
                 'description' => null,
                 'latitude' => (float) $p->latitude,
                 'longitude' => (float) $p->longitude,
-                'category' => $p->category ?: 'Uncategorized',
+                'category' => $p->category ?: 'Landmark',
                 'icon' => $p->icon ?: 'map-marker-alt',
-                'color' => '#00695C',
-                'status' => $p->is_verified ? 'verified' : 'unverified',
-                'image' => $img ? asset('storage/' . $img->image_url) : null,
-                'rating' => (float) ($p->average_rating ?? 0),
-                'reviews_count' => (int) ($p->total_reviews ?? 0),
-                'url' => $urlPrefix . $p->id,
+                'color' => '#16a34a',
+                'status' => $p->is_verified ? 'verified' : 'place',
+                'rating' => $p->average_rating ? (float) $p->average_rating : null,
+                'reviews_count' => $p->total_reviews ?? 0,
+                'url' => $urlPrefix . '/' . $p->id,
             ];
         });
+
+        return response()->json(['success' => true, 'places' => $result, 'count' => $result->count()]);
+    }
+
+    public function liveMapPlaces(Request $request)
+    {
+        $district = trim((string) $request->query('district', 'all'));
+        $ids = $request->query('ids')
+            ? array_values(array_filter(array_map('intval', explode(',', (string) $request->query('ids')))))
+            : [];
+
+        // Use Redis-cached places (separate cache from public API to avoid
+        // shape conflicts — admin needs all places for live map)
+        $allPlaces = Cache::remember(\App\Services\PlacesCache::adminAllKey(), \App\Services\PlacesCache::ALL_TTL, function () {
+            return Place::with(['category'])->active()
+                ->whereIn('source', ['admin', 'osm', 'user_submitted'])
+                ->whereNotNull('latitude')
+                ->whereNotNull('longitude')
+                ->orderBy('name')
+                ->get()
+                ->map(fn($p) => [
+                    'id' => $p->id,
+                    'name' => $p->name,
+                    'district' => $p->district,
+                    'latitude' => (float) $p->latitude,
+                    'longitude' => (float) $p->longitude,
+                    'category' => $p->category?->name ?? 'Uncategorized',
+                    'icon' => $p->category?->icon ?? 'map-marker-alt',
+                    'is_verified' => $p->is_verified,
+                    'average_rating' => $p->average_rating,
+                    'total_reviews' => $p->total_reviews,
+                ])
+                ->values()
+                ->toArray();
+        });
+
+        // In-memory filter: exclude landmarks (they show as text labels)
+        $filtered = array_values(array_filter($allPlaces, fn($p) =>
+            !in_array($p['category'], ['Attractions', 'Nature', 'Recreation'], true)
+        ));
+
+        if ($district !== 'all') {
+            $filtered = array_values(array_filter($filtered, fn($p) => $p['district'] === $district));
+        }
+
+        if ($ids !== []) {
+            $idSet = array_flip($ids);
+            $filtered = array_values(array_filter($filtered, fn($p) => isset($idSet[$p['id']])));
+        }
+
+        // Images only for single districts / small delta loads
+        $images = collect();
+        if (($district !== 'all' || $ids !== []) && count($filtered) < 200) {
+            $placeIds = array_column($filtered, 'id');
+            $images = DB::table('place_images')
+                ->whereIn('place_id', $placeIds)
+                ->select('place_id', 'image_url')
+                ->get()
+                ->groupBy('place_id');
+        }
+
+        $urlPrefix = url('/admin/places/');
+        $result = array_map(function ($p) use ($images, $urlPrefix) {
+            $img = $images->get($p['id'])?->first();
+            return [
+                'id' => $p['id'],
+                'type' => 'place',
+                'name' => $p['name'],
+                'district' => $p['district'],
+                'latitude' => $p['latitude'],
+                'longitude' => $p['longitude'],
+                'category' => $p['category'],
+                'icon' => $p['icon'],
+                'color' => '#00695C',
+                'status' => ($p['is_verified'] ?? false) ? 'verified' : 'unverified',
+                'image' => $img ? asset('storage/' . $img->image_url) : null,
+                'rating' => (float) ($p['average_rating'] ?? 0),
+                'reviews_count' => (int) ($p['total_reviews'] ?? 0),
+                'url' => $urlPrefix . $p['id'],
+            ];
+        }, $filtered);
 
         return response()->json([
             'success' => true,
             'district' => $district,
-            'count' => $result->count(),
-            'places' => $result->values(),
+            'count' => count($result),
+            'places' => array_values($result),
         ]);
     }
 

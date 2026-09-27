@@ -14,6 +14,7 @@ import 'package:share_plus/share_plus.dart';
 import '../../core/utils/share_helper.dart';
 import '../../config/themes/app_theme.dart';
 import '../../providers/report_provider.dart';
+import '../../providers/travel_context_provider.dart';
 import '../../core/models/report.dart';
 import '../../core/models/report_comment.dart';
 import '../../core/models/ad_campaign.dart';
@@ -34,6 +35,8 @@ import '../../providers/ad_provider.dart';
 import '../places/utils/route_polyline_utils.dart';
 import '../../widgets/ad_cards.dart';
 import '../profile/user_public_profile_screen.dart';
+import 'widgets/category_selection_sheet.dart';
+import 'widgets/category_form_sheet.dart';
 
 class ReportsListScreen extends StatefulWidget {
   const ReportsListScreen({super.key});
@@ -49,18 +52,44 @@ class _ReportsListScreenState extends State<ReportsListScreen>
   late final ReportProvider _reportProvider;
   double? _userLat;
   double? _userLng;
+  String _searchQuery = '';
+  int _selectedTabIndex = 0;
 
   @override
   void initState() {
     super.initState();
     _tabController = TabController(length: 2, vsync: this);
+    _selectedTabIndex = _tabController.index;
     _tabController.addListener(_onTabChanged);
     _reportProvider = context.read<ReportProvider>();
     _loadInitialData();
   }
 
   void _onTabChanged() {
-    if (mounted) setState(() {});
+    // TabController notifies on every animation tick during animateTo.
+    // Only rebuild the segment chrome when the selected index actually flips.
+    final index = _tabController.index;
+    if (index != _selectedTabIndex) {
+      _selectedTabIndex = index;
+      if (mounted) setState(() {});
+    }
+    // My Route: refresh ranked intelligence with journey progress when opened
+    // (after the transition settles — same as before).
+    if (index == 1 && !_tabController.indexIsChanging) {
+      unawaited(_refreshRouteIntel());
+    }
+  }
+
+  Future<void> _refreshRouteIntel({double? lat, double? lng}) async {
+    final tc = context.read<TravelContextProvider>();
+    if (!tc.hasContext || tc.isLoadingIntel) return;
+    // Prefer a live fix so journey progress / ahead-vs-passed stay accurate.
+    final loc = await _locationService.getLastKnownPosition() ??
+        await _locationService.getCurrentLocation();
+    final useLat = loc?.latitude ?? lat ?? _userLat;
+    final useLng = loc?.longitude ?? lng ?? _userLng;
+    if (!mounted) return;
+    await tc.fetchIntelligence(currentLat: useLat, currentLng: useLng);
   }
 
   Future<void> _loadInitialData() async {
@@ -75,7 +104,6 @@ class _ReportsListScreenState extends State<ReportsListScreen>
       }
     }));
     await provider.refreshAll();
-    await provider.fetchEmergencyReports(lat: _userLat, lng: _userLng, radiusKm: 20.0);
     if (mounted) provider.startAutoRefresh();
     // Preload ad campaigns for feed injection
     unawaited(context.read<AdProvider>().fetchActiveAds(feed: AdFeed.report, adContext: 'report', limit: 6));
@@ -93,6 +121,10 @@ class _ReportsListScreenState extends State<ReportsListScreen>
 
   @override
   Widget build(BuildContext context) {
+    // Narrow subscription: rebuild this screen only when the category filter
+    // changes — not on every ReportProvider notification (60s poll, reactions…).
+    final categoryId =
+        context.select<ReportProvider, int?>((p) => p.selectedCategoryId);
     return AnnotatedRegion<SystemUiOverlayStyle>(
       value: const SystemUiOverlayStyle(
         statusBarColor: AppTheme.backgroundColor,
@@ -142,8 +174,8 @@ class _ReportsListScreenState extends State<ReportsListScreen>
                         _buildTabSegment(0, Icons.history,
                             context.t('Recent'), AppTheme.primaryColor),
                         const SizedBox(width: 4),
-                        _buildTabSegment(1, Icons.warning,
-                            context.t('Emergency'), AppTheme.errorColor),
+                        _buildTabSegment(1, Icons.route,
+                            context.t('My Route'), AppTheme.infoColor),
                       ],
                     ),
                   ),
@@ -160,10 +192,13 @@ class _ReportsListScreenState extends State<ReportsListScreen>
                     userLng: _userLng,
                     onStatusTap: () => _showSubmitReportSheet(context),
                   ),
-                  _EmergencyReportsTab(
+                  _RouteReportsTab(
                     userLat: _userLat,
                     userLng: _userLng,
+                    searchQuery: _searchQuery,
+                    categoryId: categoryId,
                     onStatusTap: () => _showSubmitReportSheet(context),
+                    onRefreshIntel: _refreshRouteIntel,
                   ),
 ],
               ),
@@ -259,19 +294,13 @@ class _ReportsListScreenState extends State<ReportsListScreen>
     _searchDebounce?.cancel();
     _searchDebounce = Timer(const Duration(milliseconds: 400), () {
       if (!mounted) return;
+      setState(() => _searchQuery = query.trim());
       final searchTerm = query.trim().isEmpty ? null : query.trim();
       provider.fetchReports(
         search: searchTerm,
         lat: _userLat,
         lng: _userLng,
         radiusKm: 20.0,
-      );
-      provider.fetchEmergencyReports(
-        search: searchTerm,
-        lat: _userLat,
-        lng: _userLng,
-        radiusKm: 20.0,
-        refresh: true,
       );
     });
   }
@@ -280,13 +309,31 @@ class _ReportsListScreenState extends State<ReportsListScreen>
     // Guest mode: creating a report is an action → requires login.
     if (!await requireLogin(context)) return;
     if (!context.mounted) return;
-    // After returning from a successful login the auth state is updated, so
-    // re-check before opening the sheet.
-    if (!context.read<AuthProvider>().isAuthenticated) return;
+
+    final reportProvider = context.read<ReportProvider>();
+
+    // Show category selection sheet first
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
-      builder: (ctx) => const _SubmitReportSheet(),
+      backgroundColor: Colors.transparent,
+      builder: (ctx) => CategorySelectionSheet(
+        onCategorySelected: (category) {
+          Navigator.pop(ctx); // Close category selection
+          // Show category-specific form
+          showModalBottomSheet(
+            context: context,
+            isScrollControlled: true,
+            backgroundColor: Colors.transparent,
+            builder: (ctx) => CategoryFormSheet(
+              category: category,
+              initialLat: _userLat,
+              initialLng: _userLng,
+              initialDistrict: null,
+            ),
+          );
+        },
+      ),
     );
   }
 
@@ -472,6 +519,69 @@ class _SearchFilterBarState extends State<_SearchFilterBar> {
   }
 }
 
+// ============ STABLE FEED COMPOSITION ============
+// Same report IDs/order + same ad IDs/order → same ad slots across rebuilds.
+// Placement is seeded from those inputs (not a fresh Random each build).
+
+String _stableFeedKey(List<ReportModel> reports, List<AdCampaignModel> ads) {
+  final sb = StringBuffer('r:');
+  for (final r in reports) {
+    sb
+      ..write(r.id)
+      ..write(',');
+  }
+  sb.write('|a:');
+  for (final a in ads) {
+    sb
+      ..write(a.id)
+      ..write(',');
+  }
+  return sb.toString();
+}
+
+List<dynamic> _composeStableFeed(
+  List<ReportModel> reports,
+  List<AdCampaignModel> ads,
+  String seedKey,
+) {
+  final feed = <dynamic>[];
+  int adIndex = 0;
+  final random = math.Random(seedKey.hashCode);
+
+  for (int i = 0; i < reports.length; i++) {
+    feed.add(reports[i]);
+    if (i < reports.length - 1 && adIndex < ads.length && random.nextDouble() < 0.25) {
+      feed.add(ads[adIndex++]);
+    }
+  }
+
+  // Guarantee at least 1 ad if we have ads and 2+ reports
+  if (adIndex == 0 && ads.isNotEmpty && reports.length >= 2) {
+    final pos = 1 + random.nextInt(reports.length - 1);
+    feed.insert(pos, ads[adIndex++]);
+  }
+
+  return feed;
+}
+
+/// Map cached feed entries onto the *current* ReportModel/AdCampaignModel
+/// instances so field updates (reactions, counts) still render without
+/// changing ad slots.
+List<dynamic> _hydrateFeed(
+  List<dynamic> feed,
+  List<ReportModel> reports,
+  List<AdCampaignModel> ads,
+) {
+  final reportById = <String, ReportModel>{for (final r in reports) r.id: r};
+  final adById = <int, AdCampaignModel>{for (final a in ads) a.id: a};
+  return List<dynamic>.generate(feed.length, (i) {
+    final item = feed[i];
+    if (item is ReportModel) return reportById[item.id] ?? item;
+    if (item is AdCampaignModel) return adById[item.id] ?? item;
+    return item;
+  });
+}
+
 // ============ RECENT REPORTS TAB ============
 class _RecentReportsTab extends StatefulWidget {
   final double? userLat;
@@ -484,27 +594,17 @@ class _RecentReportsTab extends StatefulWidget {
 }
 
 class _RecentReportsTabState extends State<_RecentReportsTab> {
-  /// Facebook-style feed: ads randomly inserted after reports (~25% chance each)
+  String? _feedKeyCache;
+  List<dynamic>? _feedCache;
+
+  /// Memoized stable feed: recompute only when report/ad ID inputs change.
   List<dynamic> _buildFeed(List<ReportModel> reports, List<AdCampaignModel> ads) {
-    final feed = <dynamic>[];
-    int adIndex = 0;
-    final random = math.Random();
-
-    for (int i = 0; i < reports.length; i++) {
-      feed.add(reports[i]);
-      // After each report (except last), randomly insert an ad
-      if (i < reports.length - 1 && adIndex < ads.length && random.nextDouble() < 0.25) {
-        feed.add(ads[adIndex++]);
-      }
+    final key = _stableFeedKey(reports, ads);
+    if (key != _feedKeyCache || _feedCache == null) {
+      _feedCache = _composeStableFeed(reports, ads, key);
+      _feedKeyCache = key;
     }
-
-    // Guarantee at least 1 ad if we have ads and 2+ reports
-    if (adIndex == 0 && ads.isNotEmpty && reports.length >= 2) {
-      final pos = 1 + random.nextInt(reports.length - 1);
-      feed.insert(pos, ads[adIndex++]);
-    }
-
-    return feed;
+    return _hydrateFeed(_feedCache!, reports, ads);
   }
 
   @override
@@ -537,8 +637,8 @@ class _RecentReportsTabState extends State<_RecentReportsTab> {
               itemCount: feed.length + 2 + (provider.isLoadingMore ? 1 : 0),
               itemBuilder: (context, index) {
                 if (index == 0) return _StatusCard(onTap: widget.onStatusTap);
-                if (index == 1) return Padding(padding: const EdgeInsets.only(bottom: 8, left: 4, top: 8), child: Text('${filtered.length} ${filtered.length == 1 ? context.t('report') : context.t('reports')} ${context.t('near you')}', style: const TextStyle(color: AppTheme.textSecondary)));
-                if (index > feed.length + 1) return const Padding(padding: EdgeInsets.all(16), child: Center(child: CircularProgressIndicator(strokeWidth: 2)));
+                if (index == 1) return Padding(key: const ValueKey('recent-count'), padding: const EdgeInsets.only(bottom: 8, left: 4, top: 8), child: Text('${filtered.length} ${filtered.length == 1 ? context.t('report') : context.t('reports')} ${context.t('near you')}', style: const TextStyle(color: AppTheme.textSecondary)));
+                if (index > feed.length + 1) return const Padding(key: ValueKey('recent-loading-more'), padding: EdgeInsets.all(16), child: Center(child: CircularProgressIndicator(strokeWidth: 2)));
                 final item = feed[index - 2];
                 if (item is AdCampaignModel) {
                   // Find nearest report above this ad for coin crediting
@@ -548,7 +648,12 @@ class _RecentReportsTabState extends State<_RecentReportsTab> {
                   }
                   return AdReportCard(key: ValueKey('ad-report-${item.id}'), ad: item, reportId: nearestReportId, adContext: 'report');
                 }
-                return _ReportCard(report: item as ReportModel, showStatusBadge: true);
+                final report = item as ReportModel;
+                return _ReportCard(
+                  key: ValueKey('report-${report.id}'),
+                  report: report,
+                  showStatusBadge: true,
+                );
               },
             ),
           ),
@@ -575,87 +680,216 @@ class _RecentReportsShimmer extends StatelessWidget {
   }
 }
 
-// ============ EMERGENCY REPORTS TAB ============
-class _EmergencyReportsTab extends StatefulWidget {
+// ============ MY ROUTE TAB (route-aware reports) ============
+class _RouteReportsTab extends StatefulWidget {
   final double? userLat;
   final double? userLng;
+  final String searchQuery;
+  final int? categoryId;
   final VoidCallback onStatusTap;
-  const _EmergencyReportsTab({this.userLat, this.userLng, required this.onStatusTap});
+  final Future<void> Function({double? lat, double? lng}) onRefreshIntel;
+
+  const _RouteReportsTab({
+    this.userLat,
+    this.userLng,
+    this.searchQuery = '',
+    this.categoryId,
+    required this.onStatusTap,
+    required this.onRefreshIntel,
+  });
 
   @override
-  State<_EmergencyReportsTab> createState() => _EmergencyReportsTabState();
+  State<_RouteReportsTab> createState() => _RouteReportsTabState();
 }
 
-class _EmergencyReportsTabState extends State<_EmergencyReportsTab> {
-  final ScrollController _scrollController = ScrollController();
+class _RouteReportsTabState extends State<_RouteReportsTab> {
+  String? _feedKeyCache;
+  List<dynamic>? _feedCache;
 
   @override
   void initState() {
     super.initState();
-    _scrollController.addListener(_onScroll);
+    // First open with a route already set → load intel once.
+    WidgetsBinding.instance.addPostFrameCallback((_) => _ensureIntel());
   }
 
-  @override
-  void dispose() {
-    _scrollController.removeListener(_onScroll);
-    _scrollController.dispose();
-    super.dispose();
+  Future<void> _ensureIntel() async {
+    if (!mounted) return;
+    final tc = context.read<TravelContextProvider>();
+    if (!tc.hasContext) return;
+    if (tc.intelligence != null || tc.isLoadingIntel) return;
+    await tc.fetchIntelligence(
+      currentLat: widget.userLat,
+      currentLng: widget.userLng,
+    );
   }
 
-  void _onScroll() {
-    if (_scrollController.position.extentAfter < 300) {
-      context.read<ReportProvider>().fetchMoreEmergencyReports();
-    }
+  List<ReportModel> _routeReports(TravelContextProvider tc) {
+    final intel = tc.intelligence;
+    if (intel == null) return const [];
+    final q = widget.searchQuery.toLowerCase();
+    return intel.reports
+        .where((item) {
+          if (widget.categoryId != null &&
+              item.raw['category_id'] != widget.categoryId) {
+            return false;
+          }
+          if (q.isEmpty) return true;
+          final title = item.title.toLowerCase();
+          final desc = (item.description ?? '').toLowerCase();
+          return title.contains(q) || desc.contains(q);
+        })
+        .map((item) => ReportModel.fromJson(item.raw))
+        .toList();
   }
 
-  /// Facebook-style feed: ads randomly inserted after reports (~25% chance each)
+  /// Memoized stable feed: recompute only when report/ad ID inputs change.
   List<dynamic> _buildFeed(List<ReportModel> reports, List<AdCampaignModel> ads) {
-    final feed = <dynamic>[];
-    int adIndex = 0;
-    final random = math.Random();
-
-    for (int i = 0; i < reports.length; i++) {
-      feed.add(reports[i]);
-      if (i < reports.length - 1 && adIndex < ads.length && random.nextDouble() < 0.25) {
-        feed.add(ads[adIndex++]);
-      }
+    final key = _stableFeedKey(reports, ads);
+    if (key != _feedKeyCache || _feedCache == null) {
+      _feedCache = _composeStableFeed(reports, ads, key);
+      _feedKeyCache = key;
     }
-
-    if (adIndex == 0 && ads.isNotEmpty && reports.length >= 2) {
-      final pos = 1 + random.nextInt(reports.length - 1);
-      feed.insert(pos, ads[adIndex++]);
-    }
-
-    return feed;
+    return _hydrateFeed(_feedCache!, reports, ads);
   }
 
   @override
   Widget build(BuildContext context) {
     final ads = context.watch<AdProvider>().reportAds;
-    return Consumer<ReportProvider>(
-      builder: (context, provider, child) {
-        if (provider.isLoading && provider.emergencyReports.isEmpty) return const _RecentReportsShimmer();
-        final emergencyReports = provider.emergencyReports;
-        if (emergencyReports.isEmpty && !provider.isLoading) return _emptyState(context, icon: Icons.check_circle, message: context.t('No emergencies reported'), subtitle: context.t('Everything looks safe in your area'), iconColor: AppTheme.successColor.withOpacity(0.5), iconSize: 80, messageStyle: const TextStyle(fontSize: AppTheme.textXl, fontWeight: FontWeight.w600, color: AppTheme.textPrimary), onTap: widget.onStatusTap);
-        final feed = _buildFeed(emergencyReports, ads);
+    final isGuest = !context.watch<AuthProvider>().isAuthenticated;
+    return Consumer<TravelContextProvider>(
+      builder: (context, tc, child) {
+        final showSaveBanner = isGuest && tc.hasContext;
+        // Route set (e.g. returned from Travel Context) → load intel once.
+        if (tc.hasContext &&
+            tc.intelligence == null &&
+            !tc.isLoadingIntel &&
+            tc.intelError == null) {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (!mounted) return;
+            final cur = context.read<TravelContextProvider>();
+            if (cur.hasContext &&
+                cur.intelligence == null &&
+                !cur.isLoadingIntel) {
+              unawaited(cur.fetchIntelligence(
+                currentLat: widget.userLat,
+                currentLng: widget.userLng,
+              ));
+            }
+          });
+        }
+        // No route selected → explicit empty state (do not fake nearby data).
+        if (!tc.hasContext) {
+          return _emptyState(
+            context,
+            icon: Icons.route_outlined,
+            message: context.t('No route selected'),
+            subtitle: context.t('Set a route to see reports along your journey.'),
+            iconColor: AppTheme.primaryColor.withOpacity(0.35),
+            onTap: () => Navigator.pushNamed(context, '/travel-context'),
+            buttonLabel: 'Set a route',
+          );
+        }
+        if (tc.isLoadingIntel && tc.intelligence == null) {
+          return const _RecentReportsShimmer();
+        }
+        if (tc.intelError != null && tc.intelligence == null) {
+          return Center(child: Column(mainAxisSize: MainAxisSize.min, children: [
+            const Icon(Icons.cloud_off, size: 64, color: AppTheme.textSecondary),
+            const SizedBox(height: 16),
+            Text(tc.intelError!, style: const TextStyle(color: AppTheme.textSecondary)),
+            const SizedBox(height: 8),
+            ElevatedButton.icon(
+              onPressed: () => widget.onRefreshIntel(lat: widget.userLat, lng: widget.userLng),
+              icon: const Icon(Icons.refresh),
+              label: Text(context.t('Retry')),
+            ),
+          ]));
+        }
+
+        final reports = _routeReports(tc);
+        if (reports.isEmpty) {
+          return RefreshIndicator(
+            onRefresh: () => widget.onRefreshIntel(lat: widget.userLat, lng: widget.userLng),
+            child: LayoutBuilder(
+              builder: (context, constraints) => SingleChildScrollView(
+                physics: const AlwaysScrollableScrollPhysics(),
+                child: ConstrainedBox(
+                  constraints: BoxConstraints(minHeight: constraints.maxHeight),
+                    child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      if (showSaveBanner)
+                        const _GuestSaveRouteBanner(key: ValueKey('guest-save-route')),
+                      _emptyState(
+                        context,
+                        icon: Icons.check_circle,
+                        message: context.t('No reports along your route'),
+                        subtitle: context.t('Nothing relevant on this journey right now'),
+                        iconColor: AppTheme.successColor.withOpacity(0.5),
+                        iconSize: 80,
+                        messageStyle: const TextStyle(
+                            fontSize: AppTheme.textXl,
+                            fontWeight: FontWeight.w600,
+                            color: AppTheme.textPrimary),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          );
+        }
+
+        final feed = _buildFeed(reports, ads);
+        final progress = tc.context?.journey?.progress;
         return RefreshIndicator(
-          onRefresh: () => provider.fetchEmergencyReports(lat: widget.userLat, lng: widget.userLng, radiusKm: 20.0, refresh: true),
+          onRefresh: () => widget.onRefreshIntel(lat: widget.userLat, lng: widget.userLng),
           child: ListView.builder(
-            controller: _scrollController,
             padding: const EdgeInsets.all(12),
-            itemCount: feed.length + 2,
+            itemCount: feed.length + 2 + (showSaveBanner ? 1 : 0),
             itemBuilder: (context, index) {
+              if (showSaveBanner) {
+                if (index == 0)
+                  return const _GuestSaveRouteBanner(
+                      key: ValueKey('guest-save-route'));
+                index -= 1;
+              }
               if (index == 0) return _StatusCard(onTap: widget.onStatusTap);
-              if (index == 1) return Padding(padding: const EdgeInsets.only(bottom: 12, left: 4, top: 8), child: Row(children: [const Icon(Icons.warning_amber, color: AppTheme.errorColor, size: 20), const SizedBox(width: 8), Text('${emergencyReports.length} ${emergencyReports.length == 1 ? context.t('emergency report') : context.t('emergency reports')}', style: const TextStyle(color: AppTheme.errorColor, fontWeight: FontWeight.w600))]));
+              if (index == 1) {
+                return Padding(
+                  key: const ValueKey('route-count'),
+                  padding: const EdgeInsets.only(bottom: 12, left: 4, top: 8),
+                  child: Row(children: [
+                    const Icon(Icons.route, color: AppTheme.infoColor, size: 20),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        '${reports.length} ${reports.length == 1 ? context.t('report') : context.t('reports')} ${context.t('along your route')}'
+                        '${progress != null ? ' · ${(progress * 100).round()}% ${context.t('along')}' : ''}',
+                        style: const TextStyle(
+                            color: AppTheme.infoColor, fontWeight: FontWeight.w600),
+                      ),
+                    ),
+                  ]),
+                );
+              }
               final item = feed[index - 2];
-                if (item is AdCampaignModel) {
-                  dynamic nearestReportId;
-                  for (int j = index - 3; j >= 0; j--) {
-                    if (feed[j] is ReportModel) { nearestReportId = feed[j].id; break; }
-                  }
-                  return AdReportCard(key: ValueKey('ad-emergency-${item.id}'), ad: item, reportId: nearestReportId, adContext: 'report');
+              if (item is AdCampaignModel) {
+                dynamic nearestReportId;
+                for (int j = index - 3; j >= 0; j--) {
+                  if (feed[j] is ReportModel) { nearestReportId = feed[j].id; break; }
                 }
-                return _ReportCard(report: item as ReportModel, highlightEmergency: true);
+                return AdReportCard(key: ValueKey('ad-route-${item.id}'), ad: item, reportId: nearestReportId, adContext: 'report');
+              }
+              final report = item as ReportModel;
+              // Emergency severity is preserved via report.priority / isEmergency.
+              return _ReportCard(
+                key: ValueKey('report-${report.id}'),
+                report: report,
+                highlightEmergency: report.isEmergency,
+              );
             },
           ),
         );
@@ -680,6 +914,58 @@ class _CategoryChip extends StatelessWidget {
           const SizedBox(width: 6),
           Text(label, style: TextStyle(fontSize: AppTheme.textSm, fontWeight: selected ? FontWeight.w600 : FontWeight.normal, color: selected ? Colors.white : AppTheme.textSecondary)),
         ]),
+      ),
+    );
+  }
+}
+
+/// Non-intrusive prompt for guests with an active route: log in to persist
+/// it across cold starts. Shown only when unauthenticated + route is set.
+class _GuestSaveRouteBanner extends StatelessWidget {
+  const _GuestSaveRouteBanner({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12, top: 4),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        color: AppTheme.infoColor.withOpacity(0.08),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppTheme.infoColor.withOpacity(0.25)),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.map_outlined, color: AppTheme.infoColor, size: 28),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  context.t('Keep this route for your next trip'),
+                  style: const TextStyle(
+                    fontWeight: FontWeight.w600,
+                    fontSize: AppTheme.textBase,
+                    color: AppTheme.textPrimary,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  context.t('Log in to save your route and pick it up on your next trip.'),
+                  style: const TextStyle(
+                    fontSize: AppTheme.textSm,
+                    color: AppTheme.textSecondary,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pushNamed(context, '/login'),
+            child: Text(context.t('Log in')),
+          ),
+        ],
       ),
     );
   }
@@ -716,7 +1002,7 @@ Color _getReportCategoryColor(String? icon) {
 // ============ REPORT CARD ============
 class _ReportCard extends StatelessWidget {
   final ReportModel report; final bool highlightEmergency; final bool showStatusBadge;
-  const _ReportCard({required this.report, this.highlightEmergency = false, this.showStatusBadge = false});
+  const _ReportCard({super.key, required this.report, this.highlightEmergency = false, this.showStatusBadge = false});
 
   @override
   Widget build(BuildContext context) {
@@ -1034,7 +1320,7 @@ class _ReportMapScreenState extends State<_ReportMapScreen> {
               userAgentPackageName: 'np.com.nepalsmarttravel',
               minZoom: 6.0,
               maxZoom: 19,
-              // tileProvider: _offlineTiles,
+              tileProvider: _offlineTiles,
             ),
             if (_routePoints.length > 1)
               PolylineLayer(
@@ -1429,264 +1715,19 @@ class _Badge extends StatelessWidget {
   }
 }
 
-// ============ SUBMIT REPORT SHEET ============
-class _SubmitReportSheet extends StatefulWidget {
-  const _SubmitReportSheet();
-  @override State<_SubmitReportSheet> createState() => _SubmitReportSheetState();
-}
-
-class _SubmitReportSheetState extends State<_SubmitReportSheet> {
-  final _formKey = GlobalKey<FormState>();
-  final Map<String, dynamic> _formValues = {};
-  bool _isSubmitting = false;
-  bool _isLoadingLocation = true;
-  double? _lat; double? _lng; String? _district;
-  bool _configReady = false;
-  final CameraService _cameraService = CameraService();
-  final CaptureLocationService _captureLocationService = CaptureLocationService();
-  XFile? _capturedPhoto;
-  bool _isCapturingPhoto = false;
-
-  @override void initState() { super.initState(); _initialize(); }
-
-  Future<void> _initialize() async {
-    final provider = context.read<ReportProvider>();
-    if (provider.formConfig == null) await provider.fetchFormConfig();
-    if (provider.categories.isEmpty) await provider.fetchCategories();
-    final loc = LocationService(); final pos = await loc.getCurrentLocation();
-    if (pos != null && mounted) {
-      setState(() { _lat = pos.latitude; _lng = pos.longitude; _isLoadingLocation = false; });
-      final address = await loc.getAddressFromCoordinates(pos.latitude, pos.longitude);
-      if (address != null && mounted) { final parts = address.split(','); if (parts.length >= 2) setState(() => _district = parts[1].trim()); }
-    } else if (mounted) setState(() { _lat = null; _lng = null; _isLoadingLocation = false; });
-    if (mounted) setState(() => _configReady = true);
-  }
-
-  @override void dispose() { super.dispose(); }
-
-  Future<void> _capturePhoto() async {
-    final tooLargeMsg = context.tr('Photo is too large. Max 5MB.');
-    final captureFailMsg = context.tr('Failed to capture photo.');
-    setState(() => _isCapturingPhoto = true);
-    try {
-      // Open the camera immediately — never block on a slow high-accuracy GPS
-      // fix. Pre-capture GPS was blocking the button up to ~25s.
-      final photo = await _cameraService.capturePhoto(
-        maxWidth: 1600,
-        maxHeight: 1600,
-        imageQuality: 88,
-      );
-      if (photo != null && mounted) {
-        if (await CameraService.isWithinSizeLimit(photo)) {
-          setState(() => _capturedPhoto = photo);
-          // Capture capture-time GPS in the background (no UI blocking).
-          unawaited(_refreshCaptureLocation());
-        } else {
-          await CameraService.cleanUp(photo);
-          if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(tooLargeMsg), backgroundColor: AppTheme.errorColor));
-        }
-      }
-    } catch (e) { if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(captureFailMsg), backgroundColor: AppTheme.errorColor)); }
-    if (mounted) setState(() => _isCapturingPhoto = false);
-  }
-
-  /// Grab capture-time GPS coords off the UI thread, and upgrade the report
-  /// pin with them when they arrive. Never blocks the photo/submit flow.
-  Future<void> _refreshCaptureLocation() async {
-    await _captureLocationService.captureLocationAfterPhoto();
-    if (!mounted || !_captureLocationService.hasCaptureLocation) return;
-    setState(() {
-      _lat = _captureLocationService.captureLatitude;
-      _lng = _captureLocationService.captureLongitude;
-    });
-  }
-
-  Future<void> _retakePhoto() async { if (_capturedPhoto != null) await CameraService.cleanUp(_capturedPhoto!); setState(() => _capturedPhoto = null); await _capturePhoto(); }
-
-  void _showBioPrompt(BuildContext context, AuthProvider auth) {
-    showModalBottomSheet(
-      context: context,
-      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
-      builder: (ctx) {
-        final bioController = TextEditingController();
-        return Padding(
-          padding: EdgeInsets.fromLTRB(24, 24, 24, MediaQuery.of(ctx).viewInsets.bottom + 24),
-          child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Center(child: Container(width: 40, height: 4, decoration: BoxDecoration(color: Colors.grey.shade300, borderRadius: BorderRadius.circular(2)))),
-            const SizedBox(height: 16),
-            Text(context.t('Add a Bio'), style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w600)),
-            const SizedBox(height: 4),
-            Text(context.t('Tell others about yourself. This shows on your profile.'), style: TextStyle(color: Colors.grey.shade600, fontSize: 13)),
-            const SizedBox(height: 16),
-            TextField(
-              controller: bioController,
-              maxLines: 3,
-              maxLength: 200,
-              decoration: InputDecoration(hintText: context.t('e.g. Traveler, foodie, Kathmandu local...'), border: OutlineInputBorder(borderRadius: BorderRadius.circular(12))),
-            ),
-            const SizedBox(height: 16),
-            Row(children: [
-              Expanded(child: OutlinedButton(onPressed: () => Navigator.pop(ctx), child: Text(context.t('Later')))),
-              const SizedBox(width: 12),
-              Expanded(child: ElevatedButton(
-                onPressed: () async {
-                  final bio = bioController.text.trim();
-                  if (bio.isEmpty) return;
-                  await auth.updateProfile({'bio': bio});
-                  if (ctx.mounted) Navigator.pop(ctx);
-                },
-                child: Text(context.t('Save')),
-              )),
-            ]),
-          ]),
-        );
-      },
-    );
-  }
-
-  Future<void> _submitReport() async {
-    if (!_formKey.currentState!.validate()) return;
-    final provider = context.read<ReportProvider>();
-    final captureMsg = context.tr('Please capture a live photo.');
-    final fileMissingMsg = context.tr('Photo file missing.');
-    final locUnavailableMsg = context.tr('Location unavailable. Please enable GPS and try again.');
-    final successMsg = context.tr('Report submitted!');
-    if (_capturedPhoto == null) { ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(captureMsg), backgroundColor: AppTheme.errorColor)); return; }
-    if (!await File(_capturedPhoto!.path).exists()) { ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(fileMissingMsg), backgroundColor: AppTheme.errorColor)); return; }
-    setState(() => _isSubmitting = true);
-    // Reuse the pin already captured during photo/screen init — do NOT block
-    // submit on another high-accuracy GPS fix (was a 10-25s spinner).
-    if (_lat == null || _lng == null) {
-      if (mounted) {
-        setState(() => _isSubmitting = false);
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(locUnavailableMsg),
-            backgroundColor: AppTheme.errorColor,
-          ),
-        );
-      }
-      return;
-    }
-    final success = await provider.submitReport(
-      description: _formValues['description']?.toString() ?? '',
-      latitude: _lat!,
-      longitude: _lng!,
-      district: _district,
-      photoPath: _capturedPhoto?.path,
-      captureLatitude: _captureLocationService.captureLatitude,
-      captureLongitude: _captureLocationService.captureLongitude,
-    );
-    _captureLocationService.clear();
-    if (mounted) {
-      setState(() => _isSubmitting = false);
-      if (success) {
-        if (_capturedPhoto != null) CameraService.cleanUp(_capturedPhoto!);
-        Navigator.pop(context);
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(successMsg), backgroundColor: AppTheme.successColor));
-        provider.fetchReports(lat: _lat, lng: _lng, radiusKm: 20.0);
-        provider.fetchMyReports();
-
-        final auth = context.read<AuthProvider>();
-        if (auth.user?.bio == null || auth.user!.bio!.trim().isEmpty) {
-          _showBioPrompt(context, auth);
-        }
-      }
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final provider = context.watch<ReportProvider>(); final formConfig = provider.formConfig;
-    return Padding(padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom, left: 20, right: 20, top: 20),
-      child: Form(key: _formKey, child: SingleChildScrollView(child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, mainAxisSize: MainAxisSize.min, children: [
-        Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [Text(formConfig != null ? '${formConfig.submitButtonText}' : context.t('Submit Report'), style: const TextStyle(fontSize: AppTheme.text2xl, fontWeight: FontWeight.bold)), IconButton(onPressed: () => Navigator.pop(context), icon: const Icon(Icons.close))]),
-        const SizedBox(height: 16),
-        if (formConfig == null || !_configReady) Padding(padding: const EdgeInsets.symmetric(vertical: 24), child: Center(child: Column(children: [const CircularProgressIndicator(strokeWidth: 2), const SizedBox(height: 12), Text(context.t('Loading...'), style: const TextStyle(color: AppTheme.textSecondary))])))
-        else ...[
-          ...formConfig.fields.map((field) => Padding(padding: const EdgeInsets.only(bottom: 12), child: DynamicFormField(config: field, currentValue: _formValues[field.name], categories: provider.categories, onChanged: (v) => setState(() => _formValues[field.name] = v)))),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-            margin: const EdgeInsets.only(bottom: 12),
-            decoration: BoxDecoration(
-              color: (_lat != null ? AppTheme.successColor : AppTheme.errorColor).withOpacity(0.08),
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: Row(children: [
-              if (_isLoadingLocation)
-                const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
-              else
-                Icon(_lat != null ? Icons.gps_fixed : Icons.gps_off, size: 18, color: _lat != null ? AppTheme.successColor : AppTheme.errorColor),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Text(
-                  _isLoadingLocation
-                      ? context.t('Getting your location...')
-                      : _district != null
-                          ? _district!
-                          : _lat != null
-                              ? context.t('Location detected')
-                              : context.t('GPS needed for photo & report'),
-                  style: TextStyle(fontSize: AppTheme.textSm, fontWeight: FontWeight.w600, color: _lat != null ? AppTheme.successColor : AppTheme.errorColor),
-                ),
-              ),
-            ]),
-          ),
-          if (_capturedPhoto != null) ...[ClipRRect(borderRadius: BorderRadius.circular(8), child: Stack(children: [Image.file(File(_capturedPhoto!.path), height: 160, width: double.infinity, fit: BoxFit.cover), Positioned(top: 8, right: 8, child: GestureDetector(onTap: _retakePhoto, child: Container(padding: const EdgeInsets.all(6), decoration: BoxDecoration(color: Colors.black54, borderRadius: BorderRadius.circular(20)), child: const Icon(Icons.refresh, color: Colors.white, size: 18))))])), const SizedBox(height: 8)]
-          else
-            GestureDetector(
-              onTap: _isCapturingPhoto ? null : _capturePhoto,
-              child: Container(
-                height: 110,
-                decoration: BoxDecoration(
-                  color: AppTheme.primaryLight.withOpacity(0.06),
-                  borderRadius: BorderRadius.circular(14),
-                  border: Border.all(color: AppTheme.primaryColor.withOpacity(0.4), width: 1.5),
-                ),
-                child: _isCapturingPhoto
-                    ? const Center(child: CircularProgressIndicator(strokeWidth: 2))
-                    : Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-                        const Icon(Icons.photo_camera_outlined, size: 30, color: AppTheme.primaryColor),
-                        const SizedBox(height: 6),
-                        Text(context.t('Tap to capture live photo'), style: TextStyle(fontSize: AppTheme.textSm, color: AppTheme.textSecondary)),
-                      ]),
-              ),
-            ),
-          const SizedBox(height: 8),
-          SizedBox(
-            height: 50,
-            child: ElevatedButton(
-              onPressed: _isSubmitting ? null : _submitReport,
-              style: ElevatedButton.styleFrom(
-                backgroundColor: AppTheme.primaryColor,
-                foregroundColor: Colors.white,
-                elevation: 0,
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-              ),
-              child: _isSubmitting
-                  ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                  : Text(formConfig?.submitButtonText ?? context.t('Submit'), style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
-            ),
-          ),
-        ],
-      ]))),
-    );
-  }
-}
-
 // ============ EMPTY STATE ============
-Widget _emptyState(BuildContext context, {required IconData icon, required String message, String? subtitle, Color? iconColor, double iconSize = 64, TextStyle? messageStyle, VoidCallback? onTap}) {
+Widget _emptyState(BuildContext context, {required IconData icon, required String message, String? subtitle, Color? iconColor, double iconSize = 64, TextStyle? messageStyle, VoidCallback? onTap, String? buttonLabel}) {
   return Center(child: Column(mainAxisSize: MainAxisSize.min, children: [
     Icon(icon, size: iconSize, color: iconColor ?? AppTheme.textSecondary.withOpacity(0.3)),
     const SizedBox(height: 16),
-    Text(message, style: messageStyle ?? const TextStyle(color: AppTheme.textSecondary)),
-    if (subtitle != null) ...[const SizedBox(height: 8), Text(subtitle, style: const TextStyle(color: AppTheme.textSecondary, fontSize: AppTheme.textSm + 1))],
+    Text(message, style: messageStyle ?? const TextStyle(color: AppTheme.textSecondary), textAlign: TextAlign.center),
+    if (subtitle != null) ...[const SizedBox(height: 8), Text(subtitle, style: const TextStyle(color: AppTheme.textSecondary, fontSize: AppTheme.textSm + 1), textAlign: TextAlign.center)],
     if (onTap != null) ...[
       const SizedBox(height: 24),
       ElevatedButton.icon(
         onPressed: onTap,
-        icon: const Icon(Icons.add),
-        label: Text(context.t('Create Report')),
+        icon: Icon(buttonLabel != null ? Icons.route : Icons.add),
+        label: Text(context.t(buttonLabel ?? 'Create Report')),
         style: ElevatedButton.styleFrom(
           padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
         ),

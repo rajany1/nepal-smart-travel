@@ -9,8 +9,8 @@ return new class extends Migration
     public function up(): void
     {
         Schema::table('users', function (Blueprint $table) {
-            $table->json('badges')->default('[]');
-            $table->json('expertise_regions')->default('[]');
+            $table->json('badges')->nullable();
+            $table->json('expertise_regions')->nullable();
             $table->integer('total_reports')->default(0);
             $table->decimal('approval_rate', 5, 2)->default(0.00);
             $table->integer('rank')->default(0);

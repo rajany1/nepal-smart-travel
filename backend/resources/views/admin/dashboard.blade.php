@@ -2,6 +2,41 @@
 @section('title', 'Dashboard')
 
 @section('content')
+    {{-- Requires Your Attention --}}
+    @if(count($stats['attention_items']) > 0)
+    <div class="mb-6 rounded-2xl border border-amber-200 bg-amber-50 p-5">
+        <div class="flex items-center gap-3 mb-4">
+            <span class="inline-flex h-9 w-9 items-center justify-center rounded-xl bg-amber-500 text-white"><i class="fas fa-exclamation-circle text-sm"></i></span>
+            <div>
+                <h2 class="text-base font-semibold text-slate-900">Requires Your Attention</h2>
+                <p class="text-xs text-amber-700">Actionable items needing your review</p>
+            </div>
+        </div>
+        <div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            @foreach($stats['attention_items'] as $item)
+            <a href="{{ $item['route'] }}" class="group flex items-center gap-3 rounded-xl border border-{{ $item['color'] }}-200 bg-white p-4 transition hover:shadow-md hover:border-{{ $item['color'] }}-300">
+                <span class="inline-flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-xl bg-{{ $item['color'] }}-100 text-{{ $item['color'] }}-600">
+                    <i class="fas fa-{{ $item['icon'] }}"></i>
+                </span>
+                <div class="min-w-0 flex-1">
+                    <p class="text-sm font-medium text-slate-900 truncate">{{ $item['label'] }}</p>
+                    <p class="text-xs text-slate-500">Click to review →</p>
+                </div>
+                <span class="inline-flex items-center rounded-full bg-{{ $item['color'] }}-100 px-2.5 py-1 text-sm font-bold text-{{ $item['color'] }}-700">{{ $item['count'] }}</span>
+            </a>
+            @endforeach
+        </div>
+    </div>
+    @else
+    <div class="mb-6 rounded-2xl border border-emerald-200 bg-emerald-50 p-5 flex items-center gap-3">
+        <span class="inline-flex h-9 w-9 items-center justify-center rounded-xl bg-emerald-500 text-white"><i class="fas fa-check text-sm"></i></span>
+        <div>
+            <h2 class="text-base font-semibold text-slate-900">All caught up</h2>
+            <p class="text-xs text-emerald-700">No pending items require your attention right now.</p>
+        </div>
+    </div>
+    @endif
+
     <div class="mb-6 grid gap-6 lg:grid-cols-[2fr_1fr]">
         <div class="space-y-4 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
             <div class="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">

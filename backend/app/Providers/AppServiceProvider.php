@@ -5,12 +5,14 @@ namespace App\Providers;
 use Illuminate\Support\ServiceProvider;
 use Illuminate\Support\Facades\Blade;
 use Illuminate\Support\Facades\Gate;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Pagination\Paginator;
 use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\RateLimiter;
 use App\Services\Ai\AiFallbackRouter;
 use App\Services\Ai\AiProviderInterface;
+use App\Services\RomanNepaliTranslationService;
 
 class AppServiceProvider extends ServiceProvider
 {
@@ -19,10 +21,15 @@ class AppServiceProvider extends ServiceProvider
         $this->app->bind(AiProviderInterface::class, function () {
             return AiFallbackRouter::textChain();
         });
+
+        $this->app->singleton(RomanNepaliTranslationService::class, function ($app) {
+            return new RomanNepaliTranslationService();
+        });
     }
 
     public function boot(): void
     {
+        Schema::defaultStringLength(100);
         Paginator::useTailwind();
 
         Gate::before(function ($user, $ability) {
@@ -160,6 +167,21 @@ class AppServiceProvider extends ServiceProvider
         // SOS activation — max 5 per hour per user
         RateLimiter::for('sos', function (Request $request) {
             return Limit::perHour(5)->by('sos:' . $request->user()?->id);
+        });
+
+        // Withdrawal requests — max 10 per hour per user
+        RateLimiter::for('withdrawal', function (Request $request) {
+            return Limit::perHour(10)->by('withdrawal:' . $request->user()?->id);
+        });
+
+        // Phone OTP send/verify — max 5 per minute per user (brute-force guard)
+        RateLimiter::for('phone-otp', function (Request $request) {
+            return Limit::perMinute(5)->by('phone-otp:' . ($request->user()?->id ?: $request->ip()));
+        });
+
+        // Account deletion — max 3 per hour per user (safety guard)
+        RateLimiter::for('account-delete', function (Request $request) {
+            return Limit::perHour(3)->by('account-delete:' . $request->user()?->id);
         });
     }
 }

@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:provider/provider.dart';
 import '../../core/api/api_client.dart';
 import '../../config/themes/app_theme.dart';
 
@@ -35,7 +34,7 @@ class _PhoneVerificationScreenState extends State<PhoneVerificationScreen> {
     }
     setState(() { _isLoading = true; _error = null; });
     try {
-      final api = context.read<ApiClient>();
+      final api = ApiClient.instance;
       await api.sendPhoneOtp(_phoneController.text.trim());
       setState(() { _otpSent = true; _isLoading = false; _resendCountdown = 60; });
       _otpFocus.requestFocus();
@@ -52,7 +51,7 @@ class _PhoneVerificationScreenState extends State<PhoneVerificationScreen> {
     }
     setState(() { _isLoading = true; _error = null; });
     try {
-      final api = context.read<ApiClient>();
+      final api = ApiClient.instance;
       final response = await api.verifyPhone(_otpController.text.trim());
       if (!mounted) return;
       final msg = response.data['message'] ?? 'Phone verified!';

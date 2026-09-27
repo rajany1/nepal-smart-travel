@@ -14,13 +14,13 @@ class LegalDocumentController extends Controller
     public function show(string $type): JsonResponse
     {
         $validTypes = array_keys(LegalDocument::types());
-        if (!in_array($type, $validTypes)) {
+        if (! in_array($type, $validTypes)) {
             return response()->json(['success' => false, 'message' => 'Invalid document type.'], 404);
         }
 
         $doc = LegalDocument::getActive($type);
 
-        if (!$doc) {
+        if (! $doc) {
             // Return empty so mobile can show fallback
             return response()->json([
                 'success' => true,
@@ -30,6 +30,7 @@ class LegalDocumentController extends Controller
                     'content' => '',
                     'version' => null,
                     'published_at' => null,
+                    'reference_url' => null,
                 ],
             ]);
         }
@@ -42,6 +43,7 @@ class LegalDocumentController extends Controller
                 'content' => $doc->content,
                 'version' => $doc->version,
                 'published_at' => $doc->published_at?->toISOString(),
+                'reference_url' => $doc->safe_reference_url,
             ],
         ]);
     }
@@ -53,7 +55,7 @@ class LegalDocumentController extends Controller
     {
         $documents = LegalDocument::published()
             ->get()
-            ->map(fn($doc) => [
+            ->map(fn ($doc) => [
                 'type' => $doc->type,
                 'title' => $doc->title,
                 'version' => $doc->version,

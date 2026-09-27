@@ -16,6 +16,82 @@ class RouteTrackPoint {
   }
 }
 
+/// A resolved geometry segment between two track waypoints.
+///
+/// [mode]: 'driving' | 'trekking'
+/// [status]: 'routed' | 'approximate' | 'unrouted'
+/// [source]: 'osrm_driving' | 'curated_waypoints' | 'none'
+class RouteGeometrySegment {
+  final String fromName;
+  final String toName;
+  final String mode;
+  final String status;
+  final String source;
+  final List<RouteTrackPoint> points;
+  final double distanceM;
+  final double durationS;
+
+  RouteGeometrySegment({
+    required this.fromName,
+    required this.toName,
+    required this.mode,
+    required this.status,
+    required this.source,
+    required this.points,
+    required this.distanceM,
+    required this.durationS,
+  });
+
+  bool get isRouted => status == 'routed';
+  bool get isApproximate => status == 'approximate';
+  bool get isUnrouted => status == 'unrouted';
+
+  factory RouteGeometrySegment.fromJson(Map<String, dynamic> json) {
+    return RouteGeometrySegment(
+      fromName: json['from_name'] ?? '',
+      toName: json['to_name'] ?? '',
+      mode: json['mode'] ?? 'driving',
+      status: json['status'] ?? 'unrouted',
+      source: json['source'] ?? 'none',
+      points: (json['points'] as List?)
+              ?.map((e) => RouteTrackPoint.fromJson(e as Map<String, dynamic>))
+              .toList() ??
+          const [],
+      distanceM: double.tryParse((json['distance_m'] ?? 0).toString()) ?? 0.0,
+      durationS: double.tryParse((json['duration_s'] ?? 0).toString()) ?? 0.0,
+    );
+  }
+}
+
+/// Full geometry response for a curated route.
+class RouteGeometryResponse {
+  final int routeId;
+  final List<RouteGeometrySegment> segments;
+  final double totalDistanceM;
+  final String geometryVersion;
+
+  RouteGeometryResponse({
+    required this.routeId,
+    required this.segments,
+    required this.totalDistanceM,
+    required this.geometryVersion,
+  });
+
+  factory RouteGeometryResponse.fromJson(Map<String, dynamic> json) {
+    return RouteGeometryResponse(
+      routeId: json['route_id'] ?? 0,
+      segments: (json['segments'] as List?)
+              ?.map((e) =>
+                  RouteGeometrySegment.fromJson(e as Map<String, dynamic>))
+              .toList() ??
+          const [],
+      totalDistanceM:
+          double.tryParse((json['total_distance_m'] ?? 0).toString()) ?? 0.0,
+      geometryVersion: json['geometry_version'] ?? '',
+    );
+  }
+}
+
 /// A place stop on a route (from waypointPlaces on the backend).
 class RoutePlaceModel {
   final int id;

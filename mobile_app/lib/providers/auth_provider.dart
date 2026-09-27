@@ -11,6 +11,9 @@ class AuthProvider extends ChangeNotifier {
   final ApiClient _api = ApiClient.instance;
   final SessionManager _session = SessionManager.instance;
 
+  /// Public access to the API client (read-only for callers).
+  ApiClient get api => _api;
+
   UserModel? _user;
   bool _isLoading = false;
   bool _isAuthenticated = false;
@@ -20,17 +23,14 @@ class AuthProvider extends ChangeNotifier {
   // Additional auth state tracking
   bool _isEmailVerified = false;
   bool _requiresProfileCompletion = false;
-  DateTime? _lastProfileRefresh;
-  String? _lastOtp;
 
   UserModel? get user => _user;
   bool get isLoading => _isLoading;
   bool get isAuthenticated => _isAuthenticated;
-  bool get isInitialized => _isInitialized;
   String? get errorMessage => _errorMessage;
+  bool get isInitialized => _isInitialized;
   bool get isEmailVerified => _isEmailVerified;
   bool get requiresProfileCompletion => _requiresProfileCompletion;
-  String? get lastOtp => _lastOtp;
   
   // âœ… Profile completion check
   bool get isProfileCompletionRequired => _isAuthenticated && _user != null && !_user!.profileCompleted;
@@ -107,7 +107,7 @@ class AuthProvider extends ChangeNotifier {
       _isAuthenticated = true;
       _isEmailVerified = _user!.emailVerifiedAt != null;
       _requiresProfileCompletion = !_user!.profileCompleted;
-      _lastProfileRefresh = DateTime.now();
+
       
       // Persist user data
       await _session.setUser(_user!);
@@ -188,7 +188,7 @@ class AuthProvider extends ChangeNotifier {
       _user = UserModel.fromJson(profileResponse.data);
       _isEmailVerified = _user!.emailVerifiedAt != null;
       _requiresProfileCompletion = !_user!.profileCompleted;
-      _lastProfileRefresh = DateTime.now();
+
       
       // Update persisted user data
       await _session.setUser(_user!);
@@ -243,18 +243,17 @@ class AuthProvider extends ChangeNotifier {
     }
   }
 
-  Future<bool> loginWithGoogle() async {
-    _isLoading = true;
+  /// Perform Google Sign-In and return the id_token.
+  /// Returns null if the user cancels or an error occurs (sets _errorMessage).
+  Future<String?> getGoogleIdToken() async {
     _errorMessage = null;
-    notifyListeners();
 
     try {
       final serverClientId = AppConstants.googleServerClientId;
       if (serverClientId.isEmpty) {
         _errorMessage = 'Google Sign-In is not configured. Please contact support.';
-        _isLoading = false;
         notifyListeners();
-        return false;
+        return null;
       }
 
       final googleSignIn = GoogleSignIn.instance;
@@ -263,23 +262,52 @@ class AuthProvider extends ChangeNotifier {
       );
 
       final account = await googleSignIn.authenticate();
-      if (account == null) {
-        _errorMessage = 'Google sign-in was cancelled';
-        _isLoading = false;
-        notifyListeners();
-        return false;
-      }
       final authentication = account.authentication;
       final idToken = authentication.idToken;
 
       if (idToken == null) {
         _errorMessage = 'Failed to get Google authentication token';
-        _isLoading = false;
         notifyListeners();
-        return false;
+        return null;
       }
 
-      final response = await _api.socialLogin(idToken: idToken);
+      return idToken;
+    } catch (e) {
+      _errorMessage = _parseError(e);
+      print('Google sign-in error: $e');
+      notifyListeners();
+      return null;
+    }
+  }
+
+  Future<bool> loginWithGoogle({
+    String? idToken,
+    bool? termsAccepted,
+    bool? privacyAccepted,
+    bool? ageConfirmed,
+  }) async {
+    _isLoading = true;
+    _errorMessage = null;
+    notifyListeners();
+
+    try {
+      // If no idToken provided, perform Google Sign-In first
+      String? token = idToken;
+      if (token == null) {
+        token = await getGoogleIdToken();
+        if (token == null) {
+          _isLoading = false;
+          notifyListeners();
+          return false;
+        }
+      }
+
+      final response = await _api.socialLogin(
+        idToken: token,
+        termsAccepted: termsAccepted,
+        privacyAccepted: privacyAccepted,
+        ageConfirmed: ageConfirmed,
+      );
       final authResponse = AuthResponse.fromJson(response.data);
 
       final success = await _handleAuthSuccess(authResponse, fetchProfile: true);
@@ -292,7 +320,7 @@ class AuthProvider extends ChangeNotifier {
           _requiresProfileCompletion = !_user!.profileCompleted;
           await _session.setUser(_user!);
         } catch (e) {
-          print('âš ï¸ Post-Google-login profile fetch failed: $e');
+          print('Post-Google-login profile fetch failed: $e');
         }
       }
 
@@ -301,7 +329,7 @@ class AuthProvider extends ChangeNotifier {
       return success;
     } catch (e) {
       _errorMessage = _parseError(e);
-      print('âŒ Google login error: $e');
+      print('Google login error: $e');
       _isLoading = false;
       notifyListeners();
       return false;
@@ -314,6 +342,9 @@ class AuthProvider extends ChangeNotifier {
     String? phone,
     required String password,
     required String passwordConfirmation,
+    bool termsAccepted = false,
+    bool privacyAccepted = false,
+    bool ageConfirmed = false,
   }) async {
     _isLoading = true;
     _errorMessage = null;
@@ -326,14 +357,14 @@ class AuthProvider extends ChangeNotifier {
         phone: phone,
         password: password,
         passwordConfirmation: passwordConfirmation,
+        termsAccepted: termsAccepted,
+        privacyAccepted: privacyAccepted,
+        ageConfirmed: ageConfirmed,
       );
-
-      // Dev bridge: backend returns the OTP when no mail server is configured
-      _lastOtp = response.data['otp']?.toString();
 
       final authResponse = AuthResponse.fromJson(response.data);
 
-      // âœ… Don't block on profile fetch - register success is immediate
+      // ✅ Don't block on profile fetch - register success is immediate
       final success = await _handleAuthSuccess(authResponse, fetchProfile: true);
 
       _isLoading = false;
@@ -368,20 +399,20 @@ class AuthProvider extends ChangeNotifier {
     _isEmailVerified = false;
     _requiresProfileCompletion = false;
     _errorMessage = null;
-    _lastProfileRefresh = null;
+
     
     notifyListeners();
   }
 
   /// Permanently delete the account (backend anonymizes + revokes tokens),
   /// then clears the local session.
-  Future<bool> deleteAccount() async {
+  Future<bool> deleteAccount({String? confirmation}) async {
     _session.onSessionCleared = null;
 
     try {
-      await _api.deleteAccount();
+      await _api.deleteAccount(confirmation: confirmation);
     } catch (e) {
-      print('âŒ Delete account API call failed: $e');
+      print('Delete account API call failed: $e');
       return false;
     }
 
@@ -391,7 +422,7 @@ class AuthProvider extends ChangeNotifier {
     _isEmailVerified = false;
     _requiresProfileCompletion = false;
     _errorMessage = null;
-    _lastProfileRefresh = null;
+
     notifyListeners();
     return true;
   }
@@ -402,7 +433,7 @@ class AuthProvider extends ChangeNotifier {
     _isEmailVerified = false;
     _requiresProfileCompletion = false;
     _errorMessage = null;
-    _lastProfileRefresh = null;
+
     notifyListeners();
   }
 
@@ -450,7 +481,7 @@ class AuthProvider extends ChangeNotifier {
       _user = UserModel.fromJson(response.data);
       _isEmailVerified = _user!.emailVerifiedAt != null;
       _requiresProfileCompletion = !_user!.profileCompleted;
-      _lastProfileRefresh = DateTime.now();
+
       
       // Update persisted user data
       await _session.setUser(_user!);
@@ -498,7 +529,6 @@ class AuthProvider extends ChangeNotifier {
     try {
       final response = await _api.resendVerificationEmail(email);
       if (response.data['success'] ?? false) {
-        _lastOtp = response.data['otp']?.toString();
         _isLoading = false;
         notifyListeners();
         return true;
@@ -590,7 +620,12 @@ class AuthProvider extends ChangeNotifier {
           return serverMsg;
         }
         if (statusCode == 422) return serverMsg;
-        if (statusCode == 401) return 'Invalid email or password.';
+        if (statusCode == 401) {
+          // Password login sends 'Invalid credentials'; show friendlier text.
+          // Other 401s (e.g. Google sign-in) show the real server message.
+          if (serverMsg == 'Invalid credentials') return 'Invalid email or password.';
+          return serverMsg;
+        }
         return serverMsg;
       }
 

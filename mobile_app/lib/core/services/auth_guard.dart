@@ -10,6 +10,9 @@ import '../../providers/auth_provider.dart';
 /// (report / save / post / claim) requires an account. Call [requireLogin]
 /// from an action handler: if the user is not signed in it shows a prompt and
 /// routes to the login screen.
+///
+/// Returns `true` if the user is (or became) authenticated, `false` if the
+/// user cancelled or login failed.
 Future<bool> requireLogin(BuildContext context) async {
   final auth = context.read<AuthProvider>();
   if (auth.isAuthenticated) return true;
@@ -37,5 +40,10 @@ Future<bool> requireLogin(BuildContext context) async {
     await Navigator.pushNamed(context, '/login');
   }
 
-  return false;
+  // Re-check auth state after returning from login flow.
+  // The login screen sets AuthProvider._isAuthenticated = true on success
+  // before navigating away, so by the time we return here the state is
+  // already updated.
+  if (!context.mounted) return false;
+  return context.read<AuthProvider>().isAuthenticated;
 }

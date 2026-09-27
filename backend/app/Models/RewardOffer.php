@@ -36,8 +36,8 @@ class RewardOffer extends Model
     ];
 
     protected $casts = [
-        'discount_value' => 'float',
-        'value_npr' => 'float',
+        'discount_value' => 'decimal:2',
+        'value_npr' => 'decimal:2',
         'value_npr_locked' => 'boolean',
         'price_xp' => 'integer',
         'starts_at' => 'datetime',

@@ -33,6 +33,9 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen> {
     final confirm = _confirmController.text;
     if (password.isEmpty) { ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Please enter a new password'))); return; }
     if (password.length < 8) { ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Password must be at least 8 characters'))); return; }
+    if (!RegExp(r'[a-z]').hasMatch(password)) { ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Password must contain a lowercase letter'))); return; }
+    if (!RegExp(r'[A-Z]').hasMatch(password)) { ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Password must contain an uppercase letter'))); return; }
+    if (!RegExp(r'[0-9]').hasMatch(password)) { ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Password must contain a number'))); return; }
     if (password != confirm) { ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Passwords do not match'))); return; }
     final provider = context.read<AuthProvider>();
     final success = await provider.resetPassword(widget.email, widget.resetToken, password);

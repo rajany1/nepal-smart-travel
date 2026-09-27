@@ -108,6 +108,46 @@ class User extends Authenticatable
         return $this->hasMany(EmergencyContact::class);
     }
 
+    public function legalAcceptances(): \Illuminate\Database\Eloquent\Relations\HasMany
+    {
+        return $this->hasMany(LegalDocumentAcceptance::class);
+    }
+
+    public function supportConversations(): \Illuminate\Database\Eloquent\Relations\HasMany
+    {
+        return $this->hasMany(SupportConversation::class);
+    }
+
+    public function adImpressions(): \Illuminate\Database\Eloquent\Relations\HasMany
+    {
+        return $this->hasMany(AdImpression::class);
+    }
+
+    public function adClicks(): \Illuminate\Database\Eloquent\Relations\HasMany
+    {
+        return $this->hasMany(AdClick::class);
+    }
+
+    public function adRewardEvents(): \Illuminate\Database\Eloquent\Relations\HasMany
+    {
+        return $this->hasMany(AdRewardEvent::class);
+    }
+
+    public function subscriptionPayments(): \Illuminate\Database\Eloquent\Relations\HasMany
+    {
+        return $this->hasMany(\App\Models\SubscriptionPayment::class);
+    }
+
+    public function assistantChats(): \Illuminate\Database\Eloquent\Relations\HasMany
+    {
+        return $this->hasMany(\App\Models\AssistantChat::class);
+    }
+
+    public function moderationQueues(): \Illuminate\Database\Eloquent\Relations\HasMany
+    {
+        return $this->hasMany(\App\Models\ModerationQueue::class, 'submitted_by');
+    }
+
     public function subscription(): \Illuminate\Database\Eloquent\Relations\HasOne
     {
         return $this->hasOne(UserSubscription::class)->where('status', 'active');

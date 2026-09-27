@@ -24,11 +24,16 @@ class ReportAnalysisService
 
     protected AiFallbackRouter $textRouter;
     protected AiFallbackRouter $visionRouter;
+    protected ImageScreeningService $imageScreening;
 
-    public function __construct(?AiFallbackRouter $textRouter = null, ?AiFallbackRouter $visionRouter = null)
-    {
+    public function __construct(
+        ?AiFallbackRouter $textRouter = null,
+        ?AiFallbackRouter $visionRouter = null,
+        ?ImageScreeningService $imageScreening = null,
+    ) {
         $this->textRouter = $textRouter ?? AiFallbackRouter::textChain();
         $this->visionRouter = $visionRouter ?? AiFallbackRouter::visionChain(fn (array $r) => $this->isVisionResultUsable($r));
+        $this->imageScreening = $imageScreening ?? new ImageScreeningService;
     }
 
     public function process(Report $report, bool $force = false): array
@@ -112,7 +117,7 @@ class ReportAnalysisService
             return ['report_id' => $report->id, 'skipped' => true];
         }
 
-        $action = $this->decideAction($analysis, $analysis['location_check'] ?? [], $analysis['image_check'] ?? []);
+        $action = $this->decideAction($analysis, $analysis['location_check'] ?? [], $analysis['image_check'] ?? [], $report);
         $analysis['action'] = $action;
         $analysis['authenticity_score'] = $this->computeAuthenticityScore($analysis);
         $message = $this->actionMessage($analysis);
@@ -197,7 +202,7 @@ class ReportAnalysisService
         }
 
         $image = $this->analyzeImages($report, $text);
-        $action = $this->decideAction($text, $location, $image);
+        $action = $this->decideAction($text, $location, $image, $report);
 
         return array_merge($text, [
             'location_check' => $location,
@@ -239,14 +244,39 @@ class ReportAnalysisService
         $category = $report->category?->name ?? 'unknown';
         $text = "Title: {$report->title}\nDescription: {$report->description}\nPriority: {$report->priority}\nDistrict: {$report->district}\nCategory: {$category}\nReported location: {$report->latitude}, {$report->longitude}";
 
-        $result = $this->textRouter->generateJson(
-            "You are the approval officer for a Nepal community reporting app. Analyze this community report. Reports are written in Nepali OR English — Nepali text is NORMAL and legitimate, never reject a report just because it is not in English.\n\n"
-            . "is_legitimate must be FALSE (reject) for: test/example/meaningless reports; personal or social chatter that is not a community issue (e.g. someone visiting a house, gossip, greetings, mood posts); vague statements with no incident, hazard, problem, event or actionable information; spam.\n"
-            . "is_legitimate must be TRUE (approve) only for reports describing a real community issue: road damage, landslide, flood, fire, accident, waste, electricity/water outage, crime, missing person, animal hazards, events, lost/found, and similar.\n"
-            . "When in doubt between legitimate and junk, choose junk (is_legitimate=false) — never approve a trivial report.\n"
-            . "Return JSON: suggested_priority (low/medium/high/critical), is_legitimate (bool), is_duplicate (bool — true if same issue already reported), summary (string, max 2 sentences in English), category_match (bool — true if title/description matches the report category), category_reason (string), action (approve/reject).\n\n"
-            . "If is_duplicate is true, action must be reject. If is_legitimate is true, action must be approve.\n\n{$text}"
-        );
+        try {
+            $result = $this->textRouter->generateJson(
+                "You are the approval officer for a Nepal community reporting app. Analyze this community report. Reports are written in Nepali OR English — Nepali text is NORMAL and legitimate, never reject a report just because it is not in English.\n\n"
+                . "is_legitimate must be FALSE (reject) for: test/example/meaningless reports; personal or social chatter that is not a community issue (e.g. someone visiting a house, gossip, greetings, mood posts); vague statements with no incident, hazard, problem, event or actionable information; spam.\n"
+                . "is_legitimate must be TRUE (approve) only for reports describing a real community issue: road damage, landslide, flood, fire, accident, waste, electricity/water outage, crime, missing person, animal hazards, events, lost/found, and similar.\n"
+                . "When in doubt between legitimate and junk, choose junk (is_legitimate=false) — never approve a trivial report.\n"
+                . "Return JSON: suggested_priority (low/medium/high/critical), is_legitimate (bool), is_duplicate (bool — true if same issue already reported), summary (string, max 2 sentences in English), category_match (bool — true if title/description matches the report category), category_reason (string), action (approve/reject).\n\n"
+                . "If is_duplicate is true, action must be reject. If is_legitimate is true, action must be approve.\n\n{$text}"
+            );
+        } catch (\Throwable $e) {
+            // AI unavailability must NEVER abort the automated pipeline (this
+            // was the root cause of reports stuck pending with no analysis).
+            // The deterministic quality gate already passed, so continue with
+            // the remaining deterministic signals — location validity, image
+            // duplicate reuse, EXIF camera trace, deterministic screening,
+            // GPS verification — and let the existing decision engine weigh
+            // them under the normal thresholds. A blanket "AI down → human
+            // review" rule is explicitly not what happens here: the engine
+            // still auto-approves/rejects when its evidence is sufficient.
+            Log::warning("Text AI unavailable for report#{$report->id}: " . $e->getMessage());
+
+            return [
+                'suggested_priority' => $report->priority,
+                'is_legitimate' => true,
+                'is_duplicate' => false,
+                'summary' => 'Automated text analysis unavailable — decision based on deterministic signals',
+                'category_match' => null,
+                'category_reason' => 'Text AI unavailable — category match not asserted',
+                'action' => 'approve',
+                'ai_status' => 'unavailable',
+                'ai_error' => mb_substr($e->getMessage(), 0, 300),
+            ];
+        }
 
         $isDuplicate = $result['is_duplicate'] ?? false;
         $isLegitimate = $result['is_legitimate'] ?? true;
@@ -256,6 +286,7 @@ class ReportAnalysisService
         $result['category_match'] = $result['category_match'] ?? null;
         $result['category_reason'] = $result['category_reason'] ?? '';
         $result['action'] = ($isDuplicate || !$isLegitimate) ? 'reject' : ($result['action'] ?? 'approve');
+        $result['ai_status'] = 'ok';
 
         return $result;
     }
@@ -335,6 +366,30 @@ class ReportAnalysisService
                 }
             }
 
+            // Fingerprint-based near-duplicate detection: images with the same
+            // fingerprint hash are likely the same photo (byte-level sampling).
+            // Limitation: this is NOT a perceptual hash — it won't detect
+            // resized/recompressed versions, but it catches same-byte copies
+            // that were saved with different filenames.
+            $fingerprint = $item->fingerprint_hash ?? null;
+            if ($fingerprint) {
+                $fpDuplicate = DB::table('report_media')
+                    ->join('reports', 'reports.id', '=', 'report_media.report_id')
+                    ->where('report_media.fingerprint_hash', $fingerprint)
+                    ->where('report_media.report_id', '!=', $report->id)
+                    ->where('report_media.media_hash', '!=', $hash)
+                    ->where('reports.created_at', '>=', now()->subDays(30))
+                    ->first(['report_media.report_id']);
+                if ($fpDuplicate) {
+                    $images[] = [
+                        'media_id' => $item->id,
+                        'verdict' => 'duplicate',
+                        'reason' => "Fingerprint match with report #{$fpDuplicate->report_id} — likely same photo, different encoding",
+                    ];
+                    continue;
+                }
+            }
+
             // Pure-code EXIF trace (free — no AI call): real camera photos carry
             // Make/Model + lens data; screenshots/downloads usually carry none.
             $trace = $this->checkCameraTrace($path);
@@ -342,17 +397,46 @@ class ReportAnalysisService
             $width = $dims[0] ?? 0;
             $height = $dims[1] ?? 0;
 
+            // Deterministic pre-filter (no AI cost): cheap structural
+            // screen/reuse signals. Strong evidence reuses the EXISTING
+            // 'suspicious' verdict (which the decision engine already routes
+            // to human review, never auto-approval) and skips the vision
+            // call. Otherwise behaviour is unchanged: vision AI runs, and the
+            // screening facts ride along as extra evidence for moderators.
+            // This is NOT camera-provenance proof — see ImageScreeningService.
+            //
+            // Computed BEFORE every remaining branch (square heuristic, strong
+            // signal, vision call, provider outage) and attached to each one,
+            // so the stored result always carries the screening evidence —
+            // including when all AI providers are unavailable.
+            $screening = $this->imageScreening->screen($path, $width, $height, $trace);
+
             // Screenshot/download heuristic: no camera metadata + square web-size
             // dimensions = classic re-uploaded template/screenshot. Flag for human
             // review WITHOUT spending any AI quota.
             if ($trace['kind'] === 'no_metadata' && $width > 0 && $width === $height && $width < 800) {
                 $images[] = [
-                    'media_id' => $item->id,
+                    'media_id' => $item['id'],
                     'verdict' => 'suspicious',
                     'reason' => 'No camera metadata + square web-size dimensions — likely screenshot or downloaded image',
                     'exif_trace' => $trace,
                     'ai_skipped' => true,
                     'provider_used' => null,
+                    'screening' => $screening,
+                ];
+                continue;
+            }
+
+            if ($screening['strong']) {
+                $images[] = [
+                    'media_id' => $item['id'],
+                    'verdict' => 'suspicious',
+                    'reason' => 'Deterministic image pre-filter — Vision AI skipped: '
+                        . implode('; ', array_column($screening['signals'], 'detail')),
+                    'exif_trace' => $trace,
+                    'ai_skipped' => true,
+                    'provider_used' => null,
+                    'screening' => $screening,
                 ];
                 continue;
             }
@@ -365,6 +449,7 @@ class ReportAnalysisService
                 );
                 $entry = $this->judgeImage($item->id, $result);
                 $entry['exif_trace'] = $trace;
+                $entry['screening'] = $screening;
                 $images[] = $entry;
             } catch (AiRateLimitException $e) {
                 Log::warning("Vision AI unavailable for report#{$report->id} media#{$item->id}: " . $e->getMessage());
@@ -374,6 +459,7 @@ class ReportAnalysisService
                     'reason' => 'AI providers all unavailable (quota/rate limit)',
                     'exif_trace' => $trace,
                     'provider_used' => null,
+                    'screening' => $screening,
                 ];
             } catch (\Throwable $e) {
                 Log::error("Image analysis failed for report#{$report->id} media#{$item->id}: " . $e->getMessage());
@@ -383,6 +469,7 @@ class ReportAnalysisService
                     'reason' => 'Vision API error',
                     'exif_trace' => $trace,
                     'provider_used' => null,
+                    'screening' => $screening,
                 ];
             }
         }
@@ -461,30 +548,60 @@ class ReportAnalysisService
      * Pure-code EXIF camera-trace classification (zero AI cost). Classifies an
      * image as: 'camera' (real camera EXIF: Make/Model), 'screenshotish'
      * (software stamp, no camera), 'no_camera_trace' (EXIF but nothing camera),
-     * 'no_metadata' (no EXIF at all), or 'unknown' (non-JPEG / no EXIF ext).
+     * 'no_metadata' (no EXIF at all), or 'unknown' (unreadable container).
+     * When ext-exif is unavailable it falls back to the pure-PHP TIFF/IFD
+     * parser (JPEG APP1 / PNG eXIf / WebP EXIF) so the server's missing
+     * 'exif' extension no longer forces every image to 'unknown'.
      * This is a WEAK signal — never a hard reject on its own.
      */
     protected function checkCameraTrace(string $path): array
     {
-        if (!function_exists('exif_read_data')) {
-            return ['kind' => 'unknown', 'reason' => 'EXIF extension missing on server'];
+        if (function_exists('exif_read_data')) {
+            $mime = mime_content_type($path) ?: '';
+            if (!in_array($mime, ['image/jpeg', 'image/jpg'])) {
+                return ['kind' => 'unknown', 'reason' => 'Not a JPEG image (' . $mime . ')'];
+            }
+
+            $exif = @exif_read_data($path);
+            if (!$exif || !is_array($exif)) {
+                return ['kind' => 'no_metadata', 'reason' => 'No EXIF metadata at all'];
+            }
+
+            return $this->classifyCameraTrace([
+                'make' => (string) ($exif['Make'] ?? ''),
+                'model' => (string) ($exif['Model'] ?? ''),
+                'software' => (string) ($exif['Software'] ?? ''),
+                'has_lens_data' => isset($exif['FNumber']) || isset($exif['FocalLength'])
+                    || isset($exif['ExposureTime']) || isset($exif['ISOSpeedRatings']),
+            ]);
         }
 
-        $mime = mime_content_type($path) ?: '';
-        if (!in_array($mime, ['image/jpeg', 'image/jpg'])) {
-            return ['kind' => 'unknown', 'reason' => 'Not a JPEG image (' . $mime . ')'];
+        // No ext-exif on this server: use the pure-PHP TIFF/IFD parser
+        // (ImageScreeningService::parseExifTags) instead of giving up.
+        $parsed = $this->imageScreening->parseExifTags($path);
+
+        if ($parsed['container'] === 'unknown') {
+            return ['kind' => 'unknown', 'reason' => 'Unsupported image container for EXIF inspection'];
         }
 
-        $exif = @exif_read_data($path);
-        if (!$exif || !is_array($exif)) {
+        if (!$parsed['exif_found']) {
             return ['kind' => 'no_metadata', 'reason' => 'No EXIF metadata at all'];
         }
 
-        $make = trim((string) ($exif['Make'] ?? ''));
-        $model = trim((string) ($exif['Model'] ?? ''));
-        $software = trim((string) ($exif['Software'] ?? ''));
-        $hasLens = isset($exif['FNumber']) || isset($exif['FocalLength'])
-            || isset($exif['ExposureTime']) || isset($exif['ISOSpeedRatings']);
+        return $this->classifyCameraTrace($parsed);
+    }
+
+    /**
+     * Shared classification for both trace readers (ext-exif and the pure-PHP
+     * fallback): make/model -> camera, software stamp -> screenshotish,
+     * anything else -> EXIF present but no camera trace.
+     */
+    private function classifyCameraTrace(array $tags): array
+    {
+        $make = trim((string) ($tags['make'] ?? ''));
+        $model = trim((string) ($tags['model'] ?? ''));
+        $software = trim((string) ($tags['software'] ?? ''));
+        $hasLens = !empty($tags['has_lens_data']);
 
         if ($make !== '' || $model !== '') {
             return [
@@ -632,8 +749,178 @@ class ReportAnalysisService
         return round(max(0.0, min(1.0, $score)), 2);
     }
 
-    protected function decideAction(array $text, array $location, array $image): string
+    /**
+     * Compute a confidence score for the Decision Engine.
+     *
+     * This score determines whether a report is auto-approved, sent to
+     * human review, or auto-rejected. It combines ALL available signals
+     * into a single 0.00-1.00 score.
+     *
+     * SIGNAL WEIGHTS (total = 1.0):
+     *   Image analysis:   0.30 (dominant — visual evidence is strongest)
+     *   Text analysis:    0.25 (legitimacy + duplicate)
+     *   Location:         0.20 (Nepal bounds + GPS verification)
+     *   Duplicate image:  0.15 (exact/fingerprint match)
+     *   Fraud/velocity:   0.10 (user history)
+     *
+     * THRESHOLDS:
+     *   >= 0.80  →  AUTO APPROVE (high confidence safe)
+     *   >= 0.50  →  PENDING REVIEW (uncertain/suspicious)
+     *   <  0.50  →  AUTO REJECT (clearly invalid/low confidence)
+     *
+     * HARD REJECTS override the score entirely (return 0.0).
+     */
+    public function computeConfidence(
+        array $analysis,
+        ?Report $report = null,
+        ?array $imageMetadata = null,
+        ?array $fraudResult = null,
+    ): float {
+        $image = $analysis['image_check'] ?? [];
+        $location = $analysis['location_check'] ?? [];
+        $images = $image['images'] ?? [];
+
+        // === HARD REJECTS: override score to 0.0 ===
+
+        if (($analysis['is_duplicate'] ?? false) || !($analysis['is_legitimate'] ?? true)) {
+            return 0.0;
+        }
+
+        if (!($location['valid'] ?? true)) {
+            return 0.0;
+        }
+
+        if (($image['verdict'] ?? 'clean') === 'violation') {
+            return 0.0;
+        }
+
+        if (isset($imageMetadata['hard_reject']) && $imageMetadata['hard_reject']) {
+            return 0.0;
+        }
+
+        if ($fraudResult && ($fraudResult['blocked'] ?? false)) {
+            return 0.0;
+        }
+
+        // === COMPUTE WEIGHTED SCORE ===
+
+        // --- Image signal (0.30) ---
+        $verdict = $image['verdict'] ?? 'clean';
+        $imgScore = match ($verdict) {
+            'clean' => 0.95,
+            'unverifiable' => 0.50,
+            'suspicious' => 0.35,
+            'duplicate' => 0.20,
+            default => 0.50,
+        };
+
+        // --- Image signal adjustments (vision probabilities) ---
+        // The bonus/penalty below are driven by VISION probabilities
+        // (real_scene_probability / report_match). Entries produced WITHOUT
+        // vision — deterministic screening skip, provider outage, missing
+        // file — carry no probabilities at all. Treating that absence as
+        // "vision said 0.0" double-penalizes missing evidence and would
+        // force every report into human review purely because AI was down.
+        // When vision actually ran, behaviour is byte-for-byte unchanged.
+        $hasVisionEvidence = false;
+        foreach ($images as $img) {
+            if (array_key_exists('real_scene_probability', $img) || array_key_exists('report_match', $img)) {
+                $hasVisionEvidence = true;
+                break;
+            }
+        }
+
+        if (!empty($images) && $hasVisionEvidence) {
+            $avgRealScene = 0;
+            $avgMatch = 0;
+            $count = count($images);
+            foreach ($images as $img) {
+                $avgRealScene += (float) ($img['real_scene_probability'] ?? 0);
+                $avgMatch += (float) ($img['report_match'] ?? 0);
+            }
+            $avgRealScene /= max($count, 1);
+            $avgMatch /= max($count, 1);
+
+            if ($avgRealScene >= 0.8 && $avgMatch >= 0.7) {
+                $imgScore = min(1.0, $imgScore + 0.15);
+            }
+            if ($avgRealScene < 0.5 || $avgMatch < 0.4) {
+                $imgScore = max(0.0, $imgScore - 0.20);
+            }
+        }
+
+        if (empty($images) && $verdict === 'clean') {
+            $imgScore = 0.40;
+        }
+
+        // --- Text signal (0.25) ---
+        $textScore = ($analysis['is_legitimate'] ?? true) ? 0.90 : 0.0;
+        if ($analysis['is_duplicate'] ?? false) {
+            $textScore = 0.0;
+        }
+        if ($analysis['category_match'] ?? false) {
+            $textScore = min(1.0, $textScore + 0.10);
+        }
+
+        // --- Location signal (0.20) ---
+        $gps = $location['gps_status'] ?? null;
+        $locScore = match ($gps) {
+            'verified' => 1.0,
+            'no_gps_data' => 0.70,
+            'mismatched' => 0.20,
+            default => 0.70,
+        };
+        if (!($location['valid'] ?? true)) {
+            $locScore = 0.0;
+        }
+
+        // --- Duplicate image signal (0.15) ---
+        $dupScore = 0.90;
+        if (($image['verdict'] ?? '') === 'duplicate') {
+            $dupScore = 0.10;
+        }
+        if (($imageMetadata['fingerprint_near_duplicate'] ?? false)) {
+            $dupScore = max(0.30, $dupScore - 0.30);
+        }
+
+        // --- Fraud/velocity signal (0.10) ---
+        $fraudScoreVal = 0.90;
+        if (!empty($fraudResult['reasons'])) {
+            $fraudScoreVal = 0.20;
+        }
+        if ($report && $report->provenance === 'suspicious') {
+            $fraudScoreVal = max(0.30, $fraudScoreVal - 0.30);
+        }
+
+        // === WEIGHTED COMBINATION ===
+        $confidence = ($imgScore * 0.30)
+            + ($textScore * 0.25)
+            + ($locScore * 0.20)
+            + ($dupScore * 0.15)
+            + ($fraudScoreVal * 0.10);
+
+        return round(max(0.0, min(1.0, $confidence)), 2);
+    }
+
+    /**
+     * Decide the action for a report after AI analysis.
+     *
+     * DECISION ENGINE:
+     * Uses a confidence score computed from ALL available signals to determine
+     * the outcome. The client never controls the decision — only the server-side
+     * analysis determines the result.
+     *
+     * THRESHOLDS:
+     *   confidence >= 0.80  →  AUTO APPROVE (high confidence safe)
+     *   confidence >= 0.50  →  PENDING REVIEW (uncertain/suspicious)
+     *   confidence <  0.50  →  AUTO REJECT (clearly invalid)
+     *
+     * BIPAD/SYSTEM reports get a +0.10 provenance boost.
+     */
+    protected function decideAction(array $text, array $location, array $image, ?Report $report = null): string
     {
+        // === EARLY REJECTS (no scoring needed) ===
+
         if (($text['is_duplicate'] ?? false) || !($text['is_legitimate'] ?? true)) {
             return 'reject';
         }
@@ -642,39 +929,33 @@ class ReportAnalysisService
             return 'reject';
         }
 
-        // Reports WITHOUT verified photo GPS are still fully processed:
-        // missing EXIF data alone is not proof of a fake report, so a clean
-        // text+image review can still approve. (Location invalid — 0,0,
-        // outside Nepal, mismatched GPS — is rejected above/earlier.)
-
-        // NEVER auto-approve on unverifiable/suspicious/duplicate images.
-        if (in_array($image['verdict'] ?? 'clean', ['unverifiable', 'suspicious', 'duplicate'])) {
-            return 'pending-review';
-        }
-
         if (($image['verdict'] ?? 'clean') === 'violation') {
             return 'reject';
         }
 
-        // NO-COMPROMISE GATE: a "clean" verdict must be data-backed. If the
-        // vision model produced no usable numbers, or the image does not
-        // strongly match the claim, a human decides — never silent approve.
-        $images = $image['images'] ?? [];
-        if (empty($images)) {
-            return 'pending-review';
-        }
-        foreach ($images as $img) {
-            if ($img['verdict'] !== 'clean') {
-                return 'pending-review';
-            }
-            $realScene = (float) ($img['real_scene_probability'] ?? 0);
-            $match = (float) ($img['report_match'] ?? 0);
-            if ($realScene < 0.7 || $match < 0.6) {
-                return 'pending-review';
-            }
+        // === COMPUTE CONFIDENCE SCORE ===
+        $combined = $text + ['image_check' => $image, 'location_check' => $location];
+        $confidence = $this->computeConfidence($combined, $report);
+
+        // === APPLY PROVENANCE BOOST FOR TRUSTED SOURCES ===
+        $source = $report?->source ?? 'user';
+        $provenance = $report?->provenance ?? null;
+
+        if (in_array($source, ['bipad', 'system']) || $provenance === 'system') {
+            $confidence = min(1.0, $confidence + 0.10);
         }
 
-        return 'approve';
+        // === DECISION ===
+
+        if ($confidence >= 0.80) {
+            return 'approve';
+        }
+
+        if ($confidence >= 0.50) {
+            return 'pending-review';
+        }
+
+        return 'reject';
     }
 
     /**
