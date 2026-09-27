@@ -31,7 +31,6 @@ return new class extends Migration
             $table->foreignId('withdrawal_id')->nullable()->constrained()->nullOnDelete();
             $table->foreignId('partner_withdrawal_id')->nullable()->constrained()->nullOnDelete();
             $table->foreignId('payout_id')->nullable()->constrained()->nullOnDelete();
-            $table->foreignId('topup_id')->nullable()->constrained()->nullOnDelete();
             $table->timestamps();
 
             $table->index(['status', 'created_at']);

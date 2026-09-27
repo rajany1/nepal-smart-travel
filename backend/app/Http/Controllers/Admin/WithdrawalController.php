@@ -517,7 +517,8 @@ class WithdrawalController extends Controller
         $subscriptionPaymentsReceived = (float) \App\Models\SubscriptionPayment::where('status', 'success')->sum('amount');
         $featuredPaymentsReceived = (float) \App\Models\FeaturedPayment::where('status', 'paid')->sum('amount');
         $partnerTopupsReceived = (float) \App\Models\PaymentTransaction::where('status', 'completed')
-            ->whereNotNull('topup_id')->sum('amount_npr');
+            ->where('metadata->type', 'topup')
+            ->sum('amount_npr');
         $totalMoneyIn = $adPaymentsReceived + $bookingPaymentsReceived + $subscriptionPaymentsReceived
             + $featuredPaymentsReceived + $partnerTopupsReceived;
 

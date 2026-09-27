@@ -26,7 +26,6 @@ class PaymentTransaction extends Model
         'withdrawal_id',
         'partner_withdrawal_id',
         'payout_id',
-        'topup_id',
     ];
 
     protected $casts = [
