@@ -177,6 +177,27 @@ class FraudDetectionService
         return ['blocked' => false];
     }
 
+    /**
+     * Non-blocking risk feed: record location-integrity signals against the
+     * user's existing fraud profile WITHOUT blocking the submission.
+     *
+     * checkReport() above owns the hard blocks (bot / velocity / duplicate /
+     * multi-account). Location integrity is deliberately softer: it raises
+     * the user's fraud score so the moderation pipeline sees combined risk,
+     * but a mock-location flag alone never stops a report from being filed.
+     *
+     * @param string[] $reasons e.g. ['mock_location_detected', 'location_integrity_suspicious']
+     */
+    public function logReportLocationRisk(User $user, array $reasons, ?string $ip, ?string $userAgent): void
+    {
+        $reasons = array_values(array_unique(array_filter($reasons)));
+        if (empty($reasons)) {
+            return;
+        }
+
+        $this->logUserFraud($user, 'report', $reasons, $ip, $userAgent);
+    }
+
     public function checkReview(Request $request, int $placeId, User $user): array
     {
         $ip = $request->ip();
@@ -459,7 +480,7 @@ class FraudDetectionService
             'type' => $type,
             'reason' => implode(',', $reasons),
             'ip_address' => $ip,
-            'user_agent' => $userAgent,
+            'user_agent' => substr((string) $userAgent, 0, 500),
             'metadata' => json_encode([
                 'user_id' => Auth::id(),
                 'current_fraud_score' => $campaign->fraud_score,
@@ -486,6 +507,11 @@ class FraudDetectionService
             'screenshot_submission' => 15,
             'repeat_image_abuse' => 30,
             'fingerprint_near_duplicate' => 10,
+            // Location-integrity risk signals (non-blocking — they only add
+            // points; the moderation pipeline still owns the final decision).
+            'location_integrity_suspicious' => 10,
+            'mock_location_detected' => 15,
+            'impossible_movement' => 15,
         ];
 
         $addPoints = 0;

@@ -1,9 +1,67 @@
 import 'dart:async';
+
 import "../../core/services/localization_service.dart";
 import 'package:geolocator/geolocator.dart';
 import 'package:geocoding/geocoding.dart';
 
+import '../../config/constants/app_constants.dart';
+
+/// Explicit device-location lifecycle — the resolver NEVER invents a
+/// position and NEVER silently reuses an untrustworthy one.
+///
+/// Key distinctions:
+///   grantedFresh      — permission granted + fresh GPS fix
+///   grantedLastKnown  — permission granted, only a RECENT last-known fix
+///                       (age within AppConstants.locationCacheDuration)
+///   denied            — location permission denied (or denied forever)
+///   serviceDisabled   — permission granted but device Location toggle is off
+///   unavailable       — granted + service on, but no fix within the
+///                       freshness window
+///
+/// Manually selected coordinates are deliberately NOT part of this state:
+/// the app has no manual "pick my location" for nearby queries, and manual
+/// coordinates (report/place forms) must never be presented as the device's
+/// current location.
+enum DeviceLocationStatus {
+  grantedFresh,
+  grantedLastKnown,
+  denied,
+  serviceDisabled,
+  unavailable,
+}
+
+/// Result of [LocationService.resolveDeviceLocation] with provenance.
+class DeviceLocationResult {
+  const DeviceLocationResult({
+    required this.status,
+    this.latitude,
+    this.longitude,
+    this.accuracy,
+    this.fixedAt,
+    this.permanentlyDenied = false,
+  });
+
+  final DeviceLocationStatus status;
+  final double? latitude;
+  final double? longitude;
+  final double? accuracy;
+  final DateTime? fixedAt;
+
+  /// True when the OS will no longer show a permission prompt
+  /// (deniedForever) — the UI should deep-link to app settings instead.
+  final bool permanentlyDenied;
+
+  bool get hasCoordinates => latitude != null && longitude != null;
+
+  bool get isUsable =>
+      status == DeviceLocationStatus.grantedFresh ||
+      status == DeviceLocationStatus.grantedLastKnown;
+}
+
 class LocationService {
+  /// Fresh-fix age window — same 30s convention the existing
+  /// fresh-fix gate in getCurrentLocation() has always used.
+  static const Duration _freshAgeWindow = Duration(seconds: 30);
   static final LocationService _instance = LocationService._();
   LocationService._();
   factory LocationService() => _instance;
@@ -36,6 +94,135 @@ class LocationService {
     }
     return permission == LocationPermission.always ||
         permission == LocationPermission.whileInUse;
+  }
+
+  /// Resolve the DEVICE's current location with explicit provenance.
+  ///
+  /// Guarantees (the "never invent a location" rule):
+  ///  - permission denied           -> status `denied`, NO coordinates, and
+  ///    any in-memory fix cached before a revocation is discarded;
+  ///  - device Location toggle off  -> status `serviceDisabled`, NO coordinates
+  ///    (an old fix is NOT silently served);
+  ///  - fresh GPS                   -> status `grantedFresh`;
+  ///  - only a last-known fix       -> status `grantedLastKnown` ONLY when its
+  ///    age is within [AppConstants.locationCacheDuration] (the project's own
+  ///    location-cache convention), otherwise status `unavailable`.
+  ///
+  /// [requestPermission] — set false for background callers that must never
+  /// pop the system prompt (e.g. periodic intel refresh).
+  /// [freshTimeout] — how long to wait for a fresh GPS fix.
+  Future<DeviceLocationResult> resolveDeviceLocation({
+    bool requestPermission = true,
+    Duration freshTimeout = const Duration(seconds: 15),
+  }) async {
+    LocationPermission permission = await Geolocator.checkPermission();
+    if (permission == LocationPermission.denied && requestPermission) {
+      permission = await Geolocator.requestPermission();
+    }
+    if (permission == LocationPermission.denied ||
+        permission == LocationPermission.deniedForever) {
+      // Permission missing/revoked: any previously cached fix is no longer
+      // trustworthy as "current" — discard it so no caller can reuse it.
+      _currentPosition = null;
+      _currentAddress = null;
+      return DeviceLocationResult(
+        status: DeviceLocationStatus.denied,
+        permanentlyDenied: permission == LocationPermission.deniedForever,
+      );
+    }
+
+    if (!await Geolocator.isLocationServiceEnabled()) {
+      // Permission exists but the Location toggle is off: an old fix must
+      // not be served as current — there is no way to get a live fix.
+      return const DeviceLocationResult(
+          status: DeviceLocationStatus.serviceDisabled);
+    }
+
+    // Fresh GPS attempt (bounded — same platform limit as getCurrentLocation).
+    Position? fresh;
+    try {
+      fresh = await Geolocator.getCurrentPosition(
+        locationSettings: LocationSettings(
+          accuracy: LocationAccuracy.best,
+          timeLimit: freshTimeout,
+        ),
+      );
+    } catch (_) {
+      fresh = null;
+    }
+
+    if (fresh != null &&
+        DateTime.now().difference(fresh.timestamp) <= _freshAgeWindow) {
+      _currentPosition = fresh;
+      return DeviceLocationResult(
+        status: DeviceLocationStatus.grantedFresh,
+        latitude: fresh.latitude,
+        longitude: fresh.longitude,
+        accuracy: fresh.accuracy,
+        fixedAt: fresh.timestamp,
+      );
+    }
+
+    // No fresh fix — consider last-known candidates (an old-timestamped fix
+    // from the attempt above, the in-memory cache, and the OS cache).
+    // ONLY fixes inside the freshness window qualify; expired fixes yield
+    // `unavailable`, never coordinates.
+    final candidates = <Position>[
+      if (fresh != null) fresh,
+      if (_currentPosition != null) _currentPosition!,
+    ];
+    final osLast = await _safeOsLastKnown();
+    if (osLast != null) candidates.add(osLast);
+
+    Position? recent;
+    for (final candidate in candidates) {
+      if (DateTime.now().difference(candidate.timestamp) >
+          AppConstants.locationCacheDuration) {
+        continue;
+      }
+      if (recent == null || candidate.timestamp.isAfter(recent.timestamp)) {
+        recent = candidate;
+      }
+    }
+
+    if (recent != null) {
+      _currentPosition = recent;
+      return DeviceLocationResult(
+        status: DeviceLocationStatus.grantedLastKnown,
+        latitude: recent.latitude,
+        longitude: recent.longitude,
+        accuracy: recent.accuracy,
+        fixedAt: recent.timestamp,
+      );
+    }
+
+    return const DeviceLocationResult(status: DeviceLocationStatus.unavailable);
+  }
+
+  Future<Position?> _safeOsLastKnown() async {
+    try {
+      return await Geolocator.getLastKnownPosition();
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Deep-link to system Location settings (for "service disabled").
+  Future<void> openLocationSettings() async {
+    try {
+      await Geolocator.openLocationSettings();
+    } catch (_) {
+      // Unsupported platform — the caller can still ask the user manually.
+    }
+  }
+
+  /// Deep-link to this app's system settings (for deniedForever).
+  Future<void> openAppSettings() async {
+    try {
+      await Geolocator.openAppSettings();
+    } catch (_) {
+      // Unsupported platform — ignore.
+    }
   }
 
   Future<Position?> _getLastKnownLocation() async {

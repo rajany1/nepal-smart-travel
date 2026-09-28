@@ -12,6 +12,7 @@ class ReportCategorie extends Model
 
     protected $fillable = [
         'name',
+        'name_ne',
         'slug',
         'icon',
         'description',

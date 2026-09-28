@@ -9,6 +9,9 @@ use App\Models\Report;
 use App\Models\Alert;
 use App\Models\Place;
 use App\Models\ReportCategorie;
+use App\Models\ReportCategoryGroup;
+use App\Models\ReportCategoryOption;
+use App\Models\ReportCategoryField;
 use App\Models\PlaceCategories;
 use App\Models\ModerationQueue;
 use App\Models\AuditLog;
@@ -1338,6 +1341,7 @@ class AdminController extends Controller
             'description_ne' => 'nullable|string',
             'icon' => 'nullable|string|max:100',
             'icon_type' => 'nullable|string|max:50',
+            'severity' => 'nullable|string|in:low,medium,high,critical',
             'sort_order' => 'nullable|integer|min:0',
             'is_active' => 'nullable|boolean',
             'requires_photo' => 'nullable|boolean',
@@ -1367,6 +1371,7 @@ class AdminController extends Controller
             'description_ne' => 'nullable|string',
             'icon' => 'nullable|string|max:100',
             'icon_type' => 'nullable|string|max:50',
+            'severity' => 'nullable|string|in:low,medium,high,critical',
             'sort_order' => 'nullable|integer|min:0',
             'is_active' => 'nullable|boolean',
             'requires_photo' => 'nullable|boolean',
@@ -1409,6 +1414,7 @@ class AdminController extends Controller
             'placeholder_ne' => 'nullable|string',
             'type' => 'required|string|in:single_select,multi_select,text,textarea,number,photo,location,severity,date,time,yes_no',
             'required' => 'nullable|boolean',
+            'is_active' => 'nullable|boolean',
             'sort_order' => 'nullable|integer|min:0',
             'options' => 'nullable|array',
             'validation' => 'nullable|array',
@@ -1440,6 +1446,7 @@ class AdminController extends Controller
             'placeholder_ne' => 'nullable|string',
             'type' => 'required|string|in:single_select,multi_select,text,textarea,number,photo,location,severity,date,time,yes_no',
             'required' => 'nullable|boolean',
+            'is_active' => 'nullable|boolean',
             'sort_order' => 'nullable|integer|min:0',
             'options' => 'nullable|array',
             'validation' => 'nullable|array',
@@ -1447,6 +1454,21 @@ class AdminController extends Controller
             'help_text_ne' => 'nullable|string',
             'show_in_preview' => 'nullable|boolean',
         ]);
+
+        if ($request->boolean('options_clear')) {
+            $validated['options'] = [];
+        } elseif (array_key_exists('options', $validated)) {
+            // Preserve existing Nepali labels for options that keep their value
+            $existing = collect($field->options ?? []);
+            $validated['options'] = collect($validated['options'])
+                ->map(function ($o) use ($existing) {
+                    $prev = $existing->firstWhere('value', $o['value'] ?? null);
+                    $o['label_ne'] = is_array($prev) ? ($prev['label_ne'] ?? null) : ($o['label_ne'] ?? null);
+                    return $o;
+                })
+                ->values()
+                ->all();
+        }
 
         $field->update($validated);
 
@@ -1467,6 +1489,73 @@ class AdminController extends Controller
         $this->logAction('report_category_field.deleted', 'report_category_field', $id, "Deleted field: {$name}");
 
         return back()->with('success', 'Category field deleted');
+    }
+
+    /**
+     * JSON list of a category's options (powers the admin options modal).
+     */
+    public function reportCategoryOptions(Request $request, $categoryId)
+    {
+        $this->requireAdmin($request);
+        $this->requirePermission('manage_alerts');
+
+        ReportCategorie::findOrFail($categoryId);
+
+        $options = ReportCategoryOption::where('category_id', $categoryId)
+            ->orderBy('sort_order')
+            ->orderBy('id')
+            ->get()
+            ->map(fn ($o) => [
+                'id' => $o->id,
+                'name' => $o->name,
+                'slug' => $o->slug,
+                'name_ne' => $o->name_ne,
+                'description' => $o->description,
+                'description_ne' => $o->description_ne,
+                'icon' => $o->icon,
+                'icon_type' => $o->icon_type,
+                'severity' => $o->severity,
+                'sort_order' => (int) $o->sort_order,
+                'is_active' => (bool) $o->is_active,
+                'requires_photo' => (bool) $o->requires_photo,
+                'requires_location' => (bool) $o->requires_location,
+            ]);
+
+        return response()->json(['success' => true, 'data' => $options]);
+    }
+
+    /**
+     * JSON list of a category's custom fields (powers the admin fields modal).
+     */
+    public function reportCategoryFields(Request $request, $categoryId)
+    {
+        $this->requireAdmin($request);
+        $this->requirePermission('manage_alerts');
+
+        ReportCategorie::findOrFail($categoryId);
+
+        $fields = ReportCategoryField::where('category_id', $categoryId)
+            ->orderBy('sort_order')
+            ->orderBy('id')
+            ->get()
+            ->map(fn ($f) => [
+                'id' => $f->id,
+                'name' => $f->name,
+                'label' => $f->label,
+                'label_ne' => $f->label_ne,
+                'placeholder' => $f->placeholder,
+                'placeholder_ne' => $f->placeholder_ne,
+                'type' => $f->type,
+                'required' => (bool) $f->required,
+                'is_active' => (bool) $f->is_active,
+                'sort_order' => (int) $f->sort_order,
+                'help_text' => $f->help_text,
+                'help_text_ne' => $f->help_text_ne,
+                'show_in_preview' => (bool) $f->show_in_preview,
+                'options' => $f->options ?? [],
+            ]);
+
+        return response()->json(['success' => true, 'data' => $fields]);
     }
 
     public function sosAlerts(Request $request)

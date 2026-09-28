@@ -1,4 +1,7 @@
+import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
+import 'package:provider/provider.dart';
+import '../../core/services/localization_service.dart';
 
 /// Represents a report category group (e.g., Travel, Community, Safety, Services)
 class ReportCategoryGroup {
@@ -72,29 +75,25 @@ class ReportCategoryGroup {
         'categories': categories.map((c) => c.toJson()).toList(),
       };
 
-  /// Get localized name
   String getLocalizedName(LocalizationService localization) {
-    if (localization.currentLocale == 'ne' && nameNe != null && nameNe!.isNotEmpty) {
+    if (localization.isNepali && nameNe != null && nameNe!.isNotEmpty) {
       return nameNe!;
     }
     return name;
   }
 
-  /// Get localized name using BuildContext
-  String getLocalizedName(BuildContext context) {
+  String getLocalizedNameFromContext(BuildContext context) {
     return getLocalizedName(context.read<LocalizationService>());
   }
 
-  /// Get localized description
   String? getLocalizedDescription(LocalizationService localization) {
-    if (localization.currentLocale == 'ne' && descriptionNe != null && descriptionNe!.isNotEmpty) {
+    if (localization.isNepali && descriptionNe != null && descriptionNe!.isNotEmpty) {
       return descriptionNe;
     }
     return description;
   }
 
-  /// Get localized description using BuildContext
-  String? getLocalizedDescription(BuildContext context) {
+  String? getLocalizedDescriptionFromContext(BuildContext context) {
     return getLocalizedDescription(context.read<LocalizationService>());
   }
 }
@@ -180,39 +179,32 @@ class ReportCategory {
         'fields': fields.map((f) => f.toJson()).toList(),
       };
 
-  /// Get localized name
   String getLocalizedName(LocalizationService localization) {
-    if (localization.currentLocale == 'ne' && nameNe != null && nameNe!.isNotEmpty) {
+    if (localization.isNepali && nameNe != null && nameNe!.isNotEmpty) {
       return nameNe!;
     }
     return name;
   }
 
-  /// Get localized name using BuildContext
-  String getLocalizedName(BuildContext context) {
+  String getLocalizedNameFromContext(BuildContext context) {
     return getLocalizedName(context.read<LocalizationService>());
   }
 
-  /// Get localized description
   String? getLocalizedDescription(LocalizationService localization) {
-    if (localization.currentLocale == 'ne' && descriptionNe != null && descriptionNe!.isNotEmpty) {
+    if (localization.isNepali && descriptionNe != null && descriptionNe!.isNotEmpty) {
       return descriptionNe;
     }
     return description;
   }
 
-  /// Get localized description using BuildContext
-  String? getLocalizedDescription(BuildContext context) {
+  String? getLocalizedDescriptionFromContext(BuildContext context) {
     return getLocalizedDescription(context.read<LocalizationService>());
   }
 
-  /// Get the primary subcategory option if any
   ReportCategoryOption? get primaryOption => options.isNotEmpty ? options.first : null;
 
-  /// Check if category has dynamic form fields beyond description
   bool get hasCustomFields => fields.any((f) => f.name != 'description');
 
-  /// Get form fields excluding the base description field
   List<ReportCategoryField> get customFields => fields.where((f) => f.name != 'description').toList();
 }
 
@@ -227,10 +219,12 @@ class ReportCategoryOption {
   final String? descriptionNe;
   final String? icon;
   final String iconType;
+  final String severity;
   final int sortOrder;
   final bool isActive;
   final bool requiresPhoto;
   final bool requiresLocation;
+  final ReportCategory? parentCategory;
 
   ReportCategoryOption({
     required this.id,
@@ -242,10 +236,12 @@ class ReportCategoryOption {
     this.descriptionNe,
     this.icon,
     this.iconType = 'material',
+    this.severity = 'medium',
     this.sortOrder = 0,
     this.isActive = true,
     this.requiresPhoto = false,
     this.requiresLocation = false,
+    this.parentCategory,
   });
 
   factory ReportCategoryOption.fromJson(Map<String, dynamic> json) {
@@ -259,10 +255,14 @@ class ReportCategoryOption {
       descriptionNe: json['description_ne'],
       icon: json['icon'],
       iconType: json['icon_type'] ?? 'material',
+      severity: json['severity'] ?? 'medium',
       sortOrder: json['sort_order'] ?? 0,
       isActive: json['is_active'] ?? true,
       requiresPhoto: json['requires_photo'] ?? false,
       requiresLocation: json['requires_location'] ?? false,
+      parentCategory: json['category'] is Map<String, dynamic>
+          ? ReportCategory.fromJson(json['category'])
+          : null,
     );
   }
 
@@ -276,35 +276,49 @@ class ReportCategoryOption {
         'description_ne': descriptionNe,
         'icon': icon,
         'icon_type': iconType,
+        'severity': severity,
         'sort_order': sortOrder,
         'is_active': isActive,
         'requires_photo': requiresPhoto,
         'requires_location': requiresLocation,
       };
 
-  /// Get localized name
+  /// Severity-driven outline color: low -> green, medium -> blue,
+  /// high/critical -> red. Pure presentation mapping (kept in Flutter).
+  Color get severityColor {
+    switch (severity) {
+      case 'low':
+        return Colors.green.shade600;
+      case 'high':
+      case 'critical':
+        return Colors.red.shade600;
+      case 'medium':
+      default:
+        return Colors.blue.shade600;
+    }
+  }
+
+  Color get severityFillColor => severityColor.withOpacity(0.08);
+
   String getLocalizedName(LocalizationService localization) {
-    if (localization.currentLocale == 'ne' && nameNe != null && nameNe!.isNotEmpty) {
+    if (localization.isNepali && nameNe != null && nameNe!.isNotEmpty) {
       return nameNe!;
     }
     return name;
   }
 
-  /// Get localized name using BuildContext
-  String getLocalizedName(BuildContext context) {
+  String getLocalizedNameFromContext(BuildContext context) {
     return getLocalizedName(context.read<LocalizationService>());
   }
 
-  /// Get localized description
   String? getLocalizedDescription(LocalizationService localization) {
-    if (localization.currentLocale == 'ne' && descriptionNe != null && descriptionNe!.isNotEmpty) {
+    if (localization.isNepali && descriptionNe != null && descriptionNe!.isNotEmpty) {
       return descriptionNe;
     }
     return description;
   }
 
-  /// Get localized description using BuildContext
-  String? getLocalizedDescription(BuildContext context) {
+  String? getLocalizedDescriptionFromContext(BuildContext context) {
     return getLocalizedDescription(context.read<LocalizationService>());
   }
 }
@@ -376,37 +390,43 @@ class ReportCategoryField {
         'show_in_preview': showInPreview,
       };
 
-  /// Get localized label
   String getLocalizedLabel(LocalizationService localization) {
-    if (localization.currentLocale == 'ne' && labelNe != null && labelNe!.isNotEmpty) {
+    if (localization.isNepali && labelNe != null && labelNe!.isNotEmpty) {
       return labelNe!;
     }
     return label;
   }
 
-  /// Get localized placeholder
+  String getLocalizedLabelFromContext(BuildContext context) {
+    return getLocalizedLabel(context.read<LocalizationService>());
+  }
+
   String? getLocalizedPlaceholder(LocalizationService localization) {
-    if (localization.currentLocale == 'ne' && placeholderNe != null && placeholderNe!.isNotEmpty) {
+    if (localization.isNepali && placeholderNe != null && placeholderNe!.isNotEmpty) {
       return placeholderNe;
     }
     return placeholder;
   }
 
-  /// Get localized help text
+  String? getLocalizedPlaceholderFromContext(BuildContext context) {
+    return getLocalizedPlaceholder(context.read<LocalizationService>());
+  }
+
   String? getLocalizedHelpText(LocalizationService localization) {
-    if (localization.currentLocale == 'ne' && helpTextNe != null && helpTextNe!.isNotEmpty) {
+    if (localization.isNepali && helpTextNe != null && helpTextNe!.isNotEmpty) {
       return helpTextNe;
     }
     return helpText;
   }
 
-  /// Check if this is a select field
+  String? getLocalizedHelpTextFromContext(BuildContext context) {
+    return getLocalizedHelpText(context.read<LocalizationService>());
+  }
+
   bool get isSelectField => type == 'single_select' || type == 'multi_select';
 
-  /// Check if this field allows multiple selections
   bool get isMultiSelect => type == 'multi_select';
 
-  /// Get validation rules as a list of strings
   List<String> get validationRules {
     if (validation == null) return [];
     return validation!.values.expand((v) => v.toString().split('|')).toList();
@@ -439,16 +459,14 @@ class FieldOption {
         'label_ne': labelNe,
       };
 
-  /// Get localized label
   String getLocalizedLabel(LocalizationService localization) {
-    if (localization.currentLocale == 'ne' && labelNe != null && labelNe!.isNotEmpty) {
+    if (localization.isNepali && labelNe != null && labelNe!.isNotEmpty) {
       return labelNe!;
     }
     return label;
   }
 
-  /// Get localized label using BuildContext
-  String getLocalizedLabel(BuildContext context) {
+  String getLocalizedLabelFromContext(BuildContext context) {
     return getLocalizedLabel(context.read<LocalizationService>());
   }
 }

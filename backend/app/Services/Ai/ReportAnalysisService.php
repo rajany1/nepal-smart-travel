@@ -9,6 +9,7 @@ use App\Models\Report;
 use App\Models\ReportMedia;
 use App\Models\XpTransaction;
 use App\Services\AchievementService;
+use App\Services\LocationIntegrityService;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
@@ -119,6 +120,11 @@ class ReportAnalysisService
 
         $action = $this->decideAction($analysis, $analysis['location_check'] ?? [], $analysis['image_check'] ?? [], $report);
         $analysis['action'] = $action;
+        // Mark the integrity gate so actionMessage() renders the mock-location
+        // reason instead of a stale "AI rejected" line from old analysis data.
+        if ($action === 'reject' && $this->isMockLocationRejected($report)) {
+            $analysis['integrity_gate'] = 'mock_location_detected';
+        }
         $analysis['authenticity_score'] = $this->computeAuthenticityScore($analysis);
         $message = $this->actionMessage($analysis);
 
@@ -159,6 +165,15 @@ class ReportAnalysisService
 
     protected function analyze(Report $report): array
     {
+        // === Location-integrity gate: mock location → direct reject ========
+        // The device's own detector reported a spoofed GPS fix (server-side
+        // suspicious status + mock_location_detected). The decision is already
+        // made, so reject immediately and SKIP text + vision AI entirely —
+        // no API tokens are spent reviewing an untrustworthy location.
+        if ($this->isMockLocationRejected($report)) {
+            return $this->mockLocationRejection($report);
+        }
+
         $quality = $this->checkQuality($report);
 
         if (!$quality['pass']) {
@@ -295,30 +310,35 @@ class ReportAnalysisService
     {
         $lat = $report->latitude;
         $lng = $report->longitude;
+        // Server-evaluated location integrity (genuine | suspicious |
+        // cannot_determine). NEVER invalidates the location on its own —
+        // it only modulates the confidence score below, so a suspicious
+        // result routes to human review instead of auto-reject.
+        $integrity = $report->location_integrity_status;
 
         if ($lat === null || $lng === null) {
-            return ['valid' => true, 'verifiable' => false, 'gps_status' => $report->gps_verification_status, 'reason' => 'No coordinates provided'];
+            return ['valid' => true, 'verifiable' => false, 'gps_status' => $report->gps_verification_status, 'integrity_status' => $integrity, 'reason' => 'No coordinates provided'];
         }
 
         $lat = (float) $lat;
         $lng = (float) $lng;
 
         if ($lat == 0.0 && $lng == 0.0) {
-            return ['valid' => false, 'verifiable' => true, 'gps_status' => $report->gps_verification_status, 'reason' => 'Placeholder coordinates (0,0) — location not real'];
+            return ['valid' => false, 'verifiable' => true, 'gps_status' => $report->gps_verification_status, 'integrity_status' => $integrity, 'reason' => 'Placeholder coordinates (0,0) — location not real'];
         }
 
         if ($lat < self::NEPAL_BBOX['lat_min'] || $lat > self::NEPAL_BBOX['lat_max']
             || $lng < self::NEPAL_BBOX['lng_min'] || $lng > self::NEPAL_BBOX['lng_max']) {
-            return ['valid' => false, 'verifiable' => true, 'gps_status' => $report->gps_verification_status, 'reason' => 'Coordinates outside Nepal bounds — likely fake'];
+            return ['valid' => false, 'verifiable' => true, 'gps_status' => $report->gps_verification_status, 'integrity_status' => $integrity, 'reason' => 'Coordinates outside Nepal bounds — likely fake'];
         }
 
         if ($report->gps_verification_status === 'mismatched') {
-            return ['valid' => false, 'verifiable' => true, 'gps_status' => 'mismatched', 'reason' => 'Photo GPS does not match reported location — likely fake'];
+            return ['valid' => false, 'verifiable' => true, 'gps_status' => 'mismatched', 'integrity_status' => $integrity, 'reason' => 'Photo GPS does not match reported location — likely fake'];
         }
 
         $verifiable = $report->gps_verification_status === 'verified';
 
-        return ['valid' => true, 'verifiable' => $verifiable, 'gps_status' => $report->gps_verification_status, 'reason' => 'Location looks valid'];
+        return ['valid' => true, 'verifiable' => $verifiable, 'gps_status' => $report->gps_verification_status, 'integrity_status' => $integrity, 'reason' => 'Location looks valid'];
     }
 
     protected function analyzeImages(Report $report, array $text = []): array
@@ -730,6 +750,14 @@ class ReportAnalysisService
             ? ($gps === 'verified' ? 1.0 : ($gps === 'mismatched' ? 0.0 : 0.85))
             : 0.0;
 
+        // Suspicious location integrity (e.g. mock-location detection,
+        // impossible movement) caps the location trust component. It reduces
+        // trust but never zeroes it — that would auto-reject on a single
+        // client-side signal, which the moderation policy explicitly avoids.
+        if (($location['integrity_status'] ?? null) === LocationIntegrityService::STATUS_SUSPICIOUS) {
+            $loc = min($loc, 0.5);
+        }
+
         $image = $analysis['image_check'] ?? [];
         $verdict = $image['verdict'] ?? 'clean';
         $img = match ($verdict) {
@@ -874,6 +902,17 @@ class ReportAnalysisService
             $locScore = 0.0;
         }
 
+        // Location-integrity modulation: a server-evaluated 'suspicious'
+        // integrity (mock location reported, impossible movement, implausible
+        // accuracy/timestamp, photo conflict) lowers the location signal to
+        // 0.45 — enough to make auto-approval harder and push borderline
+        // reports to human review, but NOT enough to auto-reject on its own.
+        // 'genuine' and 'cannot_determine' are deliberately neutral here:
+        // lack of detector support must never be punished as fraud.
+        if (($location['integrity_status'] ?? null) === LocationIntegrityService::STATUS_SUSPICIOUS) {
+            $locScore = min($locScore, 0.45);
+        }
+
         // --- Duplicate image signal (0.15) ---
         $dupScore = 0.90;
         if (($image['verdict'] ?? '') === 'duplicate') {
@@ -921,6 +960,12 @@ class ReportAnalysisService
     {
         // === EARLY REJECTS (no scoring needed) ===
 
+        // Mock location gate (same rule as analyze()): active here so the
+        // redecode() path over stored analyses also rejects directly.
+        if ($report !== null && $this->isMockLocationRejected($report)) {
+            return 'reject';
+        }
+
         if (($text['is_duplicate'] ?? false) || !($text['is_legitimate'] ?? true)) {
             return 'reject';
         }
@@ -948,6 +993,15 @@ class ReportAnalysisService
         // === DECISION ===
 
         if ($confidence >= 0.80) {
+            // Suspicious location integrity (mock flag, impossible movement,
+            // photo conflict …) vetoes AUTO-APPROVAL only: the report is
+            // routed to human moderation instead. It never downgrades to
+            // 'reject' here — combined evidence still decides rejection
+            // through the normal confidence path.
+            if (($location['integrity_status'] ?? null) === LocationIntegrityService::STATUS_SUSPICIOUS) {
+                return 'pending-review';
+            }
+
             return 'approve';
         }
 
@@ -956,6 +1010,49 @@ class ReportAnalysisService
         }
 
         return 'reject';
+    }
+
+    /**
+     * Mock location was detected on the device: reject the report directly,
+     * before any AI call. Only the Android detector's own mock claim triggers
+     * this (it affects only the submitter's own report). Every other integrity
+     * signal (impossible movement, accuracy, stale timestamps …) keeps the
+     * normal pipeline — those vetoes auto-approval but still get AI-reviewed.
+     */
+    private function isMockLocationRejected(Report $report): bool
+    {
+        return $report->mock_location_detected === true
+            && $report->location_integrity_status === LocationIntegrityService::STATUS_SUSPICIOUS;
+    }
+
+    /**
+     * Deterministic rejection payload for the mock-location gate. Mirrors the
+     * shape of other early rejects (quality/text) so the admin panel and
+     * redecode() render it unchanged — with zero AI provider calls.
+     */
+    private function mockLocationRejection(Report $report): array
+    {
+        return [
+            'suggested_priority' => $report->priority,
+            'is_legitimate' => false,
+            'is_duplicate' => false,
+            'summary' => 'Mock location detected — device reported a spoofed GPS fix; AI review skipped',
+            'category_match' => null,
+            'category_reason' => '',
+            'quality_check' => [
+                'pass' => false,
+                'reason' => 'Mock location detected — rejected before AI review (no API tokens spent)',
+            ],
+            'location_check' => $this->checkLocation($report),
+            'image_check' => [
+                'reviewed' => 0,
+                'images' => [],
+                'verdict' => 'unverifiable',
+                'message' => 'Skipped — mock location detected before any AI call',
+            ],
+            'action' => 'reject',
+            'integrity_gate' => 'mock_location_detected',
+        ];
     }
 
     /**
@@ -985,6 +1082,10 @@ class ReportAnalysisService
         }
 
         if ($action === 'reject') {
+            // Integrity gate ran BEFORE any AI — do not mislabel it "AI rejected".
+            if (($analysis['integrity_gate'] ?? null) === 'mock_location_detected') {
+                return 'Auto-rejected — mock location detected (location integrity gate; AI review skipped)';
+            }
             foreach (($img['images'] ?? []) as $i) {
                 if (!empty($i['verdict_reason'])) {
                     return 'AI rejected — ' . $i['verdict_reason'];
@@ -1001,12 +1102,19 @@ class ReportAnalysisService
         }
 
         $verdict = (string) ($img['verdict'] ?? 'manual review');
+        // Integrity note must survive every return path in this branch —
+        // otherwise an image verdict_reason hides why the report is queued.
+        $suffix = ($loc['integrity_status'] ?? null) === LocationIntegrityService::STATUS_SUSPICIOUS
+            ? ' | location integrity flagged (see report security log)'
+            : '';
         foreach (($img['images'] ?? []) as $i) {
             if (!empty($i['verdict_reason'])) {
-                return 'AI: needs moderator review — ' . $i['verdict_reason'];
+                return 'AI: needs moderator review — ' . $i['verdict_reason'] . $suffix;
             }
         }
-        return 'AI: needs moderator review — ' . ($img['message'] ?? $verdict);
+        $message = 'AI: needs moderator review — ' . ($img['message'] ?? $verdict);
+
+        return $message . $suffix;
     }
 
     protected function awardApprovalXp(Report $report): void

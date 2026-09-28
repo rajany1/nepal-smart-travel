@@ -18,6 +18,7 @@ class ReportCategoryOption extends Model
         'description_ne',
         'icon',
         'icon_type',
+        'severity',
         'sort_order',
         'is_active',
         'requires_photo',

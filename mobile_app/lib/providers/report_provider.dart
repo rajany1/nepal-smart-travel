@@ -19,6 +19,8 @@ class ReportProvider extends ChangeNotifier {
   List<rc.ReportCategory> _categories = [];
   List<rc.ReportCategoryGroup> _categoryGroups = [];
   List<rc.ReportCategory> _featuredCategories = [];
+  List<rc.ReportCategoryOption> _featuredOptions = [];
+  bool _isLoadingFeaturedOptions = false;
   ReportFormConfig? _formConfig;
   bool _isLoading = false;
   bool _isLoadingMore = false;
@@ -51,6 +53,8 @@ class ReportProvider extends ChangeNotifier {
   List<rc.ReportCategory> get categories => _categories;
   List<rc.ReportCategoryGroup> get categoryGroups => _categoryGroups;
   List<rc.ReportCategory> get featuredCategories => _featuredCategories;
+  List<rc.ReportCategoryOption> get featuredOptions => _featuredOptions;
+  bool get isLoadingFeaturedOptions => _isLoadingFeaturedOptions;
   ReportFormConfig? get formConfig => _formConfig;
   bool get isLoading => _isLoading;
   bool get isLoadingMore => _isLoadingMore;
@@ -175,6 +179,41 @@ class ReportProvider extends ChangeNotifier {
     }
   }
 
+  /// Fetch featured/most-used report OPTIONS (flat, with severity) for the
+  /// main "What do you want to report?" picker.
+  Future<void> fetchFeaturedOptions({int limit = 9}) async {
+    _isLoadingFeaturedOptions = true;
+    notifyListeners();
+
+    try {
+      final response = await _api.dio.get('/reports/options/featured', queryParameters: {'limit': limit});
+      final data = response.data['data'] as List? ?? [];
+      _featuredOptions = data.map((j) => rc.ReportCategoryOption.fromJson(j)).toList();
+      _isLoadingFeaturedOptions = false;
+      notifyListeners();
+    } catch (e) {
+      print('⚠️ Failed to fetch featured options: $e');
+      _isLoadingFeaturedOptions = false;
+      notifyListeners();
+    }
+  }
+
+  /// Search report OPTIONS by option/category/group name (flat results).
+  Future<List<rc.ReportCategoryOption>> searchOptions(String query, {int limit = 20}) async {
+    if (query.trim().isEmpty) return [];
+    try {
+      final response = await _api.dio.get('/reports/options/search', queryParameters: {
+        'q': query.trim(),
+        'limit': limit,
+      });
+      final data = response.data['data'] as List? ?? [];
+      return data.map((j) => rc.ReportCategoryOption.fromJson(j)).toList();
+    } catch (e) {
+      print('⚠️ Failed to search options: $e');
+      return [];
+    }
+  }
+
   /// Get category form configuration for dynamic form rendering
   Future<rc.ReportCategory?> getCategoryFormConfig(int categoryId) async {
     try {
@@ -191,13 +230,27 @@ class ReportProvider extends ChangeNotifier {
   Future<void> incrementCategoryUsage(int categoryId) async {
     try {
       // This could be a separate endpoint, for now we just track locally
-      final cat = _categories.firstWhere((c) => c.id == categoryId, orElse: () => null);
+      rc.ReportCategory? cat;
+      try {
+        cat = _categories.firstWhere((c) => c.id == categoryId);
+      } catch (e) {
+        cat = null;
+      }
       if (cat != null) {
         // Note: usageCount is not mutable in the model, would need backend call
       }
     } catch (e) {
       print('⚠️ Failed to increment category usage: $e');
     }
+  }
+
+  /// Forget cached feed coordinates. Called when the device location becomes
+  /// unavailable (permission denied / Location service off / no fresh fix) so
+  /// the 60s auto-poll and the home-screen fallback stop sending stale lat/lng
+  /// — the backend's existing no-location (latest nationwide) mode takes over.
+  void clearLastFetchLocation() {
+    _lastLat = null;
+    _lastLng = null;
   }
 
   /// Fetch reports with optional filters
@@ -212,8 +265,13 @@ class ReportProvider extends ChangeNotifier {
     String? sortBy,
     bool refresh = true,
   }) async {
-    // Prevent concurrent fetches (race condition guard)
-    if (_isFetching) return;
+    // Single-flight guard: WAIT for any in-flight fetch instead of silently
+    // dropping this request. Dropping made pull-to-refresh a no-op whenever
+    // a poll/pagination/initial fetch happened to be running — the exact
+    // "refresh sometimes doesn't refresh at all" bug.
+    while (_isFetching) {
+      await Future<void>.delayed(const Duration(milliseconds: 40));
+    }
     _isFetching = true;
 
     if (search != null) _searchQuery = search;
@@ -399,6 +457,9 @@ class ReportProvider extends ChangeNotifier {
     String? photoPath, // Path to the in-app camera captured photo
     double? captureLatitude, // GPS at photo-capture time
     double? captureLongitude, // GPS at photo-capture time
+    double? locationAccuracy, // Metres of the reported GPS fix
+    DateTime? locationTimestamp, // Device time of the reported GPS fix
+    Map<String, dynamic>? locationIntegrity, // Mock-location detection evidence
   }) async {
     if (photoPath == null) {
       _submissionErrorMessage = 'Live photo is required to submit a report.';
@@ -434,6 +495,13 @@ class ReportProvider extends ChangeNotifier {
           'capture_latitude': captureLatitude,
           'capture_longitude': captureLongitude,
         },
+        // Location-integrity evidence (untrusted by design — the backend
+        // re-evaluates these signals server-side before scoring them).
+        if (locationAccuracy != null) 'location_accuracy': locationAccuracy,
+        if (locationTimestamp != null)
+          'location_timestamp': locationTimestamp.toIso8601String(),
+        if (locationIntegrity != null)
+          'location_integrity': locationIntegrity,
       };
 
       formData['image'] = await MultipartFile.fromFile(
@@ -489,6 +557,7 @@ class ReportProvider extends ChangeNotifier {
       fetchFormConfig(),
       fetchCategories(),
       fetchFeaturedCategories(),
+      fetchFeaturedOptions(),
       fetchReports(lat: lat, lng: lng, radiusKm: 20.0),
     ]);
     // Try loading my reports separately (handles auth failure gracefully)
@@ -515,7 +584,11 @@ class ReportProvider extends ChangeNotifier {
     _pollTimer = Timer.periodic(const Duration(seconds: 60), (_) async {
       if (_isFetching) return; // skip if a fetch is already in flight
       await _pollFetchReports();
-      await fetchEmergencyReports(lat: _lastLat, lng: _lastLng, radiusKm: 20.0, refresh: true);
+      await fetchEmergencyReports(
+          lat: _lastLat,
+          lng: _lastLng,
+          radiusKm: _lastLat != null ? 20.0 : null,
+          refresh: true);
       await fetchMyReports();
     });
   }
@@ -528,9 +601,12 @@ class ReportProvider extends ChangeNotifier {
       final response = await _api.dio.get('/reports', queryParameters: {
         'limit': _pageSize,
         'offset': 0,
+        // Only send a nearby filter while trustworthy coordinates exist —
+        // after clearLastFetchLocation() the poll degrades to the backend's
+        // no-location (latest nationwide) mode instead of stale lat/lng.
         if (_lastLat != null) 'lat': _lastLat,
         if (_lastLng != null) 'lng': _lastLng,
-        'radius_km': 20.0,
+        if (_lastLat != null) 'radius_km': 20.0,
         if (_searchQuery != null && _searchQuery!.isNotEmpty)
           'search': _searchQuery,
       });

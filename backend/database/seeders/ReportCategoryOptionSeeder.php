@@ -72,15 +72,40 @@ class ReportCategoryOptionSeeder extends Seeder
             ],
         ];
 
+        // Severity drives the green/blue/red outline on report option cards.
+        // low => green, medium => blue, high/critical => red
+        $severityBySlug = [
+            'pothole' => 'medium', 'road-blocked' => 'high', 'road-landslide' => 'critical',
+            'construction' => 'medium', 'road-other' => 'low',
+            'hazard' => 'high', 'unsafe-structure' => 'critical', 'falling-debris' => 'critical',
+            'hazard-other' => 'medium',
+            'heavy-rain' => 'medium', 'flooding' => 'critical', 'strong-wind' => 'high',
+            'snow-ice' => 'high', 'storm' => 'critical', 'weather-other' => 'low',
+            'bus-delay' => 'low', 'taxi-issue' => 'low', 'flight-delay' => 'medium',
+            'transport-other' => 'low',
+            'hidden-trail' => 'medium', 'viewpoint' => 'low', 'secret-spot' => 'low',
+            'discovery-other' => 'low',
+            'fuel-shortage' => 'high', 'power-outage' => 'high', 'water-issue' => 'medium',
+            'internet-down' => 'medium', 'atm-issue' => 'low', 'service-other' => 'low',
+            'local-event' => 'low', 'community-notice' => 'low', 'lost-found' => 'medium',
+            'road-closure' => 'high', 'notice-other' => 'low',
+            'general-report' => 'low', 'feedback' => 'low',
+        ];
+
         foreach ($options as $categorySlug => $categoryOptions) {
             $category = $categories->get($categorySlug);
             if (!$category) continue;
 
             foreach ($categoryOptions as $opt) {
-                ReportCategoryOption::firstOrCreate(
+                $severity = $severityBySlug[$opt['slug']] ?? 'medium';
+                $row = ReportCategoryOption::firstOrCreate(
                     ['category_id' => $category->id, 'slug' => $opt['slug']],
-                    array_merge($opt, ['category_id' => $category->id, 'icon_type' => 'material', 'is_active' => true])
+                    array_merge($opt, ['category_id' => $category->id, 'icon_type' => 'material', 'is_active' => true, 'severity' => $severity])
                 );
+                // Backfill severity for rows created before the column existed
+                if ($row->severity !== $severity) {
+                    $row->update(['severity' => $severity]);
+                }
             }
         }
 

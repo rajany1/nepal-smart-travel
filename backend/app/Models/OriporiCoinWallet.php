@@ -19,9 +19,9 @@ class OriporiCoinWallet extends Model
     protected function casts(): array
     {
         return [
-            'balance' => 'decimal:2',
-            'total_earned' => 'decimal:2',
-            'total_withdrawn' => 'decimal:2',
+            'balance' => 'decimal:4',
+            'total_earned' => 'decimal:4',
+            'total_withdrawn' => 'decimal:4',
         ];
     }
 

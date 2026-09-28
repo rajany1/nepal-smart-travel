@@ -256,6 +256,34 @@ class AppUiWordSeeder extends Seeder
             'Near you' => 'तपाईं नजिक',
             'Alert created' => 'चेतावनी सिर्जना भयो',
             'New alert nearby' => 'नजिक नयाँ चेतावनी',
+
+            // Report preview validation (missing-info review screen)
+            'Preview Report' => 'रिपोर्ट पूर्वावलोकन',
+            'Submit Report' => 'रिपोर्ट पेश गर्नुहोस्',
+            'Missing information' => 'नभएका विवरणहरू',
+            'Please complete the following before submitting:' => 'पेश गर्नु अघि निम्नहरू पूरा गर्नुहोस्:',
+            'Please complete the missing information above' => 'माथिका नभएका विवरणहरू पूरा गर्नुहोस्',
+            'Submission failed' => 'पेश गर्न सकिएन',
+            'Some fields need attention' => 'केही फिल्डहरूमा ध्यान दिनुपर्छ',
+            'Failed to submit report. Please try again.' => 'रिपोर्ट पेश गर्न सकिएन। कृपया फेरि प्रयास गर्नुहोस्।',
+            'Description must be at least 10 characters' => 'विवरण कम्तीमा १० अक्षरको हुनुपर्छ',
+            'Required' => 'आवश्यक',
+            'Photo' => 'फोटो',
+            '(No description provided)' => '(विवरण दिइएको छैन)',
+            'Photo is required for this report type' => 'यो प्रकारको रिपोर्टका लागि फोटो आवश्यक छ',
+            'Attached Photo' => 'संलग्न फोटो',
+            'Location not available' => 'स्थान उपलब्ध छैन',
+            'Tap to capture live photo' => 'प्रत्यक्ष फोटो खिच्न ट्याप गर्नुहोस्',
+            'Required for this type' => 'यो प्रकारका लागि आवश्यक',
+            'EMERGENCY' => 'आपतकालीन',
+
+            // Route removal (My Route tab)
+            'Remove this route?' => 'यो मार्ग हटाउने हो?',
+            'Reports along this route will stop showing. You can set a new route anytime.' => 'यो मार्गका रिपोर्टहरू देखिन बन्द हुन्छन्। तपाईं जुनसुकै बेला नयाँ मार्ग सेट गर्न सक्नुहुन्छ।',
+            'Remove' => 'हटाउनुहोस्',
+            'Route removed' => 'मार्ग हटाइयो',
+            'Remove route' => 'मार्ग हटाउनुहोस्',
+            'Remove this route' => 'यो मार्ग हटाउनुहोस्',
         ];
 
         foreach ($words as $term => $nepali) {

@@ -6,10 +6,12 @@ import '../../../../providers/report_provider.dart';
 import '../../../../core/models/report_category.dart' as rc;
 import '../../../../config/themes/app_theme.dart';
 
-/// Full-screen bottom sheet for browsing all categories with search and groups
+/// Full-screen bottom sheet for browsing all report options grouped by
+/// category group (Travel, Community, Safety, Services) with search.
 class MoreCategoriesSheet extends StatefulWidget {
   final List<rc.ReportCategoryGroup> categoryGroups;
-  final Function(rc.ReportCategory) onCategorySelected;
+  final void Function(rc.ReportCategory category, rc.ReportCategoryOption? option)
+      onCategorySelected;
 
   const MoreCategoriesSheet({
     super.key,
@@ -24,9 +26,10 @@ class MoreCategoriesSheet extends StatefulWidget {
 class _MoreCategoriesSheetState extends State<MoreCategoriesSheet> {
   final TextEditingController _searchController = TextEditingController();
   final FocusNode _searchFocus = FocusNode();
-  List<rc.ReportCategory> _searchResults = [];
+  List<rc.ReportCategoryOption> _searchResults = [];
   bool _isSearching = false;
   String _lastQuery = '';
+  int? _loadingOptionId;
 
   @override
   void initState() {
@@ -61,13 +64,48 @@ class _MoreCategoriesSheetState extends State<MoreCategoriesSheet> {
   Future<void> _performSearch(String query) async {
     setState(() => _isSearching = true);
     final provider = context.read<ReportProvider>();
-    final results = await provider.searchCategories(query);
+    final results = await provider.searchOptions(query);
     if (mounted) {
       setState(() {
         _searchResults = results;
         _isSearching = false;
       });
     }
+  }
+
+  /// Loads the full category form config for an option, closes this sheet and
+  /// hands (category, option) to the caller so it can open the report form.
+  Future<void> _selectOption(
+      rc.ReportCategory? category, rc.ReportCategoryOption option) async {
+    if (_loadingOptionId != null) return;
+    setState(() => _loadingOptionId = option.id);
+
+    final config =
+        await context.read<ReportProvider>().getCategoryFormConfig(option.categoryId);
+    if (!mounted) return;
+
+    final fullCategory = config ?? category ?? option.parentCategory;
+    if (fullCategory == null) {
+      setState(() => _loadingOptionId = null);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(context.t('Failed to load category')),
+            backgroundColor: AppTheme.errorColor,
+          ),
+        );
+      }
+      return;
+    }
+
+    Navigator.pop(context);
+    widget.onCategorySelected(fullCategory, option);
+  }
+
+  void _selectCategory(rc.ReportCategory category) {
+    if (_loadingOptionId != null) return;
+    Navigator.pop(context);
+    widget.onCategorySelected(category, null);
   }
 
   @override
@@ -223,16 +261,29 @@ class _MoreCategoriesSheetState extends State<MoreCategoriesSheet> {
       padding: const EdgeInsets.symmetric(horizontal: 16),
       itemCount: _searchResults.length,
       itemBuilder: (context, index) {
-        final category = _searchResults[index];
-        return _SearchResultCard(
-          category: category,
-          onTap: () => widget.onCategorySelected(category),
+        final option = _searchResults[index];
+        return Padding(
+          padding: const EdgeInsets.only(bottom: 8),
+          child: _OptionResultCard(
+            option: option,
+            isLoading: _loadingOptionId == option.id,
+            onTap: () => _selectOption(option.parentCategory, option),
+          ),
         );
       },
     );
   }
 
   Widget _buildCategoryGroups(ScrollController scrollController) {
+    if (widget.categoryGroups.isEmpty) {
+      return const Center(
+        child: Padding(
+          padding: EdgeInsets.all(32),
+          child: CircularProgressIndicator(strokeWidth: 2),
+        ),
+      );
+    }
+
     return ListView.builder(
       controller: scrollController,
       padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -241,7 +292,7 @@ class _MoreCategoriesSheetState extends State<MoreCategoriesSheet> {
         final group = widget.categoryGroups[index];
         if (group.categories.isEmpty) return const SizedBox.shrink();
 
-        final groupName = group.getLocalizedName(context);
+        final groupName = group.getLocalizedNameFromContext(context);
 
         return Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -254,7 +305,7 @@ class _MoreCategoriesSheetState extends State<MoreCategoriesSheet> {
                   Icon(
                     IconMapper.getIconData(group.icon!),
                     size: 18,
-                    color: group.iconColor != null 
+                    color: group.iconColor != null
                         ? Color(int.parse(group.iconColor!.replaceFirst('#', '0xFF')))
                         : AppTheme.textSecondary,
                   ),
@@ -290,64 +341,184 @@ class _MoreCategoriesSheetState extends State<MoreCategoriesSheet> {
               ],
             ),
             const SizedBox(height: 10),
-            // Categories Grid
-            GridView.builder(
-              shrinkWrap: true,
-              physics: const NeverScrollableScrollPhysics(),
-              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                crossAxisCount: 3,
-                crossAxisSpacing: 12,
-                mainAxisSpacing: 12,
-                childAspectRatio: 0.85,
-              ),
-              itemCount: group.categories.length,
-              itemBuilder: (context, catIndex) {
-                final category = group.categories[catIndex];
-                return _GroupCategoryCard(
-                  category: category,
-                  isFeatured: category.isFeatured,
-                  onTap: () => widget.onCategorySelected(category),
-                );
-              },
-            ),
+            // Categories (with their options)
+            ...group.categories.map((category) => _buildCategorySection(category)),
             const SizedBox(height: 8),
           ],
         );
       },
     );
   }
+
+  /// A category header plus its option chips (severity-outlined). Categories
+  /// without options stay tappable cards that open the form directly.
+  Widget _buildCategorySection(rc.ReportCategory category) {
+    if (category.options.isEmpty) {
+      return Padding(
+        padding: const EdgeInsets.only(bottom: 12),
+        child: _GroupCategoryCard(
+          category: category,
+          isFeatured: category.isFeatured,
+          onTap: () => _selectCategory(category),
+        ),
+      );
+    }
+
+    final iconData = IconMapper.getIconData(category.icon ?? 'assignment');
+    final categoryColor = IconMapper.getCategoryColor(category.icon);
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 14),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Category subheader
+          Row(
+            children: [
+              Container(
+                width: 28,
+                height: 28,
+                decoration: BoxDecoration(
+                  color: categoryColor.withOpacity(0.12),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Icon(iconData, size: 16, color: categoryColor),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  category.getLocalizedNameFromContext(context),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    fontSize: AppTheme.textBase,
+                    fontWeight: FontWeight.w700,
+                    color: AppTheme.textPrimary,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          // Option chips with severity outlines
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: category.options
+                .map(
+                  (option) => _OptionChip(
+                    option: option,
+                    isLoading: _loadingOptionId == option.id,
+                    onTap: () => _selectOption(category, option),
+                  ),
+                )
+                .toList(),
+          ),
+        ],
+      ),
+    );
+  }
 }
 
-/// Search result card with group context
-class _SearchResultCard extends StatelessWidget {
-  final rc.ReportCategory category;
+/// Option chip outlined by severity: low -> green, medium -> blue,
+/// high/critical -> red.
+class _OptionChip extends StatelessWidget {
+  final rc.ReportCategoryOption option;
+  final bool isLoading;
   final VoidCallback onTap;
 
-  const _SearchResultCard({
-    required this.category,
+  const _OptionChip({
+    required this.option,
+    required this.isLoading,
     required this.onTap,
   });
 
   @override
   Widget build(BuildContext context) {
-    final displayName = category.getLocalizedName(context);
-    final iconData = IconMapper.getIconData(category.icon ?? 'assignment');
-    final categoryColor = IconMapper.getCategoryColor(category.icon);
+    final severityColor = option.severityColor;
+    final iconData = IconMapper.getIconData(option.icon ?? 'assignment');
 
     return GestureDetector(
-      onTap: onTap,
+      onTap: isLoading ? null : onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+        decoration: BoxDecoration(
+          color: option.severityFillColor,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+            color: severityColor.withOpacity(0.75),
+            width: 1.5,
+          ),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (isLoading)
+              SizedBox(
+                width: 16,
+                height: 16,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  color: severityColor,
+                ),
+              )
+            else
+              Icon(iconData, size: 16, color: severityColor),
+            const SizedBox(width: 6),
+            Flexible(
+              child: Text(
+                option.getLocalizedNameFromContext(context),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  fontSize: AppTheme.textSm,
+                  fontWeight: FontWeight.w600,
+                  color: AppTheme.textPrimary,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Search result row for a flat report option (shows its category as context)
+class _OptionResultCard extends StatelessWidget {
+  final rc.ReportCategoryOption option;
+  final bool isLoading;
+  final VoidCallback onTap;
+
+  const _OptionResultCard({
+    required this.option,
+    required this.isLoading,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final severityColor = option.severityColor;
+    final iconData = IconMapper.getIconData(option.icon ?? 'assignment');
+    final categoryName = option.parentCategory?.getLocalizedNameFromContext(context);
+
+    return GestureDetector(
+      onTap: isLoading ? null : onTap,
       child: Container(
         decoration: BoxDecoration(
           color: AppTheme.surfaceColor,
           borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: AppTheme.dividerColor.withOpacity(0.5)),
+          border: Border.all(
+            color: severityColor.withOpacity(0.75),
+            width: 1.5,
+          ),
         ),
         child: Material(
           color: Colors.transparent,
           borderRadius: BorderRadius.circular(16),
           child: InkWell(
             borderRadius: BorderRadius.circular(16),
-            onTap: onTap,
+            onTap: isLoading ? null : onTap,
             child: Padding(
               padding: const EdgeInsets.all(14),
               child: Row(
@@ -357,10 +528,10 @@ class _SearchResultCard extends StatelessWidget {
                     width: 44,
                     height: 44,
                     decoration: BoxDecoration(
-                      color: categoryColor.withOpacity(0.12),
+                      color: option.severityFillColor,
                       borderRadius: BorderRadius.circular(12),
                     ),
-                    child: Icon(iconData, size: 22, color: categoryColor),
+                    child: Icon(iconData, size: 22, color: severityColor),
                   ),
                   const SizedBox(width: 12),
                   // Info
@@ -370,7 +541,7 @@ class _SearchResultCard extends StatelessWidget {
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
                         Text(
-                          displayName,
+                          option.getLocalizedNameFromContext(context),
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                           style: const TextStyle(
@@ -379,10 +550,10 @@ class _SearchResultCard extends StatelessWidget {
                             color: AppTheme.textPrimary,
                           ),
                         ),
-                        if (category.description != null) ...[
+                        if (categoryName != null && categoryName.isNotEmpty) ...[
                           const SizedBox(height: 2),
                           Text(
-                            category.getLocalizedDescription(context) ?? '',
+                            categoryName,
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                             style: const TextStyle(
@@ -394,19 +565,26 @@ class _SearchResultCard extends StatelessWidget {
                       ],
                     ),
                   ),
-                  // Arrow
-                  Icon(Icons.chevron_right, color: AppTheme.textSecondary.withOpacity(0.5)),
+                  if (isLoading)
+                    const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  else
+                    Icon(Icons.chevron_right,
+                        color: AppTheme.textSecondary.withOpacity(0.5)),
                 ],
               ),
             ),
           ),
         ),
-      );
-    }
+      ),
+    );
   }
 }
 
-/// Category card for group grids
+/// Category card for groups whose categories have no options
 class _GroupCategoryCard extends StatelessWidget {
   final rc.ReportCategory category;
   final bool isFeatured;
@@ -420,7 +598,7 @@ class _GroupCategoryCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final displayName = category.getLocalizedName(context);
+    final displayName = category.getLocalizedNameFromContext(context);
     final iconData = IconMapper.getIconData(category.icon ?? 'assignment');
     final categoryColor = IconMapper.getCategoryColor(category.icon);
 
@@ -507,7 +685,7 @@ class _GroupCategoryCard extends StatelessWidget {
             ),
           ),
         ),
-      );
-    }
+      ),
+    );
   }
 }

@@ -418,7 +418,7 @@ class WithdrawalController extends Controller
                 'ad_admin_share_today' => \App\Models\AdRevenueLedger::whereDate('created_at', $today)->sum('admin_share'),
                 'ad_impressions_today' => \App\Models\AdImpression::whereDate('viewed_at', $today)->count(),
                 'ad_clicks_today' => \App\Models\AdClick::whereDate('clicked_at', $today)->count(),
-                'ad_payments_today' => \App\Models\AdPayment::where('status', 'completed')
+                'ad_payments_today' => \App\Models\AdPayment::where('status', 'success')
                     ->whereDate('paid_at', $today)->sum('amount'),
                 'active_campaigns' => \App\Models\AdCampaign::where('status', 'active')->count(),
             ],
@@ -438,7 +438,7 @@ class WithdrawalController extends Controller
                 'ad_admin_share_month' => \App\Models\AdRevenueLedger::where('created_at', '>=', $thisMonth)->sum('admin_share'),
                 'ad_impressions_month' => \App\Models\AdImpression::where('viewed_at', '>=', $thisMonth)->count(),
                 'ad_clicks_month' => \App\Models\AdClick::where('clicked_at', '>=', $thisMonth)->count(),
-                'ad_payments_month' => \App\Models\AdPayment::where('status', 'completed')
+                'ad_payments_month' => \App\Models\AdPayment::where('status', 'success')
                     ->where('paid_at', '>=', $thisMonth)->sum('amount'),
             ],
             'total' => [
@@ -456,7 +456,7 @@ class WithdrawalController extends Controller
                 'ad_user_share_total' => \App\Models\AdRevenueLedger::sum('user_share'),
                 'ad_impressions_total' => \App\Models\AdImpression::count(),
                 'ad_clicks_total' => \App\Models\AdClick::count(),
-                'ad_payments_total' => \App\Models\AdPayment::where('status', 'completed')->sum('amount'),
+                'ad_payments_total' => \App\Models\AdPayment::where('status', 'success')->sum('amount'),
                 'ad_campaigns_total' => \App\Models\AdCampaign::count(),
             ],
         ];
@@ -485,7 +485,7 @@ class WithdrawalController extends Controller
                 'ad_admin_share' => \App\Models\AdRevenueLedger::whereBetween('created_at', [$from, $to])->sum('admin_share'),
                 'ad_impressions' => \App\Models\AdImpression::whereBetween('viewed_at', [$from, $to])->count(),
                 'ad_clicks' => \App\Models\AdClick::whereBetween('clicked_at', [$from, $to])->count(),
-                'ad_payments' => \App\Models\AdPayment::where('status', 'completed')
+                'ad_payments' => \App\Models\AdPayment::where('status', 'success')
                     ->whereBetween('paid_at', [$from, $to])->sum('amount'),
             ];
         }
@@ -512,7 +512,7 @@ class WithdrawalController extends Controller
         $adminSharePercent = (float) CoinSetting::getValue('admin_share_percent', 53);
 
         // ── MONEY IN (Real NPR entering the platform) ──
-        $adPaymentsReceived = (float) \App\Models\AdPayment::where('status', 'completed')->sum('amount');
+        $adPaymentsReceived = (float) \App\Models\AdPayment::where('status', 'success')->sum('amount');
         $bookingPaymentsReceived = (float) \App\Models\BookingPayment::where('status', 'success')->sum('amount');
         $subscriptionPaymentsReceived = (float) \App\Models\SubscriptionPayment::where('status', 'success')->sum('amount');
         $featuredPaymentsReceived = (float) \App\Models\FeaturedPayment::where('status', 'paid')->sum('amount');
@@ -611,6 +611,13 @@ class WithdrawalController extends Controller
         $clickEarnings = (float) CoinTransaction::where('type', 'click_earning')->sum('amount');
         $adminAdjustments = (float) CoinTransaction::where('type', 'admin_adjustment')->sum('amount');
         $redemptionDeductions = (float) CoinTransaction::where('type', 'redemption')->sum('amount');
+        $reversalCount = CoinTransaction::whereNotNull('reverses_transaction_id')->count();
+        $reversalTotal = (float) CoinTransaction::whereNotNull('reverses_transaction_id')->sum('amount');
+        $recentReversals = CoinTransaction::whereNotNull('reverses_transaction_id')
+            ->with(['user:id,name', 'reverses:id,user_id,type,amount,description'])
+            ->latest('id')
+            ->limit(10)
+            ->get();
         $totalCoinNprValue = $totalCoinsIssued * $coinToNpr;
 
         // ── Partner Wallets ──
@@ -651,7 +658,7 @@ class WithdrawalController extends Controller
         $adRevenueAdminShare = (float) \App\Models\AdRevenueLedger::sum('admin_share');
         $activeAdCampaigns = \App\Models\AdCampaign::where('status', 'active')->count();
         $totalAdCampaigns = \App\Models\AdCampaign::count();
-        $totalAdPayments = (float) \App\Models\AdPayment::where('status', 'completed')->sum('amount');
+        $totalAdPayments = (float) \App\Models\AdPayment::where('status', 'success')->sum('amount');
 
         // ── Offer Redemptions ──
         $totalOffers = \App\Models\RewardOffer::withTrashed()->count();
@@ -719,7 +726,7 @@ class WithdrawalController extends Controller
         // ── Reconciliation Check ──
         $walletSumBalance = (float) \App\Models\OriporiCoinWallet::sum('balance');
         $coinTxnSum = (float) CoinTransaction::sum('amount');
-        $coinDrift = round($walletSumBalance - $coinTxnSum, 2);
+        $coinDrift = round($walletSumBalance - $coinTxnSum, 4);
 
         $partnerWalletSum = (float) \App\Models\PartnerWallet::sum('balance');
         // partner ledger not yet created — mark as unreconcilable
@@ -732,6 +739,7 @@ class WithdrawalController extends Controller
             'totalCoinWallets', 'totalCoinsIssued', 'totalCoinsEarned', 'totalCoinsWithdrawn',
             'coinTransactionsCount', 'impressionEarnings', 'clickEarnings', 'adminAdjustments',
             'redemptionDeductions', 'totalCoinNprValue',
+            'reversalCount', 'reversalTotal', 'recentReversals',
             'totalPartnerWallets', 'totalPartnerBalance', 'totalPartnerEarned', 'totalPartnerWithdrawn',
             'partnerPaymentsCount', 'partnerPaymentsRevenue', 'partnerPaymentsCommission', 'partnerPaymentsNet',
             'totalWithdrawals', 'pendingWithdrawals', 'processingWithdrawals', 'completedWithdrawals',

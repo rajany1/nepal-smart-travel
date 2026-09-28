@@ -3,15 +3,16 @@ import 'package:provider/provider.dart';
 import '../../../../core/services/localization_service.dart';
 import '../../../../core/utils/icon_mapper.dart';
 import '../../../../providers/report_provider.dart';
-import '../../../../core/models/report_category.dart';
+import '../../../../core/models/report_category.dart' as rc;
 import '../../../../config/themes/app_theme.dart';
 import 'more_categories_sheet.dart';
-import 'category_form_sheet.dart';
 
-/// Bottom sheet for selecting a report category
-/// Shows featured categories + "More categories" button
+/// Bottom sheet for selecting what to report.
+/// Shows featured report OPTIONS (with severity-colored outlines) plus a
+/// "More categories" button that opens the full group/category browser.
 class CategorySelectionSheet extends StatefulWidget {
-  final Function(ReportCategory) onCategorySelected;
+  final void Function(rc.ReportCategory category, rc.ReportCategoryOption? option)
+      onCategorySelected;
 
   const CategorySelectionSheet({
     super.key,
@@ -24,17 +25,24 @@ class CategorySelectionSheet extends StatefulWidget {
 
 class _CategorySelectionSheetState extends State<CategorySelectionSheet> {
   late final ReportProvider _reportProvider;
+  int? _loadingOptionId;
+  bool _isOpening = false;
 
   @override
   void initState() {
     super.initState();
     _reportProvider = context.read<ReportProvider>();
-    // Load featured categories if not already loaded
-    if (_reportProvider.featuredCategories.isEmpty && !_reportProvider.isLoadingFeatured) {
+    if (_reportProvider.featuredOptions.isEmpty &&
+        !_reportProvider.isLoadingFeaturedOptions) {
+      _reportProvider.fetchFeaturedOptions(limit: 9);
+    }
+    // Fallback + "More" sheet data
+    if (_reportProvider.featuredCategories.isEmpty &&
+        !_reportProvider.isLoadingFeatured) {
       _reportProvider.fetchFeaturedCategories();
     }
-    // Load all categories for "More" sheet
-    if (_reportProvider.categoryGroups.isEmpty && !_reportProvider.isLoadingCategories) {
+    if (_reportProvider.categoryGroups.isEmpty &&
+        !_reportProvider.isLoadingCategories) {
       _reportProvider.fetchCategories();
     }
   }
@@ -90,23 +98,32 @@ class _CategorySelectionSheetState extends State<CategorySelectionSheet> {
               ),
               const SizedBox(height: 20),
 
-              // Featured Categories
-              if (provider.isLoadingFeatured)
+              // Featured report options
+              if (provider.isLoadingFeaturedOptions && provider.featuredOptions.isEmpty)
                 const Center(
                   child: Padding(
                     padding: EdgeInsets.all(24),
                     child: CircularProgressIndicator(strokeWidth: 2),
                   ),
                 )
-              else if (provider.featuredCategories.isEmpty)
+              else if (provider.featuredOptions.isNotEmpty)
+                _buildFeaturedOptions(provider)
+              else if (provider.isLoadingFeatured)
+                const Center(
+                  child: Padding(
+                    padding: EdgeInsets.all(24),
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  ),
+                )
+              else if (provider.featuredCategories.isNotEmpty)
+                _buildFeaturedCategories(provider)
+              else
                 const Center(
                   child: Padding(
                     padding: EdgeInsets.all(24),
                     child: Text('No categories available'),
                   ),
-                )
-              else
-                _buildFeaturedCategories(provider),
+                ),
 
               const SizedBox(height: 16),
 
@@ -121,6 +138,43 @@ class _CategorySelectionSheetState extends State<CategorySelectionSheet> {
     );
   }
 
+  Widget _buildFeaturedOptions(ReportProvider provider) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          context.t('Most Used'),
+          style: const TextStyle(
+            fontSize: AppTheme.textLg,
+            fontWeight: FontWeight.w600,
+            color: AppTheme.textPrimary,
+          ),
+        ),
+        const SizedBox(height: 12),
+        GridView.builder(
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
+          gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+            crossAxisCount: 3,
+            crossAxisSpacing: 12,
+            mainAxisSpacing: 12,
+            childAspectRatio: 0.85,
+          ),
+          itemCount: provider.featuredOptions.length,
+          itemBuilder: (context, index) {
+            final option = provider.featuredOptions[index];
+            return _OptionCard(
+              option: option,
+              isLoading: _loadingOptionId == option.id,
+              onTap: () => _selectOption(option),
+            );
+          },
+        ),
+      ],
+    );
+  }
+
+  /// Fallback when the options endpoint is unavailable: featured categories.
   Widget _buildFeaturedCategories(ReportProvider provider) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -148,8 +202,11 @@ class _CategorySelectionSheetState extends State<CategorySelectionSheet> {
             final category = provider.featuredCategories[index];
             return _CategoryCard(
               category: category,
-              isFeatured: true,
-              onTap: () => _selectCategory(category),
+              onTap: () {
+                if (_isOpening) return;
+                _isOpening = true;
+                widget.onCategorySelected(category, null);
+              },
             );
           },
         ),
@@ -180,9 +237,33 @@ class _CategorySelectionSheetState extends State<CategorySelectionSheet> {
     );
   }
 
-  void _selectCategory(ReportCategory category) {
+  /// Loads the full category form config for an option, closes this sheet and
+  /// hands (category, option) to the caller so it can open the report form.
+  Future<void> _selectOption(rc.ReportCategoryOption option) async {
+    if (_loadingOptionId != null || _isOpening) return;
+    setState(() => _loadingOptionId = option.id);
+
+    final config =
+        await context.read<ReportProvider>().getCategoryFormConfig(option.categoryId);
+    if (!mounted) return;
+
+    final category = config ?? option.parentCategory;
+    if (category == null) {
+      setState(() => _loadingOptionId = null);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(context.t('Failed to load category')),
+            backgroundColor: AppTheme.errorColor,
+          ),
+        );
+      }
+      return;
+    }
+
+    _isOpening = true;
     Navigator.pop(context);
-    widget.onCategorySelected(category);
+    widget.onCategorySelected(category, option);
   }
 
   void _showMoreCategoriesSheet(ReportProvider provider) {
@@ -193,27 +274,130 @@ class _CategorySelectionSheetState extends State<CategorySelectionSheet> {
       backgroundColor: Colors.transparent,
       builder: (ctx) => MoreCategoriesSheet(
         categoryGroups: provider.categoryGroups,
-        onCategorySelected: _selectCategory,
+        onCategorySelected: widget.onCategorySelected,
       ),
     );
   }
 }
 
-/// Individual category card in the grid
-class _CategoryCard extends StatelessWidget {
-  final ReportCategory category;
-  final bool isFeatured;
+/// Option card in the grid, outlined by severity: low -> green,
+/// medium -> blue, high/critical -> red.
+class _OptionCard extends StatelessWidget {
+  final rc.ReportCategoryOption option;
+  final bool isLoading;
   final VoidCallback onTap;
 
-  const _CategoryCard({
-    required this.category,
-    required this.isFeatured,
+  const _OptionCard({
+    required this.option,
+    required this.isLoading,
     required this.onTap,
   });
 
   @override
   Widget build(BuildContext context) {
-    final displayName = category.getLocalizedName(context);
+    final displayName = option.getLocalizedNameFromContext(context);
+    final iconData = IconMapper.getIconData(option.icon ?? 'assignment');
+    final severityColor = option.severityColor;
+
+    return GestureDetector(
+      onTap: isLoading ? null : onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 150),
+        curve: Curves.easeOut,
+        decoration: BoxDecoration(
+          color: AppTheme.surfaceColor,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(
+            color: severityColor.withOpacity(0.75),
+            width: 1.5,
+          ),
+          boxShadow: [
+            BoxShadow(
+              color: severityColor.withOpacity(0.12),
+              blurRadius: 8,
+              offset: const Offset(0, 2),
+            ),
+          ],
+        ),
+        child: Material(
+          color: Colors.transparent,
+          borderRadius: BorderRadius.circular(16),
+          child: InkWell(
+            borderRadius: BorderRadius.circular(16),
+            onTap: isLoading ? null : onTap,
+            child: Stack(
+              children: [
+                Padding(
+                  padding: const EdgeInsets.all(12),
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Container(
+                        width: 48,
+                        height: 48,
+                        decoration: BoxDecoration(
+                          color: option.severityFillColor,
+                          borderRadius: BorderRadius.circular(14),
+                        ),
+                        child: Icon(
+                          iconData,
+                          size: 26,
+                          color: severityColor,
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                      Text(
+                        displayName,
+                        textAlign: TextAlign.center,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          fontSize: AppTheme.textSm,
+                          fontWeight: FontWeight.w600,
+                          color: AppTheme.textPrimary,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                if (isLoading)
+                  Positioned.fill(
+                    child: Container(
+                      decoration: BoxDecoration(
+                        color: AppTheme.surfaceColor.withOpacity(0.75),
+                        borderRadius: BorderRadius.circular(16),
+                      ),
+                      child: const Center(
+                        child: SizedBox(
+                          width: 22,
+                          height: 22,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        ),
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Fallback category card (options endpoint unavailable)
+class _CategoryCard extends StatelessWidget {
+  final rc.ReportCategory category;
+  final VoidCallback onTap;
+
+  const _CategoryCard({
+    required this.category,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final displayName = category.getLocalizedNameFromContext(context);
     final iconData = IconMapper.getIconData(category.icon ?? 'assignment');
     final categoryColor = IconMapper.getCategoryColor(category.icon);
 
@@ -226,14 +410,12 @@ class _CategoryCard extends StatelessWidget {
           color: AppTheme.surfaceColor,
           borderRadius: BorderRadius.circular(16),
           border: Border.all(
-            color: isFeatured 
-                ? categoryColor.withOpacity(0.3) 
-                : AppTheme.dividerColor.withOpacity(0.5),
-            width: isFeatured ? 2 : 1,
+            color: categoryColor.withOpacity(0.3),
+            width: 2,
           ),
           boxShadow: [
             BoxShadow(
-              color: categoryColor.withOpacity(isFeatured ? 0.15 : 0.08),
+              color: categoryColor.withOpacity(0.15),
               blurRadius: 8,
               offset: const Offset(0, 2),
             ),
@@ -250,7 +432,6 @@ class _CategoryCard extends StatelessWidget {
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  // Icon
                   Container(
                     width: 48,
                     height: 48,
@@ -265,7 +446,6 @@ class _CategoryCard extends StatelessWidget {
                     ),
                   ),
                   const SizedBox(height: 10),
-                  // Name
                   Text(
                     displayName,
                     textAlign: TextAlign.center,
@@ -277,29 +457,12 @@ class _CategoryCard extends StatelessWidget {
                       color: AppTheme.textPrimary,
                     ),
                   ),
-                  if (isFeatured) ...[
-                    const SizedBox(height: 4),
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                      decoration: BoxDecoration(
-                        color: AppTheme.primaryColor.withOpacity(0.1),
-                        borderRadius: BorderRadius.circular(4),
-                      ),
-                      child: Text(
-                        context.t('Popular'),
-                        style: const TextStyle(
-                          fontSize: 9,
-                          fontWeight: FontWeight.w600,
-                          color: AppTheme.primaryColor,
-                        ),
-                      ),
-                    ),
-                  ],
                 ],
               ),
             ),
           ),
         ),
-      );
-    }
+      ),
+    );
+  }
 }

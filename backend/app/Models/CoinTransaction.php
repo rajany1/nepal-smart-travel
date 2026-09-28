@@ -4,6 +4,7 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 
 class CoinTransaction extends Model
 {
@@ -15,6 +16,7 @@ class CoinTransaction extends Model
         'amount',
         'ad_campaign_id',
         'report_id',
+        'reverses_transaction_id',
         'description',
         'metadata',
     ];
@@ -22,7 +24,7 @@ class CoinTransaction extends Model
     protected function casts(): array
     {
         return [
-            'amount' => 'decimal:2',
+            'amount' => 'decimal:4',
             'metadata' => 'array',
         ];
     }
@@ -40,5 +42,21 @@ class CoinTransaction extends Model
     public function report(): BelongsTo
     {
         return $this->belongsTo(Report::class);
+    }
+
+    /**
+     * The original credit this transaction reverses (null for ordinary rows).
+     */
+    public function reverses(): BelongsTo
+    {
+        return $this->belongsTo(CoinTransaction::class, 'reverses_transaction_id');
+    }
+
+    /**
+     * The compensating reversal created for this credit (if any).
+     */
+    public function reversedBy(): HasOne
+    {
+        return $this->hasOne(CoinTransaction::class, 'reverses_transaction_id')->latestOfMany();
     }
 }

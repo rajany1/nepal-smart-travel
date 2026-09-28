@@ -4,10 +4,10 @@ import '../../../config/themes/app_theme.dart';
 /// Utility class for mapping string icon names to Flutter IconData
 /// Supports Material Icons, custom icons, and emoji
 class IconMapper {
-  static const Map<String, IconData> _materialIcons = {
+  static final Map<String, IconData> _materialIcons = <String, IconData>{
     'info': Icons.info_outline,
     'info_outline': Icons.info_outline,
-    'road': Icons.road,
+    'road': Icons.directions_car,
     'traffic': Icons.traffic,
     'warning': Icons.warning_amber,
     'warning_amber': Icons.warning_amber,
@@ -19,7 +19,7 @@ class IconMapper {
     'directions_car': Icons.directions_car,
     'groups': Icons.groups,
     'local_hospital': Icons.local_hospital,
-    'pothole': Icons.pothole,
+    'pothole': Icons.terrain,
     'block': Icons.block,
     'terrain': Icons.terrain,
     'construction': Icons.construction,
@@ -63,32 +63,25 @@ class IconMapper {
     'directions_bike': Icons.directions_bike,
   };
 
-  static const Map<String, IconData> _customIcons = {
-    // Add any custom icon mappings here
-  };
+  static final Map<String, IconData> _customIcons = <String, IconData>{};
 
   /// Get IconData from icon name string
   static IconData getIconData(String iconName) {
-    // Check material icons first
     if (_materialIcons.containsKey(iconName)) {
       return _materialIcons[iconName]!;
     }
 
-    // Check custom icons
     if (_customIcons.containsKey(iconName)) {
       return _customIcons[iconName]!;
     }
 
-    // Try to parse as IconData (for dynamically generated icons)
     try {
       final parts = iconName.split('.');
       if (parts.length == 2) {
-        // This won't work for runtime, but kept for reference
         return Icons.help_outline;
       }
     } catch (_) {}
 
-    // Default fallback
     return Icons.help_outline;
   }
 
@@ -102,39 +95,39 @@ class IconMapper {
       case 'directions_car':
       case 'directions_bus':
       case 'local_taxi':
-        return const Color(0xFFF39C12); // Amber/Orange
+        return const Color(0xFFF39C12);
       case 'warning':
       case 'warning_amber':
       case 'hazard':
       case 'block':
-        return AppTheme.errorColor; // Red
+        return AppTheme.errorColor;
       case 'ac_unit':
       case 'rain':
       case 'flood':
       case 'air':
       case 'flash_on':
-        return const Color(0xFF5C6BC0); // Indigo
+        return const Color(0xFF5C6BC0);
       case 'directions_bike':
       case 'hiking':
       case 'explore':
-        return const Color(0xFF8E44AD); // Purple
+        return const Color(0xFF8E44AD);
       case 'local_gas_station':
       case 'bolt':
       case 'water_drop':
       case 'local_hospital':
       case 'bloodtype':
       case 'medication':
-        return const Color(0xFF16A085); // Teal
+        return const Color(0xFF16A085);
       case 'event':
       case 'celebration':
       case 'announcement':
-        return const Color(0xFFE91E63); // Pink
+        return const Color(0xFFE91E63);
       case 'info':
       case 'info_outline':
       case 'help':
       case 'help_outline':
       case 'assignment':
-        return AppTheme.infoColor; // Blue
+        return AppTheme.infoColor;
       default:
         return AppTheme.primaryColor;
     }

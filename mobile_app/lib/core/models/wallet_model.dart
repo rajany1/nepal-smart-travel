@@ -134,6 +134,8 @@ class CoinTransaction {
         return 'Withdrawal';
       case 'admin_adjustment':
         return 'Admin Adjustment';
+      case 'self_reward_reversal':
+        return 'Reward Reversed';
       default:
         return type;
     }

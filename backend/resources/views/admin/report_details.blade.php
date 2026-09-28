@@ -87,6 +87,32 @@
                         <span class="text-gray-600">Not verified</span>
                     @endif
                 </div>
+                <div class="mt-2"><strong>Location Integrity:</strong>
+                    @php
+                        $liStatus = $report->location_integrity_status ?? null;
+                    @endphp
+                    @if($liStatus === 'suspicious')
+                        <span class="text-red-700">Suspicious</span>
+                        @if($report->mock_location_detected)
+                            <span class="text-red-700">(client reported mock location)</span>
+                        @endif
+                    @elseif($liStatus === 'genuine')
+                        <span class="text-green-700">Genuine</span>
+                    @elseif($liStatus === 'cannot_determine')
+                        <span class="text-yellow-700">Could not be determined</span>
+                    @else
+                        <span class="text-gray-600">Not evaluated</span>
+                    @endif
+                    @if($report->location_integrity_source)
+                        <span class="text-xs text-gray-500">(source: {{ $report->location_integrity_source }})</span>
+                    @endif
+                    @if($report->location_accuracy !== null)
+                        <span class="text-xs text-gray-500">— accuracy {{ $report->location_accuracy }} m</span>
+                    @endif
+                    @if($report->location_timestamp)
+                        <div class="text-xs text-gray-500">Fix time: {{ $report->location_timestamp }}</div>
+                    @endif
+                </div>
                 <div class="mt-2"><strong>Photo captured at:</strong> {{ $report->photo_captured_at ?? 'N/A' }}</div>
                 @if($report->moderation_message)
                 <div class="mt-4 pt-4 border-t border-gray-200">

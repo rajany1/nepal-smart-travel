@@ -173,9 +173,11 @@ Route::prefix($adminPrefix)->name('admin.')->middleware(['auth', 'status', 'role
     Route::post('/report-categories', [AdminController::class, 'createReportCategory'])->name('report-categories.create');
     Route::post('/report-categories/{id}/update', [AdminController::class, 'updateReportCategory'])->name('report-categories.update');
     Route::post('/report-categories/{id}/delete', [AdminController::class, 'deleteReportCategory'])->name('report-categories.delete');
+    Route::get('/report-categories/{id}/options', [AdminController::class, 'reportCategoryOptions'])->name('report-categories.options.list');
     Route::post('/report-categories/{id}/options', [AdminController::class, 'createReportCategoryOption'])->name('report-categories.options.create');
     Route::post('/report-categories/options/{id}/update', [AdminController::class, 'updateReportCategoryOption'])->name('report-categories.options.update');
     Route::post('/report-categories/options/{id}/delete', [AdminController::class, 'deleteReportCategoryOption'])->name('report-categories.options.delete');
+    Route::get('/report-categories/{id}/fields', [AdminController::class, 'reportCategoryFields'])->name('report-categories.fields.list');
     Route::post('/report-categories/{id}/fields', [AdminController::class, 'createReportCategoryField'])->name('report-categories.fields.create');
     Route::post('/report-categories/fields/{id}/update', [AdminController::class, 'updateReportCategoryField'])->name('report-categories.fields.update');
     Route::post('/report-categories/fields/{id}/delete', [AdminController::class, 'deleteReportCategoryField'])->name('report-categories.fields.delete');

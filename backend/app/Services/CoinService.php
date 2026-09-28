@@ -9,6 +9,7 @@ use App\Models\AdCampaign;
 use App\Models\AdRewardEvent;
 use App\Models\Report;
 use App\Models\User;
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Cache;
 use Carbon\Carbon;
@@ -26,10 +27,15 @@ class CoinService
      * Credit coins to user when ad impression happens on their report.
      * Coins derived from: gross_amount (CPM/1000) × user_share_percent / coin_to_npr_rate
      * NOT from static impression_value — that's just a fallback.
+     *
+     * @param int|null $actorId Authenticated user who triggered the ad event (viewer).
+     *                          Falls back to Auth::id() when omitted.
      */
-    public function creditImpression(User $user, AdCampaign $campaign, Report $report): ?CoinTransaction
+    public function creditImpression(User $user, AdCampaign $campaign, Report $report, ?int $actorId = null): ?CoinTransaction
     {
-        if (!$this->canCredit($user, $campaign, $report, 'impression')) {
+        $actorId = $actorId ?? Auth::id();
+
+        if (!$this->canCredit($user, $campaign, $report, 'impression', $actorId)) {
             return null;
         }
 
@@ -68,6 +74,7 @@ class CoinService
                 'ip_address' => request()->ip(),
             ]),
             idempotencyKey: $idempotencyKey,
+            actorId: $actorId,
         );
     }
 
@@ -75,10 +82,15 @@ class CoinService
      * Credit coins to user when ad click happens on their report.
      * Coins derived from: gross_amount (CPC) × user_share_percent / coin_to_npr_rate
      * NOT from static click_value — that's just a fallback.
+     *
+     * @param int|null $actorId Authenticated user who triggered the ad event (viewer).
+     *                          Falls back to Auth::id() when omitted.
      */
-    public function creditClick(User $user, AdCampaign $campaign, Report $report): ?CoinTransaction
+    public function creditClick(User $user, AdCampaign $campaign, Report $report, ?int $actorId = null): ?CoinTransaction
     {
-        if (!$this->canCredit($user, $campaign, $report, 'click')) {
+        $actorId = $actorId ?? Auth::id();
+
+        if (!$this->canCredit($user, $campaign, $report, 'click', $actorId)) {
             return null;
         }
 
@@ -117,6 +129,7 @@ class CoinService
                 'ip_address' => request()->ip(),
             ]),
             idempotencyKey: $idempotencyKey,
+            actorId: $actorId,
         );
     }
 
@@ -141,9 +154,17 @@ class CoinService
 
     /**
      * Check if user can earn from this ad interaction.
+     *
+     * Ownership rule (security-critical, must stay first):
+     * a report owner must NEVER earn coins from a reward event triggered on
+     * their own report — regardless of report status.
      */
-    private function canCredit(User $user, AdCampaign $campaign, Report $report, string $type): bool
+    private function canCredit(User $user, AdCampaign $campaign, Report $report, string $type, ?int $actorId = null): bool
     {
+        if ($this->isSelfRewardOnOwnReport($report, $actorId)) {
+            return false;
+        }
+
         if ($this->isBot()) {
             return false;
         }
@@ -161,6 +182,36 @@ class CoinService
         }
 
         return true;
+    }
+
+    /**
+     * Security rule: is the user who triggered this reward event the owner of
+     * the associated report?
+     *
+     * When true, the reward must be denied (no coin transaction, no wallet
+     * increment). The report itself may still be viewed and its ad displayed —
+     * only the coin reward is blocked.
+     *
+     * The owner is always resolved server-side from the report record and the
+     * authenticated actor. Client-provided identity/ownership claims are never
+     * trusted here.
+     *
+     * Fails closed: if the actor cannot be identified, the credit is treated as
+     * a potential self-reward and blocked.
+     */
+    public function isSelfRewardOnOwnReport(Report $report, ?int $actorId = null): bool
+    {
+        $actorId = $actorId ?? Auth::id();
+
+        if ($actorId === null) {
+            return true;
+        }
+
+        if ($report->user_id === null) {
+            return false;
+        }
+
+        return (int) $report->user_id === (int) $actorId;
     }
 
     /**
@@ -241,7 +292,7 @@ class CoinService
             'balance' => (float) $wallet->balance,
             'total_earned' => (float) $wallet->total_earned,
             'total_withdrawn' => (float) $wallet->total_withdrawn,
-            'formatted_balance' => number_format($wallet->balance, 2),
+            'formatted_balance' => number_format($wallet->balance, 4),
         ];
     }
 

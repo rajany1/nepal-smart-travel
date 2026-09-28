@@ -13,11 +13,16 @@ class DatabaseSeeder extends Seeder
 {
     public function run(): void
     {
+        // Seed groups first so categories can reference them
+        $this->call(\Database\Seeders\ReportCategoryGroupSeeder::class);
+
         // Report Categories (first one is the default)
         $reportCategories = [
             [
                 'name' => 'General',
+                'name_ne' => 'सामान्य',
                 'slug' => 'general',
+                'group_slug' => 'community',
                 'icon' => 'info',
                 'description' => 'General reports and updates',
                 'description_ne' => 'सामान्य रिपोर्ट र अपडेटहरू',
@@ -28,7 +33,9 @@ class DatabaseSeeder extends Seeder
             ],
             [
                 'name' => 'Road & Traffic',
+                'name_ne' => 'सडक र यातायात',
                 'slug' => 'road-traffic',
+                'group_slug' => 'travel',
                 'icon' => 'road',
                 'description' => 'Road conditions, traffic, construction, blockages',
                 'description_ne' => 'सडक अवस्था, यातायात, निर्माण, अवरोधहरू',
@@ -39,7 +46,9 @@ class DatabaseSeeder extends Seeder
             ],
             [
                 'name' => 'Safety & Hazards',
+                'name_ne' => 'सुरक्षा र जोखिम',
                 'slug' => 'safety-hazards',
+                'group_slug' => 'safety',
                 'icon' => 'warning',
                 'description' => 'Safety concerns, hazards, dangerous conditions',
                 'description_ne' => 'सुरक्षा चिन्ता, जोखिम, खतरनाक अवस्थाहरू',
@@ -50,7 +59,9 @@ class DatabaseSeeder extends Seeder
             ],
             [
                 'name' => 'Weather & Conditions',
+                'name_ne' => 'मौसम र अवस्था',
                 'slug' => 'weather-conditions',
+                'group_slug' => 'safety',
                 'icon' => 'ac_unit',
                 'description' => 'Weather reports, flooding, landslides, conditions',
                 'description_ne' => 'मौसम रिपोर्ट, बाढी, पहिरो, अवस्थाहरू',
@@ -61,7 +72,9 @@ class DatabaseSeeder extends Seeder
             ],
             [
                 'name' => 'Transportation',
+                'name_ne' => 'यातायात साधन',
                 'slug' => 'transportation',
+                'group_slug' => 'travel',
                 'icon' => 'directions_bus',
                 'description' => 'Public transport, bus, taxi, flight issues',
                 'description_ne' => 'सार्वजनिक यातायात, बस, ट्याक्सी, उडान समस्याहरू',
@@ -72,7 +85,9 @@ class DatabaseSeeder extends Seeder
             ],
             [
                 'name' => 'Hidden Destinations',
+                'name_ne' => 'लुकेका गन्तव्यहरू',
                 'slug' => 'hidden-destinations',
+                'group_slug' => 'travel',
                 'icon' => 'explore',
                 'description' => 'Off-the-beaten-path places and discoveries',
                 'description_ne' => 'अनछुए स्थानहरू र नयाँ खोजहरू',
@@ -83,7 +98,9 @@ class DatabaseSeeder extends Seeder
             ],
             [
                 'name' => 'Services & Utilities',
+                'name_ne' => 'सेवा र उपयुक्तता',
                 'slug' => 'services-utilities',
+                'group_slug' => 'services',
                 'icon' => 'local_gas_station',
                 'description' => 'Fuel, electricity, water, internet, ATMs',
                 'description_ne' => 'इन्धन, बिजुली, पानी, इन्टरनेट, एटीएम',
@@ -94,7 +111,9 @@ class DatabaseSeeder extends Seeder
             ],
             [
                 'name' => 'Events & Notices',
+                'name_ne' => 'कार्यक्रम र सूचना',
                 'slug' => 'events-notices',
+                'group_slug' => 'community',
                 'icon' => 'event',
                 'description' => 'Local events, festivals, community notices',
                 'description_ne' => 'स्थानीय कार्यक्रमहरू, पर्वहरू, समुदायिक सूचनाहरू',
@@ -106,13 +125,30 @@ class DatabaseSeeder extends Seeder
         ];
 
         foreach ($reportCategories as $cat) {
-            ReportCategorie::firstOrCreate(['slug' => $cat['slug']], $cat);
+            $group = \App\Models\ReportCategoryGroup::where('slug', $cat['group_slug'])->first();
+            unset($cat['group_slug']);
+            if ($group) {
+                $cat['category_group_id'] = $group->id;
+            }
+
+            $category = ReportCategorie::firstOrCreate(['slug' => $cat['slug']], $cat);
+
+            // Backfill fields added later without clobbering admin edits
+            $updates = [];
+            if (empty($category->name_ne) && !empty($cat['name_ne'])) {
+                $updates['name_ne'] = $cat['name_ne'];
+            }
+            if (empty($category->category_group_id) && $group) {
+                $updates['category_group_id'] = $group->id;
+            }
+            if ($updates) {
+                $category->update($updates);
+            }
         }
 
         $this->command->info('Created ' . count($reportCategories) . ' report categories.');
 
-        // Seed report category groups, options, and fields
-        $this->call(\Database\Seeders\ReportCategoryGroupSeeder::class);
+        // Seed report options and fields (groups are seeded above)
         $this->call(\Database\Seeders\ReportCategoryOptionSeeder::class);
         $this->call(\Database\Seeders\ReportCategoryFieldSeeder::class);
 

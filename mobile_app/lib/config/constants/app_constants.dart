@@ -13,7 +13,7 @@ class AppConstants {
   static const String devPhone = 'http://192.168.1.67:8000/api/v1';
   static String get prod => const String.fromEnvironment(
     'API_BASE_URL',
-    defaultValue: 'http://192.168.10.67:8000/api/v1',
+    defaultValue: 'http://163.128.128.188/api/v1',
     // defaultValue: 'https://api.nepalsmarttravel.com/api/v1',
   );
   static const Duration apiTimeout = Duration(seconds: 30);

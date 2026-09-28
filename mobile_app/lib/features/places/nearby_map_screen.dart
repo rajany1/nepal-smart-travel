@@ -78,8 +78,6 @@ class _NearbyMapScreenState extends State<NearbyMapScreen>
   final OfflineTileProvider _offlineTiles = OfflineTileProvider();
   final OfflineTileProvider _satelliteTiles =
       OfflineTileProvider(tileType: 'satellite_v2');
-  final OfflineTileProvider _labelTiles =
-      OfflineTileProvider(tileType: 'labels');
 
   double? _lat;
   double? _lng;
@@ -1160,6 +1158,9 @@ class _NearbyMapScreenState extends State<NearbyMapScreen>
             child: _buildMapModeToggle(),
           ),
 
+          // Visible source attribution for the active tile provider
+          _buildMapAttribution(),
+
           // Trekking & curated routes button
           Positioned(
             top: MediaQuery.of(context).padding.top + 104,
@@ -1366,13 +1367,6 @@ class _NearbyMapScreenState extends State<NearbyMapScreen>
             userAgentPackageName: 'np.com.nepalsmarttravel',
             maxZoom: 19,
             tileProvider: _satelliteTiles,
-          ),
-          TileLayer(
-            urlTemplate:
-                'https://{s}.basemaps.cartocdn.com/light_only_labels/{z}/{x}/{y}.png',
-            userAgentPackageName: 'np.com.nepalsmarttravel',
-            maxZoom: 19,
-            tileProvider: _labelTiles,
           ),
         ] else
           TileLayer(
@@ -1724,6 +1718,51 @@ class _NearbyMapScreenState extends State<NearbyMapScreen>
                       ),
                     ),
                   ],
+                ),
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  /// Visible map attribution for whichever tile provider is on screen:
+  /// '© Esri, Maxar, Earthstar Geographics' for Satellite (Esri World Imagery)
+  /// and '© OpenStreetMap contributors' for Standard mode. Tapping opens the
+  /// provider's attribution page.
+  Widget _buildMapAttribution() {
+    return Consumer<MapViewProvider>(
+      builder: (context, mapView, _) {
+        final isSatellite = mapView.isSatellite;
+        return Positioned(
+          top: MediaQuery.of(context).padding.top + 114,
+          right: 16,
+          child: Material(
+            color: const Color(0xE6FFFFFF),
+            borderRadius: BorderRadius.circular(6),
+            elevation: 2,
+            child: InkWell(
+              borderRadius: BorderRadius.circular(6),
+              onTap: () {
+                final Uri url = Uri.parse(isSatellite
+                    ? 'https://www.esri.com/en-us/home'
+                    : 'https://www.openstreetmap.org/copyright');
+                launchUrl(url, mode: LaunchMode.externalApplication);
+              },
+              child: Padding(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                child: Text(
+                  isSatellite
+                      ? '© Esri, Maxar, Earthstar Geographics'
+                      : '© OpenStreetMap contributors',
+                  style: const TextStyle(
+                    fontSize: 10,
+                    height: 1.2,
+                    fontWeight: FontWeight.w500,
+                    color: AppTheme.textSecondary,
+                  ),
                 ),
               ),
             ),

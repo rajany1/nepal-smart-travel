@@ -331,6 +331,12 @@
                     <td class="num">Rs. {{ number_format($adminAdjustments * $coinToNpr, 2) }}</td>
                 </tr>
                 <tr>
+                    <td>Automatic Reversals (invalid rewards)</td>
+                    <td>{{ number_format($reversalCount) }} reversals</td>
+                    <td class="num {{ $reversalTotal >= 0 ? '' : 'text-red-600' }}">{{ number_format($reversalTotal, 2) }}</td>
+                    <td class="num">Rs. {{ number_format($reversalTotal * $coinToNpr, 2) }}</td>
+                </tr>
+                <tr>
                     <td>Offer Redemptions (deducted)</td>
                     <td>—</td>
                     <td class="num">{{ number_format($redemptionDeductions, 2) }}</td>
@@ -350,6 +356,49 @@
                 </tr>
             </tbody>
         </table>
+        @if($recentReversals->isNotEmpty())
+            <div style="margin-top:12px">
+                <div style="font-weight:600; margin-bottom:4px">Recent Automatic Reversals</div>
+                <div style="font-size:12px; opacity:.75; margin-bottom:6px">
+                    Compensating transactions for invalid rewards. Original transactions are preserved;
+                    reversals are automatic and distinct from admin adjustments.
+                </div>
+                <table class="audit-table">
+                    <thead>
+                        <tr>
+                            <th>Reversal</th>
+                            <th>User</th>
+                            <th class="num">Amount</th>
+                            <th>Reason</th>
+                            <th>Original Reward</th>
+                            <th>Date</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach($recentReversals as $reversal)
+                            <tr>
+                                <td>#{{ $reversal->id }}</td>
+                                <td>{{ $reversal->user?->name ?? '—' }}</td>
+                                <td class="num text-red-600">{{ number_format($reversal->amount, 2) }}</td>
+                                <td>{{ $reversal->type }}</td>
+                                <td>
+                                    @if($reversal->reverses)
+                                        #{{ $reversal->reverses->id }} &mdash; {{ $reversal->reverses->type }}
+                                        ({{ number_format($reversal->reverses->amount, 2) }})
+                                        @if(!empty($reversal->metadata['original_reward_event_id']))
+                                            <br><small>reward event #{{ $reversal->metadata['original_reward_event_id'] }}</small>
+                                        @endif
+                                    @else
+                                        &mdash;
+                                    @endif
+                                </td>
+                                <td>{{ $reversal->created_at }}</td>
+                            </tr>
+                        @endforeach
+                    </tbody>
+                </table>
+            </div>
+        @endif
     </div>
 
     {{-- ═══════════ 3. PARTNER WALLET ═══════════ --}}

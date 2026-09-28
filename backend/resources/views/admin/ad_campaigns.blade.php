@@ -37,7 +37,12 @@
         <div class="bg-white rounded-xl border border-slate-200 p-4 shadow-sm">
             <div class="w-10 h-10 rounded-lg bg-rose-100 grid place-items-center text-rose-600 mb-2"><i class="fas fa-coins"></i></div>
             <p class="text-xl font-bold text-rose-600">Rs. {{ number_format($stats['revenue'], 0) }}</p>
-            <p class="text-xs text-slate-500 font-medium">Revenue (admin spend)</p>
+            <p class="text-xs text-slate-500 font-medium">Ad Payments (intake)</p>
+        </div>
+        <div class="bg-white rounded-xl border border-slate-200 p-4 shadow-sm">
+            <div class="w-10 h-10 rounded-lg bg-emerald-100 grid place-items-center text-emerald-600 mb-2"><i class="fas fa-chart-pie"></i></div>
+            <p class="text-xl font-bold text-emerald-600">Rs. {{ number_format($stats['admin_revenue'], 2) }}</p>
+            <p class="text-xs text-slate-500 font-medium">Platform Share (ledger)</p>
         </div>
     </div>
 
@@ -70,8 +75,8 @@
                         <td class="px-4 py-4 text-center text-sm">{{ number_format($c->current_clicks) }}</td>
                         <td class="px-4 py-4 text-center text-sm">{{ $c->ctr() }}%</td>
                         <td class="px-4 py-4 text-center text-sm font-semibold">Rs. {{ number_format((float) $c->budget, 0) }}</td>
-                        <td class="px-4 py-4 text-center text-sm text-amber-600 font-semibold">Rs. {{ number_format((float) $c->spent_amount, 1) }}</td>
-                        <td class="px-4 py-4 text-center text-sm text-emerald-600">Rs. {{ number_format((float) $c->budget - (float) $c->spent_amount, 1) }}</td>
+                        <td class="px-4 py-4 text-center text-sm text-amber-600 font-semibold">Rs. {{ number_format((float) $c->spent_amount, 2) }}</td>
+                        <td class="px-4 py-4 text-center text-sm text-emerald-600">Rs. {{ number_format($c->budgetRemaining(), 2) }}</td>
                         <td class="px-4 py-4 text-center">@if($c->payment_status === 'paid')<span class="text-xs bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full">Paid</span>@elseif($c->payment_status === 'refunded')<span class="text-xs bg-slate-100 text-slate-500 px-2 py-0.5 rounded-full">Refunded</span>@else<span class="text-xs bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full">Unpaid</span>@endif</td>
                         <td class="px-4 py-4 text-center">
                             <div class="text-xs text-slate-500">

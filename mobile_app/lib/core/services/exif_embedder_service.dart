@@ -15,6 +15,7 @@ import 'package:geolocator/geolocator.dart';
 class CaptureLocationService {
   double? _captureLatitude;
   double? _captureLongitude;
+  double? _captureAccuracy;
   DateTime? _capturedAt;
 
   bool get hasCaptureLocation =>
@@ -22,6 +23,10 @@ class CaptureLocationService {
 
   double? get captureLatitude => _captureLatitude;
   double? get captureLongitude => _captureLongitude;
+
+  /// GPS accuracy (metres) of the capture-time fix — sent with the report
+  /// so the backend can sanity-check the fix quality.
+  double? get captureAccuracy => _captureAccuracy;
   DateTime? get capturedAt => _capturedAt;
 
   /// Immediately after a photo is taken, grab the current GPS position.
@@ -40,6 +45,7 @@ class CaptureLocationService {
 
       _captureLatitude = position.latitude;
       _captureLongitude = position.longitude;
+      _captureAccuracy = position.accuracy;
       _capturedAt = DateTime.now();
 
       debugPrint('📍 [CaptureLocationService] GPS captured at photo time: '
@@ -55,6 +61,7 @@ class CaptureLocationService {
   void clear() {
     _captureLatitude = null;
     _captureLongitude = null;
+    _captureAccuracy = null;
     _capturedAt = null;
   }
 }

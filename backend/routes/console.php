@@ -25,3 +25,7 @@ Schedule::job(new SyncBipadData('both'))->everyMinute()->withoutOverlapping();
 
 // Data retention purge - runs daily at 3 AM
 Schedule::command('data:purge')->dailyAt('03:00')->withoutOverlapping();
+
+// Reverse invalid self-reward coin credits (report owner rewarded on own report).
+// Safety net behind the prevention layer; bounded scan, append-only reversals.
+Schedule::command('coins:reconcile-self-rewards')->dailyAt('03:30')->withoutOverlapping();

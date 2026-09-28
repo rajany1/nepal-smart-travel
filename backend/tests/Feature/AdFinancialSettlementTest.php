@@ -777,15 +777,14 @@ test('coin credit exception rolls back entire financial settlement', function ()
         expect((float) $wallet->balance)->toBe(0.0);
     }
 
-    // PROVE: reward event exists (created before transaction) but NOT finalized
+    // PROVE: no orphan reward event — event, impression and settlement are one
+    // atomic transaction (InnoDB), so a mid-settlement failure rolls everything back
     $reward = AdRewardEvent::where('ad_campaign_id', $campaignId)->first();
-    expect($reward)->not->toBeNull();
-    expect((float) $reward->gross_amount)->toBe(0.0);
-    expect((float) $reward->coins_credited)->toBe(0.0);
+    expect($reward)->toBeNull();
 
-    // PROVE: raw impression exists (created outside transaction - audit survives)
+    // PROVE: raw impression rolled back with the event — nothing partial remains
     $rawImpression = DB::table('ad_impressions')->where('ad_campaign_id', $campaignId)->first();
-    expect($rawImpression)->not->toBeNull();
+    expect($rawImpression)->toBeNull();
 
     cleanupTest($ownerId, $campaignId);
     DB::table('users')->where('id', $viewerId)->delete();
@@ -840,9 +839,13 @@ test('revenue ledger failure rolls back entire settlement including inner coin t
         expect((float) $wallet->balance)->toBe(0.0);
     }
 
-    // PROVE: raw impression still exists (audit survives)
+    // PROVE: raw impression rolled back too — no orphan event or partial
+    // impression remains after a failed settlement
     $rawImpression = DB::table('ad_impressions')->where('ad_campaign_id', $campaignId)->first();
-    expect($rawImpression)->not->toBeNull();
+    expect($rawImpression)->toBeNull();
+
+    $reward = AdRewardEvent::where('ad_campaign_id', $campaignId)->first();
+    expect($reward)->toBeNull();
 
     cleanupTest($ownerId, $campaignId);
     DB::table('users')->where('id', $viewerId)->delete();

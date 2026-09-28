@@ -64,6 +64,9 @@ Route::prefix('v1')->group(function () {
     Route::get('/reports/categories/search', [ReportController::class, 'searchCategories']);
     Route::get('/reports/categories/{id}/form-config', [ReportController::class, 'categoryFormConfig']);
     Route::get('/reports/form-config', [ReportController::class, 'formConfig']);
+    // Flat report options (report_category_options) for the option-based picker UI
+    Route::get('/reports/options/featured', [ReportController::class, 'optionsFeatured']);
+    Route::get('/reports/options/search', [ReportController::class, 'optionsSearch']);
     Route::get('/reports', [ReportController::class, 'index']);
     // /reports/my MUST be BEFORE /reports/{id} to avoid "my" being matched as {id}
     Route::get('/reports/my', [ReportController::class, 'myReports']);

@@ -5,6 +5,8 @@ namespace App\Http\Controllers;
 use Illuminate\Http\Request;
 use App\Models\Report;
 use App\Models\ReportCategorie;
+use App\Models\ReportCategoryOption;
+use App\Models\ReportCategoryGroup;
 use App\Models\ReportComment;
 use App\Models\ReportConfirmation;
 use App\Models\ReportReaction;
@@ -18,10 +20,12 @@ use App\Services\AchievementService;
 use App\Services\Ai\AgentOrchestrator;
 use App\Services\ExifGpsVerificationService;
 use App\Services\ImageValidationService;
+use App\Services\LocationIntegrityService;
 use App\Services\ModeratorService;
 use App\Services\ReportAutoClassifyService;
 use App\Services\TranslationService;
 use App\Helpers\GeoHelper;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Cache;
@@ -139,6 +143,7 @@ class ReportController extends Controller
                                 'description_ne' => $opt->description_ne,
                                 'icon' => $opt->icon,
                                 'icon_type' => $opt->icon_type,
+                                'severity' => $opt->severity ?? 'medium',
                                 'requires_photo' => $opt->requires_photo,
                                 'requires_location' => $opt->requires_location,
                             ];
@@ -236,6 +241,7 @@ class ReportController extends Controller
                         'description_ne' => $opt->description_ne,
                         'icon' => $opt->icon,
                         'icon_type' => $opt->icon_type,
+                        'severity' => $opt->severity ?? 'medium',
                         'requires_photo' => $opt->requires_photo,
                         'requires_location' => $opt->requires_location,
                     ];
@@ -306,6 +312,7 @@ class ReportController extends Controller
                     'description_ne' => $opt->description_ne,
                     'icon' => $opt->icon,
                     'icon_type' => $opt->icon_type,
+                    'severity' => $opt->severity ?? 'medium',
                     'requires_photo' => $opt->requires_photo,
                     'requires_location' => $opt->requires_location,
                 ];
@@ -398,6 +405,8 @@ class ReportController extends Controller
                         'name' => $opt->name,
                         'slug' => $opt->slug,
                         'name_ne' => $opt->name_ne,
+                        'icon' => $opt->icon,
+                        'severity' => $opt->severity ?? 'medium',
                     ];
                 }),
                 'fields' => $cat->fields->map(function ($field) {
@@ -417,6 +426,135 @@ class ReportController extends Controller
             'success' => true,
             'data' => $data,
         ]);
+    }
+
+    /**
+     * Featured / most-used report OPTIONS (report_category_options) for the
+     * main "What do you want to report?" picker. Flat list, ranked by the
+     * parent category: featured > emergency > usage_count > sort_order.
+     */
+    public function optionsFeatured(Request $request)
+    {
+        $limit = (int) $request->input('limit', 9);
+
+        $options = ReportCategoryOption::where('is_active', true)
+            ->whereHas('category', function ($q) {
+                $q->where('is_active', true);
+            })
+            ->with(['category.group'])
+            ->get()
+            ->sortBy([
+                ['category.is_featured', 'desc'],
+                ['category.is_emergency', 'desc'],
+                ['category.usage_count', 'desc'],
+                ['category.sort_order', 'asc'],
+                ['sort_order', 'asc'],
+            ])
+            ->take($limit)
+            ->values();
+
+        return response()->json([
+            'success' => true,
+            'data' => $options->map(fn ($opt) => $this->formatOptionPayload($opt)),
+        ]);
+    }
+
+    /**
+     * Search report OPTIONS by option name/slug or their category/group name.
+     * Powers the search box in the "More" category browser.
+     */
+    public function optionsSearch(Request $request)
+    {
+        $request->validate([
+            'q' => 'required|string|min:1|max:100',
+            'limit' => 'nullable|integer|min:1|max:50',
+        ]);
+
+        $query = $request->input('q');
+        $limit = (int) $request->input('limit', 20);
+
+        $options = ReportCategoryOption::where('is_active', true)
+            ->whereHas('category', function ($q) {
+                $q->where('is_active', true);
+            })
+            ->where(function ($q) use ($query) {
+                $q->where('name', 'like', "%{$query}%")
+                    ->orWhere('name_ne', 'like', "%{$query}%")
+                    ->orWhere('slug', 'like', "%{$query}%")
+                    ->orWhere('description', 'like', "%{$query}%")
+                    ->orWhereHas('category', function ($cq) use ($query) {
+                        $cq->where('name', 'like', "%{$query}%")
+                            ->orWhere('name_ne', 'like', "%{$query}%")
+                            ->orWhere('slug', 'like', "%{$query}%")
+                            ->orWhereHas('group', function ($gq) use ($query) {
+                                $gq->where('name', 'like', "%{$query}%")
+                                    ->orWhere('name_ne', 'like', "%{$query}%")
+                                    ->orWhere('slug', 'like', "%{$query}%");
+                            });
+                    });
+            })
+            ->with(['category.group'])
+            ->get()
+            ->sortBy([
+                ['category.is_featured', 'desc'],
+                ['category.is_emergency', 'desc'],
+                ['category.usage_count', 'desc'],
+                ['category.sort_order', 'asc'],
+                ['sort_order', 'asc'],
+            ])
+            ->take($limit)
+            ->values();
+
+        return response()->json([
+            'success' => true,
+            'data' => $options->map(fn ($opt) => $this->formatOptionPayload($opt)),
+        ]);
+    }
+
+    /**
+     * Shared payload for flat report-option endpoints.
+     * Includes severity (green/blue/red outline) + compact parent category.
+     */
+    private function formatOptionPayload(ReportCategoryOption $opt): array
+    {
+        $cat = $opt->category;
+        $group = $cat?->group;
+
+        return [
+            'id' => $opt->id,
+            'category_id' => $opt->category_id,
+            'name' => $opt->name,
+            'slug' => $opt->slug,
+            'name_ne' => $opt->name_ne,
+            'description' => $opt->description,
+            'description_ne' => $opt->description_ne,
+            'icon' => $opt->icon,
+            'icon_type' => $opt->icon_type,
+            'severity' => $opt->severity ?? 'medium',
+            'requires_photo' => (bool) $opt->requires_photo,
+            'requires_location' => (bool) $opt->requires_location,
+            'category' => $cat ? [
+                'id' => $cat->id,
+                'name' => $cat->name,
+                'name_ne' => $cat->name_ne,
+                'slug' => $cat->slug,
+                'description' => $cat->description,
+                'description_ne' => $cat->description_ne,
+                'icon' => $cat->icon,
+                'icon_color' => $cat->icon_color,
+                'is_featured' => $cat->is_featured,
+                'is_emergency' => $cat->is_emergency,
+                'usage_count' => $cat->usage_count,
+                'group' => $group ? [
+                    'id' => $group->id,
+                    'name' => $group->name,
+                    'name_ne' => $group->name_ne,
+                    'icon' => $group->icon,
+                    'icon_color' => $group->icon_color,
+                    'is_emergency_group' => $group->is_emergency_group,
+                ] : null,
+            ] : null,
+        ];
     }
 
     /**
@@ -490,9 +628,30 @@ class ReportController extends Controller
 
         // Location-based filter (nearby)
         if ($request->filled('lat') && $request->filled('lng')) {
-            $lat = (float) $request->lat;
-            $lng = (float) $request->lng;
-            $radiusKm = (float) ($request->input('radius_km', 5));
+            $latRaw = $request->input('lat');
+            $lngRaw = $request->input('lng');
+
+            // Reject malformed / out-of-range coordinates instead of silently
+            // casting them (e.g. "abc" -> 0.0 would filter around Null Island,
+            // inventing a location the client never reported). Valid requests
+            // are unaffected; missing lat/lng keeps the existing no-location
+            // (latest nationwide) mode.
+            if (!is_numeric($latRaw) || !is_numeric($lngRaw)
+                || (float) $latRaw < -90.0 || (float) $latRaw > 90.0
+                || (float) $lngRaw < -180.0 || (float) $lngRaw > 180.0) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Invalid latitude/longitude coordinates.',
+                ], 422);
+            }
+
+            $lat = (float) $latRaw;
+            $lng = (float) $lngRaw;
+            $radiusRaw = $request->input('radius_km', 5);
+            $radiusKm = is_numeric($radiusRaw) ? (float) $radiusRaw : 5.0;
+            if ($radiusKm <= 0) {
+                $radiusKm = 5.0;
+            }
 
             // Approximate degree-to-km conversion
             $latDelta = $radiusKm / 111.0;
@@ -631,6 +790,21 @@ class ReportController extends Controller
         }
         $request->merge(['is_live_capture' => $coercedIsLive]);
 
+        // Normalise the client location-integrity mock flag. This is pure
+        // input hygiene so validation/sanitisation is deterministic — the
+        // value itself remains UNTRUSTED evidence and is re-evaluated
+        // server-side by LocationIntegrityService before it influences
+        // any risk score.
+        $clientIntegrity = $request->input('location_integrity');
+        if (is_array($clientIntegrity) && array_key_exists('mock_location_detected', $clientIntegrity)) {
+            $clientIntegrity['mock_location_detected'] = filter_var(
+                $clientIntegrity['mock_location_detected'],
+                FILTER_VALIDATE_BOOLEAN,
+                FILTER_NULL_ON_FAILURE
+            );
+            $request->merge(['location_integrity' => $clientIntegrity]);
+        }
+
         // === Auto-classification ===
         // Mobile submits only a description + live photo. The system infers
         // the title, category and priority from the description when they are
@@ -660,6 +834,15 @@ class ReportController extends Controller
             'photo_captured_at' => 'nullable|date',
             'capture_latitude' => 'nullable|numeric|between:-90,90',
             'capture_longitude' => 'nullable|numeric|between:-180,180',
+            // Location-integrity signals from the mobile detector. Shape/type
+            // validation only — these are UNTRUSTED client claims; the server
+            // re-evaluates them (LocationIntegrityService) before use.
+            'location_accuracy' => 'nullable|numeric|between:0,1000000',
+            'location_timestamp' => 'nullable|date',
+            'location_integrity' => 'nullable|array',
+            'location_integrity.status' => 'nullable|string|in:genuine,mock_detected,cannot_determine,unknown',
+            'location_integrity.mock_location_detected' => 'nullable',
+            'location_integrity.detection_source' => 'nullable|string|max:32',
         ]);
 
         // Layer 1: Server-side image validation (NEVER trust client metadata)
@@ -894,9 +1077,88 @@ class ReportController extends Controller
 
         // If photo has no GPS data or GPS mismatched, still allow submission
         // but flag it for admin review. Moderators can reject based on this.
+
+        // === LOCATION INTEGRITY (server-side) ===
+        // Evaluates the untrusted client signals (mock flag, accuracy, fix
+        // timestamp) combined with server-side evidence (EXIF/capture GPS
+        // conflict, impossible movement). Never blocks a submission; a
+        // suspicious result only escalates provenance so the automated
+        // decision engine routes the report to human moderation.
+        $locationIntegrity = null;
+        if (Schema::hasColumn('reports', 'location_integrity_status')) {
+            $locationIntegrity = app(LocationIntegrityService::class)->evaluate([
+                'client' => $request->input('location_integrity'),
+                'latitude' => (float) $validated['latitude'],
+                'longitude' => (float) $validated['longitude'],
+                'location_timestamp' => $request->input('location_timestamp'),
+                'location_accuracy' => $request->input('location_accuracy'),
+                'gps_verification_status' => $validated['gps_verification_status'] ?? null,
+                'previous' => $this->previousReportLocation((int) $validated['user_id']),
+            ]);
+
+            $validated['location_integrity_status'] = $locationIntegrity['status'];
+            $validated['mock_location_detected'] = $locationIntegrity['mock_location_detected'];
+            $validated['location_integrity_source'] = $locationIntegrity['source'];
+
+            if (is_numeric($request->input('location_accuracy'))) {
+                $validated['location_accuracy'] = (float) $request->input('location_accuracy');
+            }
+            if ($request->filled('location_timestamp')) {
+                $validated['location_timestamp'] = $request->input('location_timestamp');
+            }
+
+            if ($locationIntegrity['status'] === LocationIntegrityService::STATUS_SUSPICIOUS
+                && ($validated['provenance'] ?? null) === 'unverified_client') {
+                $validated['provenance'] = 'suspicious';
+            }
+        }
+
         $validated['ip_address'] = $request->ip();
-        $validated['user_agent'] = $request->userAgent();
+        $validated['user_agent'] = substr((string) $request->userAgent(), 0, 500);
         $report = Report::create($validated);
+
+        // Non-blocking risk feed for suspicious location integrity: leave an
+        // audit trail and add points to the user's existing fraud score so
+        // the moderation pipeline sees the COMBINED risk (mock flag + EXIF
+        // conflict + duplicate image + impossible movement …). The final
+        // moderation decision stays with the existing engine — a suspicious
+        // location alone never rejects a report here.
+        if ($locationIntegrity !== null
+            && $locationIntegrity['status'] === LocationIntegrityService::STATUS_SUSPICIOUS) {
+            $integrityReasons = app(LocationIntegrityService::class)->fraudReasons($locationIntegrity['signals']);
+
+            try {
+                DB::table('report_security_logs')->insert([
+                    'user_id' => $request->user()->id,
+                    'report_id' => $report->id,
+                    'reason' => 'location_integrity_suspicious',
+                    'metadata' => json_encode([
+                        'status' => $locationIntegrity['status'],
+                        'signals' => $locationIntegrity['signals'],
+                        'mock_location_detected' => $locationIntegrity['mock_location_detected'],
+                        'client_status' => $locationIntegrity['client_status'],
+                        'detection_source' => $locationIntegrity['source'],
+                        'gps_verification_status' => $validated['gps_verification_status'] ?? null,
+                        'location_accuracy' => $validated['location_accuracy'] ?? null,
+                    ]),
+                    'ip_address' => $request->ip(),
+                    'user_agent' => substr((string) $request->userAgent(), 0, 500),
+                    'created_at' => now(),
+                    'updated_at' => now(),
+                ]);
+            } catch (\Throwable $e) {
+                // Audit logging must never break report creation.
+            }
+
+            if (!empty($integrityReasons)) {
+                app(\App\Services\FraudDetectionService::class)->logReportLocationRisk(
+                    $request->user(),
+                    $integrityReasons,
+                    $request->ip(),
+                    $request->userAgent()
+                );
+            }
+        }
 
         // Review AI agent - real-time safety guard
         $safety = app(\App\Services\ContentSafetyService::class);
@@ -1499,6 +1761,32 @@ class ReportController extends Controller
     private function haversineDistanceMeters(float $lat1, float $lng1, float $lat2, float $lng2): float
     {
         return GeoHelper::haversineMeters($lat1, $lng1, $lat2, $lng2);
+    }
+
+    /**
+     * The user's most recent previous report — movement-consistency context
+     * for the location-integrity evaluation. Null for first-time reporters
+     * (no movement signal possible).
+     */
+    private function previousReportLocation(int $userId): ?array
+    {
+        try {
+            $previous = Report::where('user_id', $userId)
+                ->latest('id')
+                ->first(['latitude', 'longitude', 'created_at']);
+
+            if ($previous === null || $previous->created_at === null) {
+                return null;
+            }
+
+            return [
+                'latitude' => (float) $previous->latitude,
+                'longitude' => (float) $previous->longitude,
+                'created_at' => $previous->created_at->toIso8601String(),
+            ];
+        } catch (\Throwable $e) {
+            return null;
+        }
     }
 
     public function confirm(Request $request, string $id)

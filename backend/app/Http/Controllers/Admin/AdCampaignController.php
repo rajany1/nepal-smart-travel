@@ -55,7 +55,7 @@ class AdCampaignController extends Controller
             'clicks' => (int) $all->sum('current_clicks'),
             'revenue' => 0,
             'admin_revenue' => round($totalAdminRevenue, 2),
-            'user_payout' => round($totalUserPayout, 2),
+            'user_payout' => round($totalUserPayout, 4),
             'unpaid' => 0,
             'ctr' => 0,
         ];

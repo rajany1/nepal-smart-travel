@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/foundation.dart';
 import 'package:image_picker/image_picker.dart';
 import 'dart:io';
 import '../../../../core/services/localization_service.dart';
@@ -7,8 +6,13 @@ import '../../../../core/utils/icon_mapper.dart';
 import '../../../../core/models/report_category.dart' as rc;
 import '../../../../config/themes/app_theme.dart';
 
-/// Preview sheet showing the report before submission
-class PreviewSheet extends StatelessWidget {
+/// Preview sheet showing the report before submission.
+///
+/// Shows a systematic "Missing information" banner listing every required
+/// item that is still empty (description, required fields, photo, location)
+/// and blocks submission until the list is empty. Submission errors coming
+/// back from the provider are rendered as an error banner on this screen.
+class PreviewSheet extends StatefulWidget {
   final rc.ReportCategory category;
   final rc.ReportCategoryOption? selectedOption;
   final String description;
@@ -18,8 +22,15 @@ class PreviewSheet extends StatelessWidget {
   final double? lng;
   final String? district;
   final VoidCallback onEdit;
-  final Future<void> Function() onSubmit;
-  final bool isSubmitting;
+
+  /// Returns an error message to display, or null when submission succeeded.
+  final Future<String?> Function() onSubmit;
+
+  /// Localized labels of everything still missing (already empty when valid).
+  final List<String> missingItems;
+
+  /// Localized inline error for the description (null when valid).
+  final String? descriptionError;
 
   const PreviewSheet({
     super.key,
@@ -33,13 +44,68 @@ class PreviewSheet extends StatelessWidget {
     this.district,
     required this.onEdit,
     required this.onSubmit,
-    this.isSubmitting = false,
+    this.missingItems = const [],
+    this.descriptionError,
   });
 
   @override
+  State<PreviewSheet> createState() => _PreviewSheetState();
+}
+
+class _PreviewSheetState extends State<PreviewSheet> {
+  bool _submitting = false;
+  String? _submitError;
+  ScrollController? _sheetScrollController;
+
+  Future<void> _submit() async {
+    if (widget.missingItems.isNotEmpty) {
+      _highlightMissing();
+      return;
+    }
+    setState(() {
+      _submitting = true;
+      _submitError = null;
+    });
+    String? error;
+    try {
+      error = await widget.onSubmit();
+    } catch (_) {
+      error = 'Failed to submit report. Please try again.';
+    }
+    if (!mounted) return;
+    setState(() => _submitting = false);
+    if (error != null) {
+      setState(() => _submitError = error);
+      _scrollTop();
+    }
+  }
+
+  void _highlightMissing() {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(context.t('Please complete the missing information above')),
+        backgroundColor: AppTheme.errorColor,
+      ),
+    );
+    _scrollTop();
+  }
+
+  void _scrollTop() {
+    _sheetScrollController?.animateTo(
+      0,
+      duration: const Duration(milliseconds: 300),
+      curve: Curves.easeOut,
+    );
+  }
+
+  @override
   Widget build(BuildContext context) {
-    final categoryName = category.getLocalizedName(context);
-    final categoryColor = IconMapper.getCategoryColor(category.icon);
+    final categoryName = widget.category.getLocalizedNameFromContext(context);
+    final categoryColor = IconMapper.getCategoryColor(widget.category.icon);
+    final requiresPhoto =
+        widget.category.options.any((o) => o.requiresPhoto) ||
+            widget.selectedOption?.requiresPhoto == true ||
+            widget.category.fields.any((f) => f.type == 'photo' && f.required);
 
     return DraggableScrollableSheet(
       initialChildSize: 0.9,
@@ -47,6 +113,7 @@ class PreviewSheet extends StatelessWidget {
       maxChildSize: 0.95,
       expand: false,
       builder: (context, scrollController) {
+        _sheetScrollController = scrollController;
         return Container(
           decoration: const BoxDecoration(
             color: AppTheme.backgroundColor,
@@ -82,7 +149,7 @@ class PreviewSheet extends StatelessWidget {
                     ),
                     const Spacer(),
                     IconButton(
-                      onPressed: onEdit,
+                      onPressed: widget.onEdit,
                       icon: const Icon(Icons.edit, size: 24),
                       color: AppTheme.textSecondary,
                       tooltip: context.t('Edit'),
@@ -102,6 +169,17 @@ class PreviewSheet extends StatelessWidget {
                   controller: scrollController,
                   padding: const EdgeInsets.fromLTRB(16, 8, 16, 100),
                   children: [
+                    // Missing information banner (systematic validation)
+                    if (widget.missingItems.isNotEmpty) ...[
+                      _buildMissingBanner(context),
+                    ],
+
+                    // Submission error banner
+                    if (_submitError != null) ...[
+                      _buildSubmitErrorBanner(context),
+                      const SizedBox(height: 16),
+                    ],
+
                     // Category Header
                     Container(
                       padding: const EdgeInsets.all(16),
@@ -120,7 +198,7 @@ class PreviewSheet extends StatelessWidget {
                               borderRadius: BorderRadius.circular(14),
                             ),
                             child: Icon(
-                              IconMapper.getIconData(category.icon ?? 'assignment'),
+                              IconMapper.getIconData(widget.category.icon ?? 'assignment'),
                               size: 26,
                               color: categoryColor,
                             ),
@@ -138,7 +216,7 @@ class PreviewSheet extends StatelessWidget {
                                     color: categoryColor,
                                   ),
                                 ),
-                                if (selectedOption != null) ...[
+                                if (widget.selectedOption != null) ...[
                                   const SizedBox(height: 4),
                                   Container(
                                     padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
@@ -147,7 +225,7 @@ class PreviewSheet extends StatelessWidget {
                                       borderRadius: BorderRadius.circular(4),
                                     ),
                                     child: Text(
-                                      selectedOption!.getLocalizedName(context),
+                                      widget.selectedOption!.getLocalizedNameFromContext(context),
                                       style: TextStyle(
                                         fontSize: AppTheme.textSm,
                                         fontWeight: FontWeight.w600,
@@ -160,7 +238,7 @@ class PreviewSheet extends StatelessWidget {
                             ),
                           ),
                           // Emergency badge
-                          if (category.isEmergency)
+                          if (widget.category.isEmergency)
                             Container(
                               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                               decoration: BoxDecoration(
@@ -188,12 +266,12 @@ class PreviewSheet extends StatelessWidget {
                     ),
                     const SizedBox(height: 20),
 
-                    // Photo Preview
-                    if (photo != null) ...[
+                    // Photo Preview (top image)
+                    if (widget.photo != null) ...[
                       ClipRRect(
                         borderRadius: BorderRadius.circular(16),
                         child: Image.file(
-                          File(photo!.path),
+                          File(widget.photo!.path),
                           height: 200,
                           width: double.infinity,
                           fit: BoxFit.cover,
@@ -206,8 +284,11 @@ class PreviewSheet extends StatelessWidget {
                     _buildSection(
                       context,
                       context.t('Description'),
-                      description.isNotEmpty ? description : context.t('(No description provided)'),
+                      widget.description.isNotEmpty
+                          ? widget.description
+                          : context.t('(No description provided)'),
                       Icons.description_outlined,
+                      errorText: widget.descriptionError,
                     ),
 
                     // Custom Fields
@@ -217,13 +298,12 @@ class PreviewSheet extends StatelessWidget {
                     _buildSection(
                       context,
                       context.t('Location'),
-                      _buildLocationText(),
+                      _buildLocationText(context),
                       Icons.location_on_outlined,
                     ),
 
-                    // Photo requirement indicator
-                    if (selectedOption?.requiresPhoto == true || 
-                        category.fields.any((f) => f.type == 'photo' && f.required)) ...[
+                    // Photo requirement indicator (only while photo is missing)
+                    if (requiresPhoto && widget.photo == null) ...[
                       const SizedBox(height: 16),
                       Container(
                         padding: const EdgeInsets.all(12),
@@ -252,7 +332,7 @@ class PreviewSheet extends StatelessWidget {
                     ],
 
                     // Photo preview in preview
-                    if (photo != null) ...[
+                    if (widget.photo != null) ...[
                       const SizedBox(height: 16),
                       _buildSection(
                         context,
@@ -262,7 +342,7 @@ class PreviewSheet extends StatelessWidget {
                         child: ClipRRect(
                           borderRadius: BorderRadius.circular(12),
                           child: Image.file(
-                            File(photo!.path),
+                            File(widget.photo!.path),
                             height: 180,
                             width: double.infinity,
                             fit: BoxFit.cover,
@@ -283,7 +363,7 @@ class PreviewSheet extends StatelessWidget {
                   children: [
                     Expanded(
                       child: OutlinedButton(
-                        onPressed: isSubmitting ? null : onEdit,
+                        onPressed: _submitting ? null : widget.onEdit,
                         style: OutlinedButton.styleFrom(
                           padding: const EdgeInsets.symmetric(vertical: 16),
                           side: BorderSide(color: AppTheme.primaryColor.withOpacity(0.5)),
@@ -303,7 +383,7 @@ class PreviewSheet extends StatelessWidget {
                     const SizedBox(width: 12),
                     Expanded(
                       child: ElevatedButton(
-                        onPressed: isSubmitting ? null : () => onSubmit(),
+                        onPressed: _submitting ? null : _submit,
                         style: ElevatedButton.styleFrom(
                           padding: const EdgeInsets.symmetric(vertical: 16),
                           backgroundColor: categoryColor,
@@ -311,7 +391,7 @@ class PreviewSheet extends StatelessWidget {
                           elevation: 0,
                           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
                         ),
-                        child: isSubmitting
+                        child: _submitting
                             ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
                             : Row(
                                 mainAxisAlignment: MainAxisAlignment.center,
@@ -333,12 +413,119 @@ class PreviewSheet extends StatelessWidget {
     );
   }
 
+  Widget _buildMissingBanner(BuildContext context) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 16),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: AppTheme.errorColor.withOpacity(0.08),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: AppTheme.errorColor.withOpacity(0.5), width: 1.5),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.error_outline, color: AppTheme.errorColor, size: 22),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  context.t('Missing information'),
+                  style: const TextStyle(
+                    fontSize: AppTheme.textLg,
+                    fontWeight: FontWeight.w700,
+                    color: AppTheme.errorColor,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Text(
+            context.t('Please complete the following before submitting:'),
+            style: const TextStyle(
+              fontSize: AppTheme.textSm,
+              color: AppTheme.textSecondary,
+              height: 1.4,
+            ),
+          ),
+          const SizedBox(height: 8),
+          ...widget.missingItems.map(
+            (item) => Padding(
+              padding: const EdgeInsets.only(top: 4),
+              child: Row(
+                children: [
+                  const Icon(Icons.circle, size: 8, color: AppTheme.errorColor),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      item,
+                      style: const TextStyle(
+                        fontSize: AppTheme.textSm,
+                        fontWeight: FontWeight.w600,
+                        color: AppTheme.textPrimary,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSubmitErrorBanner(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: AppTheme.errorColor.withOpacity(0.08),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: AppTheme.errorColor.withOpacity(0.5), width: 1.5),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Icon(Icons.warning_amber_outlined, color: AppTheme.errorColor, size: 22),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  context.t('Submission failed'),
+                  style: const TextStyle(
+                    fontSize: AppTheme.textSm,
+                    fontWeight: FontWeight.w700,
+                    color: AppTheme.errorColor,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  context.t(_submitError!),
+                  style: const TextStyle(
+                    fontSize: AppTheme.textSm,
+                    color: AppTheme.textPrimary,
+                    height: 1.4,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildSection(
     BuildContext context,
     String title,
     String content,
     IconData icon, {
     Widget? child,
+    String? errorText,
   }) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -376,6 +563,25 @@ class PreviewSheet extends StatelessWidget {
                 ),
               ),
             ),
+        if (errorText != null) ...[
+          const SizedBox(height: 6),
+          Row(
+            children: [
+              const Icon(Icons.error_outline, size: 14, color: AppTheme.errorColor),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(
+                  errorText,
+                  style: const TextStyle(
+                    fontSize: AppTheme.textSm,
+                    color: AppTheme.errorColor,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ],
         const SizedBox(height: 20),
       ],
     );
@@ -383,22 +589,46 @@ class PreviewSheet extends StatelessWidget {
 
   List<Widget> _buildCustomFields(BuildContext context) {
     final widgets = <Widget>[];
-    
-    for (final field in category.customFields) {
-      final value = formValues[field.name];
-      if (value == null || (value is String && value.isEmpty) || (value is List && value.isEmpty)) continue;
 
-      final label = field.getLocalizedLabel(context);
+    for (final field in widget.category.customFields) {
+      final value = widget.formValues[field.name];
+      final isEmptyValue = value == null ||
+          (value is String && value.isEmpty) ||
+          (value is List && value.isEmpty);
+
+      if (isEmptyValue) {
+        // Required-but-empty fields are listed instead of hidden.
+        if (field.required) {
+          widgets.add(
+            _buildSection(
+              context,
+              field.getLocalizedLabelFromContext(context),
+              '',
+              _getFieldIcon(field.type),
+              errorText: context.t('Required'),
+            ),
+          );
+        }
+        continue;
+      }
+
+      final label = field.getLocalizedLabelFromContext(context);
       String displayValue;
 
       if (field.isMultiSelect && value is List) {
         displayValue = value.map((v) {
-          final opt = field.options.firstWhere((o) => o.value == v, orElse: () => null);
-          return opt?.getLocalizedLabel(context) ?? v.toString();
+          final opt = field.options.firstWhere(
+            (o) => o.value == v,
+            orElse: () => rc.FieldOption(value: v, label: v),
+          );
+          return opt.getLocalizedLabelFromContext(context) ?? v.toString();
         }).join(', ');
       } else if (field.isSelectField && field.options.isNotEmpty) {
-        final opt = field.options.firstWhere((o) => o.value == value, orElse: () => null);
-        displayValue = opt?.getLocalizedLabel(context) ?? value.toString();
+        final opt = field.options.firstWhere(
+          (o) => o.value == value,
+          orElse: () => rc.FieldOption(value: value, label: value.toString()),
+        );
+        displayValue = opt.getLocalizedLabelFromContext(context) ?? value.toString();
       } else {
         displayValue = value.toString();
       }
@@ -434,11 +664,11 @@ class PreviewSheet extends StatelessWidget {
     }
   }
 
-  String _buildLocationText() {
-    if (lat != null && lng != null) {
+  String _buildLocationText(BuildContext context) {
+    if (widget.lat != null && widget.lng != null) {
       final parts = <String>[];
-      if (district != null) parts.add(district!);
-      parts.add('${lat!.toStringAsFixed(6)}, ${lng!.toStringAsFixed(6)}');
+      if (widget.district != null) parts.add(widget.district!);
+      parts.add('${widget.lat!.toStringAsFixed(6)}, ${widget.lng!.toStringAsFixed(6)}');
       return parts.join('\n');
     }
     return context.t('Location not available');

@@ -46,23 +46,40 @@ class ReportsListScreen extends StatefulWidget {
 }
 
 class _ReportsListScreenState extends State<ReportsListScreen>
-    with SingleTickerProviderStateMixin {
+    with SingleTickerProviderStateMixin, WidgetsBindingObserver {
   late TabController _tabController;
   final LocationService _locationService = LocationService();
   late final ReportProvider _reportProvider;
   double? _userLat;
   double? _userLng;
+
+  /// Provenance of the coordinates above — null until the first resolve.
+  /// _userLat/_userLng are ONLY set from a trustworthy resolve result
+  /// (grantedFresh / grantedLastKnown); denied / service-off / unavailable
+  /// always carry null coordinates and an explicit status for the UI.
+  DeviceLocationResult? _locationResult;
   String _searchQuery = '';
   int _selectedTabIndex = 0;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _tabController = TabController(length: 2, vsync: this);
     _selectedTabIndex = _tabController.index;
     _tabController.addListener(_onTabChanged);
     _reportProvider = context.read<ReportProvider>();
     _loadInitialData();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    // Permission / Location-service state may have changed in system Settings
+    // while the app was backgrounded — re-resolve on return so coordinates
+    // from before a revocation immediately stop driving nearby queries.
+    if (state == AppLifecycleState.resumed) {
+      unawaited(_applyNearbyLocation());
+    }
   }
 
   void _onTabChanged() {
@@ -80,39 +97,102 @@ class _ReportsListScreenState extends State<ReportsListScreen>
     }
   }
 
+  Future<void> _loadInitialData() async {
+    final provider = context.read<ReportProvider>();
+    // Instant first paint: fetch immediately — don't block on GPS/permission.
+    // With no location yet this is the backend's no-location mode (latest
+    // nationwide) — honest "latest" data, never a guessed Kathmandu pin.
+    unawaited(provider.refreshAll());
+    // Location resolves in the background; RE-FETCH the nearby feed as soon
+    // as a trustworthy fix is ready (or clear coordinates + show the
+    // unavailable banner when there is none).
+    unawaited(_applyNearbyLocation());
+    if (mounted) provider.startAutoRefresh();
+    // Preload ad campaigns for feed injection
+    unawaited(context.read<AdProvider>().fetchActiveAds(feed: AdFeed.report, adContext: 'report', limit: 6));
+  }
+
   Future<void> _refreshRouteIntel({double? lat, double? lng}) async {
     final tc = context.read<TravelContextProvider>();
     if (!tc.hasContext || tc.isLoadingIntel) return;
-    // Prefer a live fix so journey progress / ahead-vs-passed stay accurate.
-    final loc = await _locationService.getLastKnownPosition() ??
-        await _locationService.getCurrentLocation();
-    final useLat = loc?.latitude ?? lat ?? _userLat;
-    final useLng = loc?.longitude ?? lng ?? _userLng;
+    // Background caller — never pop the permission prompt here. Denied /
+    // service-off / stale states resolve to NO coordinates, so journey
+    // intelligence never runs on revoked or expired positions.
+    final loc = await _locationService.resolveDeviceLocation(
+        requestPermission: false, freshTimeout: const Duration(seconds: 6));
+    final useLat = loc.latitude ?? lat ?? _userLat;
+    final useLng = loc.longitude ?? lng ?? _userLng;
     if (!mounted) return;
     await tc.fetchIntelligence(currentLat: useLat, currentLng: useLng);
   }
 
-  Future<void> _loadInitialData() async {
-    final provider = context.read<ReportProvider>();
-    // Load reports immediately — don't block on GPS
-    unawaited(_locationService.getCurrentLocation().then((position) {
-      if (position != null && mounted) {
-        setState(() {
-          _userLat = position.latitude;
-          _userLng = position.longitude;
-        });
+  /// Commit a resolve result: coordinates are stored ONLY when the result
+  /// carries them; every unavailable state nulls them out.
+  void _storeLocationResult(DeviceLocationResult result) {
+    _locationResult = result;
+    _userLat = result.hasCoordinates ? result.latitude : null;
+    _userLng = result.hasCoordinates ? result.longitude : null;
+  }
+
+  Future<void> _applyNearbyLocation() async {
+    final result = await _locationService.resolveDeviceLocation();
+    if (!mounted) return;
+
+    final hadCoordinates = _reportProvider.lastFetchLat != null;
+    setState(() => _storeLocationResult(result));
+
+    if (!result.hasCoordinates) {
+      // No trustworthy device location: forget cached feed coordinates so
+      // the 60s auto-poll stops sending stale lat/lng, and replace any
+      // previously-fetched NEARBY list with the backend's no-location
+      // (latest nationwide) mode — never a wrong-region "near you" list.
+      _reportProvider.clearLastFetchLocation();
+      if (hadCoordinates) {
+        await _reportProvider.fetchReports(refresh: true);
       }
-    }));
-    await provider.refreshAll();
-    if (mounted) provider.startAutoRefresh();
-    // Preload ad campaigns for feed injection
-    unawaited(context.read<AdProvider>().fetchActiveAds(feed: AdFeed.report, adContext: 'report', limit: 6));
+      return;
+    }
+
+    await _reportProvider.fetchReports(
+        lat: _userLat, lng: _userLng, radiusKm: 20.0, refresh: true);
+  }
+
+  /// Pull-to-refresh: re-resolve (bounded) so a pull always reflects the
+  /// CURRENT permission/service state — coordinates from before a revocation
+  /// are never re-sent. Every pull hits the network regardless of outcome.
+  Future<void> _pullRefreshReports() async {
+    final result = await _locationService.resolveDeviceLocation(
+        freshTimeout: const Duration(seconds: 6));
+    if (!mounted) return;
+    setState(() => _storeLocationResult(result));
+
+    if (result.hasCoordinates) {
+      await _reportProvider.fetchReports(
+          lat: _userLat, lng: _userLng, radiusKm: 20.0, refresh: true);
+    } else {
+      _reportProvider.clearLastFetchLocation();
+      await _reportProvider.fetchReports(refresh: true);
+    }
+  }
+
+  /// Banner action: route to the right system surface first (Location
+  /// settings when the toggle is off, app settings when permanently
+  /// denied — otherwise the plain permission prompt), then re-resolve.
+  Future<void> _handleEnableLocation() async {
+    final current = _locationResult;
+    if (current?.status == DeviceLocationStatus.serviceDisabled) {
+      await _locationService.openLocationSettings();
+    } else if (current?.permanentlyDenied ?? false) {
+      await _locationService.openAppSettings();
+    }
+    await _applyNearbyLocation();
   }
 
   @override
   void dispose() {
     _searchDebounce?.cancel();
     // FL-28: provider captured in initState — no context.read inside dispose()
+    WidgetsBinding.instance.removeObserver(this);
     _tabController.removeListener(_onTabChanged);
     _reportProvider.stopAutoRefresh();
     _tabController.dispose();
@@ -190,7 +270,10 @@ class _ReportsListScreenState extends State<ReportsListScreen>
                   _RecentReportsTab(
                     userLat: _userLat,
                     userLng: _userLng,
+                    location: _locationResult,
                     onStatusTap: () => _showSubmitReportSheet(context),
+                    onRefresh: _pullRefreshReports,
+                    onEnableLocation: _handleEnableLocation,
                   ),
                   _RouteReportsTab(
                     userLat: _userLat,
@@ -318,15 +401,15 @@ class _ReportsListScreenState extends State<ReportsListScreen>
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
       builder: (ctx) => CategorySelectionSheet(
-        onCategorySelected: (category) {
-          Navigator.pop(ctx); // Close category selection
-          // Show category-specific form
+        onCategorySelected: (category, option) {
+          // Category selection sheet closes itself; open the report form.
           showModalBottomSheet(
             context: context,
             isScrollControlled: true,
             backgroundColor: Colors.transparent,
-            builder: (ctx) => CategoryFormSheet(
+            builder: (formCtx) => CategoryFormSheet(
               category: category,
+              preselectedOption: option,
               initialLat: _userLat,
               initialLng: _userLng,
               initialDistrict: null,
@@ -587,7 +670,25 @@ class _RecentReportsTab extends StatefulWidget {
   final double? userLat;
   final double? userLng;
   final VoidCallback onStatusTap;
-  const _RecentReportsTab({this.userLat, this.userLng, required this.onStatusTap});
+
+  /// Device-location provenance for this feed (null until first resolve).
+  /// Drives the "near you" label and the location-unavailable banner.
+  final DeviceLocationResult? location;
+
+  /// Parent-provided refresh: re-resolves location + force re-fetches.
+  /// Falls back to a plain re-fetch when not supplied.
+  final Future<void> Function()? onRefresh;
+
+  /// Parent-provided "enable location" action (permission prompt /
+  /// system Location settings / app settings as appropriate).
+  final Future<void> Function()? onEnableLocation;
+  const _RecentReportsTab(
+      {this.userLat,
+      this.userLng,
+      required this.onStatusTap,
+      this.location,
+      this.onRefresh,
+      this.onEnableLocation});
 
   @override
   State<_RecentReportsTab> createState() => _RecentReportsTabState();
@@ -607,26 +708,108 @@ class _RecentReportsTabState extends State<_RecentReportsTab> {
     return _hydrateFeed(_feedCache!, reports, ads);
   }
 
+  /// Count header that never claims proximity it doesn't have:
+  ///  - no resolve yet / no coordinates -> plain "N reports"
+  ///  - fresh or recent last-known      -> "N reports near you"
+  ///    (last-known additionally labelled, per the location lifecycle)
+  String _countLabel(BuildContext context, int n) {
+    final base = '$n ${n == 1 ? context.t('report') : context.t('reports')}';
+    final loc = widget.location;
+    if (loc == null || !loc.hasCoordinates) return base;
+    final label = '$base ${context.t('near you')}';
+    return loc.status == DeviceLocationStatus.grantedLastKnown
+        ? '$label · ${context.t('Last known location')}'
+        : label;
+  }
+
+  /// Explicit state card when the device has no trustworthy location —
+  /// mirrors the map screen's "waiting for location" convention
+  /// (icon + explanation + single action button).
+  Widget _locationBanner(BuildContext context) {
+    final loc = widget.location!;
+    final serviceOff = loc.status == DeviceLocationStatus.serviceDisabled;
+    final title = serviceOff
+        ? context.t('Location is turned off')
+        : context.t('Location unavailable');
+    final subtitle = serviceOff
+        ? context.t('Turn on location to see nearby reports')
+        : context.t('Enable location to see nearby reports');
+    final String actionLabel;
+    if (serviceOff) {
+      actionLabel = context.t('Turn on location');
+    } else if (loc.permanentlyDenied) {
+      actionLabel = context.t('Open settings');
+    } else if (loc.status == DeviceLocationStatus.unavailable) {
+      actionLabel = context.t('Try Again');
+    } else {
+      actionLabel = context.t('Enable location');
+    }
+
+    return Container(
+      key: const ValueKey('location-unavailable-banner'),
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: AppTheme.errorColor.withOpacity(0.06),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppTheme.errorColor.withOpacity(0.2)),
+      ),
+      child: Row(children: [
+        const Icon(Icons.location_off, size: 28, color: AppTheme.errorColor),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text(title,
+                style: const TextStyle(
+                    fontWeight: FontWeight.w600, fontSize: AppTheme.textSm)),
+            const SizedBox(height: 2),
+            Text(subtitle,
+                style: const TextStyle(
+                    color: AppTheme.textSecondary,
+                    fontSize: AppTheme.textXs)),
+          ]),
+        ),
+        TextButton(
+            onPressed: widget.onEnableLocation,
+            child: Text(actionLabel)),
+      ]),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final ads = context.watch<AdProvider>().reportAds;
     return Consumer<ReportProvider>(
       builder: (context, provider, child) {
+        final loc = widget.location;
+        final showBanner = loc != null && !loc.hasCoordinates;
         if (provider.isLoading && provider.reports.isEmpty) return const _RecentReportsShimmer();
         if (provider.errorMessage != null && provider.reports.isEmpty) {
           return Center(child: Column(mainAxisSize: MainAxisSize.min, children: [
+            if (showBanner) ...[_locationBanner(context), const SizedBox(height: 8)],
             const Icon(Icons.cloud_off, size: 64, color: AppTheme.textSecondary),
             const SizedBox(height: 16),
             Text(provider.errorMessage!, style: const TextStyle(color: AppTheme.textSecondary)),
             const SizedBox(height: 8),
-            ElevatedButton.icon(onPressed: () => provider.fetchReports(lat: widget.userLat, lng: widget.userLng, radiusKm: 20.0), icon: const Icon(Icons.refresh), label: Text(context.t('Retry'))),
+            ElevatedButton.icon(onPressed: () => (widget.onRefresh ??
+                () => provider.fetchReports(lat: widget.userLat, lng: widget.userLng, radiusKm: 20.0))(), icon: const Icon(Icons.refresh), label: Text(context.t('Retry'))),
           ]));
         }
         final filtered = provider.filteredReports;
-        if (filtered.isEmpty) return _emptyState(context, icon: Icons.assignment, message: context.t('No reports yet'), subtitle: context.t('Be the first to submit a report'), onTap: widget.onStatusTap);
+        if (filtered.isEmpty) {
+          final empty = _emptyState(context, icon: Icons.assignment, message: context.t('No reports yet'), subtitle: context.t('Be the first to submit a report'), onTap: widget.onStatusTap);
+          if (showBanner) {
+            return ListView(
+                padding: const EdgeInsets.all(12),
+                children: [_locationBanner(context), empty]);
+          }
+          return empty;
+        }
         final feed = _buildFeed(filtered, ads);
+        final bannerSlots = showBanner ? 1 : 0;
         return RefreshIndicator(
-          onRefresh: () => provider.fetchReports(lat: widget.userLat, lng: widget.userLng, radiusKm: 20.0),
+          onRefresh: widget.onRefresh ??
+              () => provider.fetchReports(lat: widget.userLat, lng: widget.userLng, radiusKm: 20.0),
           child: NotificationListener<ScrollNotification>(
             onNotification: (notification) {
               if (notification is ScrollEndNotification && notification.metrics.pixels >= notification.metrics.maxScrollExtent - 100) provider.fetchMoreReports();
@@ -634,16 +817,17 @@ class _RecentReportsTabState extends State<_RecentReportsTab> {
             },
             child: ListView.builder(
               padding: const EdgeInsets.all(12),
-              itemCount: feed.length + 2 + (provider.isLoadingMore ? 1 : 0),
+              itemCount: feed.length + 2 + bannerSlots + (provider.isLoadingMore ? 1 : 0),
               itemBuilder: (context, index) {
                 if (index == 0) return _StatusCard(onTap: widget.onStatusTap);
-                if (index == 1) return Padding(key: const ValueKey('recent-count'), padding: const EdgeInsets.only(bottom: 8, left: 4, top: 8), child: Text('${filtered.length} ${filtered.length == 1 ? context.t('report') : context.t('reports')} ${context.t('near you')}', style: const TextStyle(color: AppTheme.textSecondary)));
-                if (index > feed.length + 1) return const Padding(key: ValueKey('recent-loading-more'), padding: EdgeInsets.all(16), child: Center(child: CircularProgressIndicator(strokeWidth: 2)));
-                final item = feed[index - 2];
+                if (index == 1) return Padding(key: const ValueKey('recent-count'), padding: const EdgeInsets.only(bottom: 8, left: 4, top: 8), child: Text(_countLabel(context, filtered.length), style: const TextStyle(color: AppTheme.textSecondary)));
+                if (showBanner && index == 2) return _locationBanner(context);
+                if (index > feed.length + 1 + bannerSlots) return const Padding(key: ValueKey('recent-loading-more'), padding: EdgeInsets.all(16), child: Center(child: CircularProgressIndicator(strokeWidth: 2)));
+                final item = feed[index - 2 - bannerSlots];
                 if (item is AdCampaignModel) {
                   // Find nearest report above this ad for coin crediting
                   dynamic nearestReportId;
-                  for (int j = index - 3; j >= 0; j--) {
+                  for (int j = index - 3 - bannerSlots; j >= 0; j--) {
                     if (feed[j] is ReportModel) { nearestReportId = feed[j].id; break; }
                   }
                   return AdReportCard(key: ValueKey('ad-report-${item.id}'), ad: item, reportId: nearestReportId, adContext: 'report');
@@ -721,6 +905,41 @@ class _RouteReportsTabState extends State<_RouteReportsTab> {
     await tc.fetchIntelligence(
       currentLat: widget.userLat,
       currentLng: widget.userLng,
+    );
+  }
+
+  /// Ask for confirmation, then drop the active route (memory + persisted
+  /// snapshot). The tab rebuilds into the "No route selected" empty state
+  /// where a new route can be set.
+  Future<void> _confirmClearRoute() async {
+    final tc = context.read<TravelContextProvider>();
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(ctx.t('Remove this route?')),
+        content: Text(
+            ctx.t('Reports along this route will stop showing. You can set a new route anytime.')),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: Text(ctx.t('Cancel')),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: Text(ctx.t('Remove'),
+                style: const TextStyle(color: AppTheme.errorColor)),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    tc.clear();
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(context.tr('Route removed')),
+        backgroundColor: AppTheme.successColor,
+      ),
     );
   }
 
@@ -834,6 +1053,18 @@ class _RouteReportsTabState extends State<_RouteReportsTab> {
                             fontWeight: FontWeight.w600,
                             color: AppTheme.textPrimary),
                       ),
+                      const SizedBox(height: 4),
+                      TextButton.icon(
+                        onPressed: _confirmClearRoute,
+                        icon: const Icon(Icons.delete_outline,
+                            size: 18, color: AppTheme.errorColor),
+                        label: Text(
+                          context.t('Remove this route'),
+                          style: const TextStyle(
+                              color: AppTheme.errorColor,
+                              fontWeight: FontWeight.w600),
+                        ),
+                      ),
                     ],
                   ),
                 ),
@@ -871,6 +1102,16 @@ class _RouteReportsTabState extends State<_RouteReportsTab> {
                         style: const TextStyle(
                             color: AppTheme.infoColor, fontWeight: FontWeight.w600),
                       ),
+                    ),
+                    const SizedBox(width: 4),
+                    IconButton(
+                      onPressed: _confirmClearRoute,
+                      icon: const Icon(Icons.delete_outline, size: 20),
+                      color: AppTheme.textSecondary,
+                      tooltip: context.t('Remove route'),
+                      padding: EdgeInsets.zero,
+                      constraints:
+                          const BoxConstraints(minWidth: 36, minHeight: 36),
                     ),
                   ]),
                 );
@@ -1225,8 +1466,15 @@ class _ReportMapScreenState extends State<_ReportMapScreen> {
   @override void initState() { super.initState(); _getMyLocation(); }
 
   Future<void> _getMyLocation() async {
-    final pos = await _locationService.getCurrentLocation();
-    if (pos != null && mounted) setState(() { _myLat = pos.latitude; _myLng = pos.longitude; });
+    // Directions origin must be a trustworthy device fix — denied / service
+    // off / stale resolve to NO coordinates, and the existing null check
+    // below surfaces "Could not determine your location" instead of routing
+    // from a stale position.
+    final loc = await _locationService.resolveDeviceLocation(
+        requestPermission: false, freshTimeout: const Duration(seconds: 6));
+    if (loc.hasCoordinates && mounted) {
+      setState(() { _myLat = loc.latitude; _myLng = loc.longitude; });
+    }
   }
 
   Future<void> _openDirections() async {

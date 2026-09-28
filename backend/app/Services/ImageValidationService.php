@@ -376,7 +376,7 @@ class ImageValidationService
                 'reason' => $reason,
                 'metadata' => json_encode($metadata),
                 'ip_address' => $ip,
-                'user_agent' => $userAgent,
+                'user_agent' => substr((string) $userAgent, 0, 500),
                 'created_at' => now(),
                 'updated_at' => now(),
             ]);

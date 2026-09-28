@@ -1,0 +1,351 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "Oripori System Architecture",
+    "quality_profile": "showcase",
+    "output": "architecture/archify/oripori-architecture.html",
+    "repository": {
+      "url": "https://github.com/rajany1/nepal-smart-travel.git",
+      "revision": "28b759277843c8bd0bc1d1132808077ca31439aa"
+    },
+    "views": [
+      {
+        "id": "overall-architecture",
+        "label": "A · Overall architecture",
+        "focus": ["mobile", "admin", "api", "auth", "reports", "sos", "geo", "commerce", "care", "ai_core", "workers", "mysql", "redis", "osm", "ai_providers", "gov", "push"],
+        "note": "Clients hit the Laravel API, core services persist to MySQL/Redis, workers call third-party services."
+      },
+      {
+        "id": "report-moderation",
+        "label": "B · Report to publication",
+        "focus": ["mobile", "api", "reports", "workers", "ai_core", "ai_providers", "mysql", "admin", "push"],
+        "note": "Capture, validation, queued AI chain Groq to Gemini to Cloudflare, then approve or reject and alert push."
+      },
+      {
+        "id": "sos-emergency",
+        "label": "C · SOS emergency flow",
+        "focus": ["mobile", "api", "sos", "mysql", "workers", "push"],
+        "note": "GPS SOS activation with live location updates, then queued FCM and SMS fan-out to contacts."
+      },
+      {
+        "id": "location-map-intel",
+        "label": "D · Map and location intel",
+        "focus": ["mobile", "api", "geo", "redis", "osm", "mysql"],
+        "note": "GPS feeds places, routing and travel-context services that query Overpass and OSRM behind Redis caches."
+      },
+      {
+        "id": "auth-admin-support",
+        "label": "E · Auth, admin and support",
+        "focus": ["admin", "api", "auth", "care", "reports"],
+        "note": "Sanctum tokens plus status, legal and role gates; Blade panel drives moderation, consent and human takeover."
+      }
+    ]
+  },
+  "components": [
+    {
+      "id": "admin",
+      "type": "frontend",
+      "label": "Admin & Ops Panel",
+      "sublabel": "Blade · session auth",
+      "tag": "role-gated",
+      "pos": [40, 60],
+      "size": [170, 60],
+      "sources": [
+        { "path": "backend/routes/web.php", "line": 138, "label": "Admin route group" },
+        { "path": "backend/app/Http/Controllers/AdminController.php", "line": 826, "end_line": 873, "label": "Approve report" }
+      ]
+    },
+    {
+      "id": "auth",
+      "type": "security",
+      "label": "Auth & Access Gates",
+      "sublabel": "Sanctum · status · legal",
+      "tag": "trust boundary",
+      "pos": [250, 190],
+      "size": [170, 60],
+      "sources": [
+        { "path": "backend/app/Http/Controllers/AuthController.php", "line": 31, "end_line": 42, "label": "Token pair issue" },
+        { "path": "backend/app/Http/Middleware/LegalAcceptance.php", "line": 19, "end_line": 40, "label": "Legal gate" },
+        { "path": "backend/app/Http/Middleware/CheckUserStatus.php", "line": 12, "label": "Status gate" }
+      ]
+    },
+    {
+      "id": "mobile",
+      "type": "frontend",
+      "label": "Flutter Mobile App",
+      "sublabel": "Dio · Provider · flutter_map",
+      "tag": "guest-first",
+      "pos": [40, 430],
+      "size": [170, 60],
+      "sources": [
+        { "path": "mobile_app/lib/core/api/api_client.dart", "line": 18, "label": "Dio client" },
+        { "path": "mobile_app/lib/main.dart", "line": 165, "end_line": 192, "label": "Provider wiring" }
+      ]
+    },
+    {
+      "id": "api",
+      "type": "backend",
+      "label": "Laravel HTTP Kernel",
+      "sublabel": "routes/api.php · web.php",
+      "tag": "/api/v1",
+      "pos": [250, 430],
+      "size": [170, 60],
+      "sources": [
+        { "path": "backend/routes/api.php", "line": 29, "label": "v1 prefix" },
+        { "path": "backend/bootstrap/app.php", "line": 15, "end_line": 31, "label": "Middleware wiring" }
+      ]
+    },
+    {
+      "id": "reports",
+      "type": "backend",
+      "label": "Report Lifecycle",
+      "sublabel": "store · queue · publish",
+      "tag": "pending → approved",
+      "pos": [520, 60],
+      "size": [180, 60],
+      "sources": [
+        { "path": "backend/app/Http/Controllers/ReportController.php", "line": 757, "label": "Report store" },
+        { "path": "backend/app/Models/Report.php", "line": 11, "label": "Report model" }
+      ]
+    },
+    {
+      "id": "sos",
+      "type": "backend",
+      "label": "SOS / Emergency",
+      "sublabel": "activate · track · resolve",
+      "tag": "rate-limited",
+      "pos": [520, 210],
+      "size": [180, 60],
+      "sources": [
+        { "path": "backend/app/Http/Controllers/SosController.php", "line": 15, "label": "Activate SOS" },
+        { "path": "backend/app/Jobs/NotifySosEmergencyContacts.php", "line": 26, "label": "Contact fan-out" }
+      ]
+    },
+    {
+      "id": "geo",
+      "type": "backend",
+      "label": "Places & Route Intel",
+      "sublabel": "nearby · directions · context",
+      "tag": "bbox cached",
+      "pos": [520, 360],
+      "size": [180, 60],
+      "sources": [
+        { "path": "backend/app/Http/Controllers/PlaceController.php", "line": 1105, "label": "OSRM directions" },
+        { "path": "backend/app/Services/TravelContext/TravelContextService.php", "line": 21, "label": "Corridor intel" }
+      ]
+    },
+    {
+      "id": "commerce",
+      "type": "backend",
+      "label": "Ads · Coins · Wallet",
+      "sublabel": "impressions → coins → payouts",
+      "tag": "ledger-backed",
+      "pos": [520, 510],
+      "size": [180, 60],
+      "sources": [
+        { "path": "backend/app/Http/Controllers/AdController.php", "line": 196, "label": "Track impression" },
+        { "path": "backend/app/Services/CoinService.php", "line": 30, "label": "Credit coins" }
+      ]
+    },
+    {
+      "id": "care",
+      "type": "backend",
+      "label": "Support & Legal",
+      "sublabel": "chat · takeover · consent",
+      "tag": "AI → human",
+      "pos": [520, 660],
+      "size": [180, 60],
+      "sources": [
+        { "path": "backend/app/Services/SupportService.php", "line": 20, "label": "Conversations" },
+        { "path": "backend/app/Http/Controllers/Admin/AdminSupportController.php", "line": 115, "label": "Human takeover" }
+      ]
+    },
+    {
+      "id": "mysql",
+      "type": "database",
+      "label": "MySQL / MariaDB",
+      "sublabel": "Eloquent · 171 migrations",
+      "tag": "primary store",
+      "pos": [790, 60],
+      "size": [170, 60],
+      "sources": [
+        { "path": "backend/database/migrations/2026_05_16_153321_create_reports_table.php", "line": 14, "label": "reports table" },
+        { "path": "backend/database/migrations/0001_01_01_000002_create_jobs_table.php", "line": 14, "label": "Queue tables" }
+      ]
+    },
+    {
+      "id": "redis",
+      "type": "database",
+      "label": "Redis Cache & Realtime",
+      "sublabel": "bbox · quota · live feed",
+      "tag": "cache layer",
+      "pos": [790, 300],
+      "size": [170, 60],
+      "sources": [
+        { "path": "backend/app/Services/OsmImportService.php", "line": 68, "label": "Redis import state" },
+        { "path": "backend/app/Support/LiveFeed.php", "line": 44, "label": "Realtime pipeline" }
+      ]
+    },
+    {
+      "id": "ai_core",
+      "type": "backend",
+      "label": "AI Analysis Engine",
+      "sublabel": "report analysis · agents",
+      "tag": "fallback router",
+      "pos": [790, 540],
+      "size": [170, 60],
+      "sources": [
+        { "path": "backend/app/Services/Ai/AiFallbackRouter.php", "line": 45, "end_line": 95, "label": "Failover loop" },
+        { "path": "backend/app/Services/Ai/ReportAnalysisService.php", "line": 40, "label": "Decision engine" }
+      ]
+    },
+    {
+      "id": "workers",
+      "type": "messagebus",
+      "label": "Queue Workers & Scheduler",
+      "sublabel": "queue:work · schedule",
+      "tag": "jobs · commands",
+      "pos": [790, 780],
+      "size": [170, 60],
+      "sources": [
+        { "path": "backend/routes/console.php", "line": 18, "end_line": 27, "label": "Schedule entries" },
+        { "path": "backend/app/Jobs/AnalyzeReport.php", "line": 14, "label": "Report job" }
+      ]
+    },
+    {
+      "id": "osm",
+      "type": "external",
+      "label": "OSM Services",
+      "sublabel": "Overpass · OSRM · tiles",
+      "tag": "3 mirrors",
+      "pos": [1050, 360],
+      "size": [170, 60],
+      "sources": [
+        { "path": "backend/app/Services/OsmOverpassService.php", "line": 25, "label": "Mirror endpoints" },
+        { "path": "backend/app/Services/Routing/OsrmDrivingRouter.php", "line": 15, "label": "OSRM router" }
+      ]
+    },
+    {
+      "id": "ai_providers",
+      "type": "external",
+      "label": "AI Providers",
+      "sublabel": "Groq · Gemini · Cloudflare",
+      "tag": "key pool",
+      "pos": [1050, 540],
+      "size": [170, 60],
+      "sources": [
+        { "path": "backend/config/services.php", "line": 44, "end_line": 53, "label": "Chain config" },
+        { "path": "backend/app/Services/Ai/GeminiService.php", "line": 56, "label": "Gemini call" }
+      ]
+    },
+    {
+      "id": "gov",
+      "type": "external",
+      "label": "BIPAD · Open-Meteo",
+      "sublabel": "incidents · weather grid",
+      "tag": "scheduled sync",
+      "pos": [1050, 660],
+      "size": [170, 60],
+      "sources": [
+        { "path": "backend/app/Services/BipadApiService.php", "line": 17, "label": "BIPAD client" },
+        { "path": "backend/app/Console/Commands/FetchWeather.php", "line": 13, "label": "Weather command" }
+      ]
+    },
+    {
+      "id": "push",
+      "type": "external",
+      "label": "FCM · SMS · Email",
+      "sublabel": "device tokens · OTP",
+      "tag": "Kreait FCM v1",
+      "pos": [1050, 780],
+      "size": [170, 60],
+      "sources": [
+        { "path": "backend/app/Services/PushNotificationService.php", "line": 54, "label": "FCM send" },
+        { "path": "backend/app/Http/Controllers/PushTokenController.php", "line": 13, "label": "Token register" }
+      ]
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "region",
+      "label": "Client tier · user and operator devices",
+      "wraps": ["admin", "mobile"],
+      "pad": 24
+    },
+    {
+      "kind": "security-group",
+      "label": "Trusted backend · Laravel runtime (MySQL + Redis)",
+      "wraps": ["auth", "api", "reports", "sos", "geo", "commerce", "care", "mysql", "redis", "ai_core", "workers"],
+      "pad": 24
+    },
+    {
+      "kind": "region",
+      "label": "Third-party services · public internet",
+      "wraps": ["osm", "ai_providers", "gov", "push"],
+      "pad": 24
+    }
+  ],
+  "connections": [
+    { "id": "mobile-api", "from": "mobile", "to": "api", "label": "HTTPS /api/v1", "variant": "emphasis", "fromSide": "right", "toSide": "left", "labelAt": [230, 504] },
+    { "id": "api-auth", "from": "api", "to": "auth", "label": "verify token · gates", "variant": "security", "fromSide": "top", "toSide": "bottom" },
+    { "id": "admin-api", "from": "admin", "to": "api", "label": "session · role gate", "variant": "security", "fromSide": "right", "toSide": "left" },
+    { "id": "admin-reports", "from": "admin", "to": "reports", "label": "approve · reject", "fromSide": "right", "toSide": "top", "via": [[270, 90], [270, 20], [610, 20]], "labelAt": [610, 40] },
+    { "id": "api-reports", "from": "api", "to": "reports", "label": "create · query", "fromSide": "right", "toSide": "left", "via": [[445, 460], [445, 90]], "labelAt": [445, 170] },
+    { "id": "api-sos", "from": "api", "to": "sos", "label": "activate · track", "fromSide": "right", "toSide": "left", "via": [[475, 460], [475, 240]], "labelAt": [495, 320] },
+    { "id": "api-geo", "from": "api", "to": "geo", "label": "places · routes", "fromSide": "right", "toSide": "left", "via": [[505, 460], [505, 390]], "labelAt": [528, 448] },
+    { "id": "api-commerce", "from": "api", "to": "commerce", "label": "ads · coins", "fromSide": "right", "toSide": "left", "labelAt": [470, 515] },
+    { "id": "api-care", "from": "api", "to": "care", "label": "support · legal", "fromSide": "bottom", "toSide": "bottom" },
+    { "id": "api-workers", "from": "api", "to": "workers", "label": "enqueue jobs", "variant": "dashed", "fromSide": "bottom", "toSide": "left" },
+    { "id": "workers-ai", "from": "workers", "to": "ai_core", "label": "run analysis", "fromSide": "top", "toSide": "bottom" },
+    { "id": "ai-providers", "from": "ai_core", "to": "ai_providers", "label": "text · vision chain", "variant": "emphasis", "fromSide": "right", "toSide": "left", "labelAt": [1005, 614] },
+    { "id": "geo-osm", "from": "geo", "to": "osm", "label": "Overpass · OSRM", "fromSide": "right", "toSide": "left" },
+    { "id": "geo-redis", "from": "geo", "to": "redis", "label": "cache reads", "fromSide": "right", "toSide": "left" },
+    { "id": "reports-mysql", "from": "reports", "to": "mysql", "label": "SQL rows", "fromSide": "right", "toSide": "left" },
+    { "id": "workers-gov", "from": "workers", "to": "gov", "label": "BIPAD · weather sync", "fromSide": "right", "toSide": "left", "labelAt": [1005, 745] },
+    { "id": "workers-push", "from": "workers", "to": "push", "label": "FCM · SMS jobs", "fromSide": "right", "toSide": "left", "labelAt": [1005, 830] },
+    { "id": "push-mobile", "from": "push", "to": "mobile", "label": "push delivery", "variant": "dashed", "fromSide": "bottom", "toSide": "bottom" }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "Request path and gates",
+      "items": [
+        "Mobile and panel hit one Laravel 13 app; public reads are open under /api/v1",
+        "Authenticated group runs auth:sanctum, then status, legal.acceptance, profile.completed, role",
+        "Idempotency, access-log and throttle middleware run before controllers",
+        "Admin prefix is dynamic via GameSetting; role:admin,super_admin,moderator guards the panel"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "Report lifecycle",
+      "items": [
+        "store() forces status pending, validates media, adds a moderation_queues row, dispatches AnalyzeReport",
+        "ReportAnalysisService writes approved, rejected or pending plus authenticity_score and ai_analysis",
+        "AdminController approveReport or rejectReport records verified_by, XP changes and an audit log",
+        "Approved reports publish a proximity Alert and a queued nearby push"
+      ]
+    },
+    {
+      "dot": "violet",
+      "title": "AI, queue and data",
+      "items": [
+        "Text chain order: Groq, Gemini per key, Cloudflare Workers AI; vision: Gemini, Cloudflare",
+        "Rate-limited keys block in Redis-backed cache and the chain fails over or throws",
+        "Queue default driver is database jobs table; scheduler runs BIPAD sync, weather and AI commands",
+        "Redis holds bbox and directions caches, assistant quota, OSM import state and the live feed"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "Monetization and trust edges",
+      "items": [
+        "Ads are first-party campaigns: impression and click tracking feeds FraudDetectionService then CoinService into the coin wallet ledger",
+        "Support chat starts AI-handled and moves to awaiting_human with takeover, stop-AI and CSAT",
+        "Legal documents are authored in the panel; acceptances gate writes until re-accepted",
+        "External: BIPAD, Open-Meteo, Overpass, OSRM, Groq, Gemini, Cloudflare, FCM, SMS, eSewa, Khalti"
+      ]
+    }
+  ]
+}

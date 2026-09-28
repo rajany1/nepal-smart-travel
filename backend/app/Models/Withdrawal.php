@@ -22,7 +22,7 @@ class Withdrawal extends Model
     protected function casts(): array
     {
         return [
-            'amount' => 'decimal:2',
+            'amount' => 'decimal:4',
             'account_details' => 'array',
             'processed_at' => 'datetime',
         ];

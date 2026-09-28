@@ -8,6 +8,7 @@ import '../../../../core/utils/icon_mapper.dart';
 import '../../../../providers/report_provider.dart';
 import '../../../../core/models/report_category.dart' as rc;
 import '../../../../core/services/location_service.dart';
+import '../../../../core/services/location_integrity_service.dart';
 import '../../../../core/services/camera_service.dart';
 import '../../../../core/services/exif_embedder_service.dart';
 import '../../../../config/themes/app_theme.dart';
@@ -42,10 +43,20 @@ class _CategoryFormSheetState extends State<CategoryFormSheet> {
 
   // Location
   final LocationService _locationService = LocationService();
+  final LocationIntegrityService _integrityService =
+      LocationIntegrityService.instance;
   double? _lat;
   double? _lng;
+  double? _accuracy;
+  DateTime? _locationTimestamp;
   String? _district;
   bool _isLoadingLocation = true;
+
+  // Location integrity (mock-location detection) — evidence for the backend,
+  // never blocks the submission. Started early so it is usually settled by
+  // the time the user taps submit.
+  Future<LocationIntegrityResult>? _integrityFuture;
+  LocationIntegrityResult? _locationIntegrity;
 
   // Photo
   final CameraService _cameraService = CameraService();
@@ -57,12 +68,17 @@ class _CategoryFormSheetState extends State<CategoryFormSheet> {
   bool _isSubmitting = false;
   bool _configReady = false;
 
+  // Category (starts as the widget's category, upgraded to the full form
+  // config from the backend when fields/options are missing)
+  late rc.ReportCategory _category;
+
   // Selected option (for categories with options)
   rc.ReportCategoryOption? _selectedOption;
 
   @override
   void initState() {
     super.initState();
+    _category = widget.category;
     _initialize();
     if (widget.preselectedOption != null) {
       _selectedOption = widget.preselectedOption;
@@ -70,6 +86,10 @@ class _CategoryFormSheetState extends State<CategoryFormSheet> {
   }
 
   Future<void> _initialize() async {
+    // Kick off mock-location detection in the background — it must never
+    // delay or block opening the report form.
+    unawaited(_startIntegrityCheck());
+
     // Use initial location if provided
     if (widget.initialLat != null && widget.initialLng != null) {
       _lat = widget.initialLat;
@@ -80,8 +100,8 @@ class _CategoryFormSheetState extends State<CategoryFormSheet> {
       await _getCurrentLocation();
     }
 
-    // Load category form config if it has custom fields
-    if (widget.category.hasCustomFields) {
+    // Load the full category config when the passed category is incomplete
+    if (_category.fields.isEmpty || _category.options.isEmpty) {
       await _loadCategoryConfig();
     } else {
       _configReady = true;
@@ -90,12 +110,28 @@ class _CategoryFormSheetState extends State<CategoryFormSheet> {
     if (mounted) setState(() {});
   }
 
+  Future<void> _startIntegrityCheck() async {
+    _integrityFuture ??= _integrityService.check();
+    try {
+      final result = await _integrityFuture!;
+      if (mounted) {
+        setState(() => _locationIntegrity = result);
+      } else {
+        _locationIntegrity = result;
+      }
+    } catch (_) {
+      // check() never throws in practice — submission has its own fallback.
+    }
+  }
+
   Future<void> _getCurrentLocation() async {
     final pos = await _locationService.getCurrentLocation();
     if (pos != null && mounted) {
       setState(() {
         _lat = pos.latitude;
         _lng = pos.longitude;
+        _accuracy = pos.accuracy;
+        _locationTimestamp = pos.timestamp;
         _isLoadingLocation = false;
       });
       final address = await _locationService.getAddressFromCoordinates(pos.latitude, pos.longitude);
@@ -116,14 +152,11 @@ class _CategoryFormSheetState extends State<CategoryFormSheet> {
 
   Future<void> _loadCategoryConfig() async {
     final provider = context.read<ReportProvider>();
-    final config = await provider.getCategoryFormConfig(widget.category.id);
+    final config = await provider.getCategoryFormConfig(_category.id);
     if (config != null && mounted) {
-      // Merge options from config
-      if (config.options.isNotEmpty && widget.category.options.isEmpty) {
-        // Note: In production, you'd update the category with config data
-      }
+      setState(() => _category = config);
     }
-    setState(() => _configReady = true);
+    if (mounted) setState(() => _configReady = true);
   }
 
   Future<void> _capturePhoto() async {
@@ -163,6 +196,8 @@ class _CategoryFormSheetState extends State<CategoryFormSheet> {
     setState(() {
       _lat = _captureLocationService.captureLatitude;
       _lng = _captureLocationService.captureLongitude;
+      _accuracy = _captureLocationService.captureAccuracy;
+      _locationTimestamp = _captureLocationService.capturedAt;
     });
   }
 
@@ -172,36 +207,78 @@ class _CategoryFormSheetState extends State<CategoryFormSheet> {
     await _capturePhoto();
   }
 
-  Future<void> _submitReport() async {
-    if (!_formKey.currentState!.validate()) return;
+  /// Systematic list of everything required but still empty. Mirrors the
+  /// form validators plus photo/location requirements — the preview screen
+  /// renders these as the "Missing information" banner and blocks submit.
+  List<String> _collectMissingItems() {
+    final missing = <String>[];
 
-    // Check photo requirement
-    final requiresPhoto = widget.category.options.any((o) => o.requiresPhoto) || 
-                          _selectedOption?.requiresPhoto == true ||
-                          widget.category.fields.any((f) => f.type == 'photo' && f.required);
-    
-    if (requiresPhoto && _capturedPhoto == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(context.t('Live photo is required for this category.')), backgroundColor: AppTheme.errorColor),
-      );
-      return;
+    final baseDesc = _formValues['description']?.toString().trim() ?? '';
+    if (baseDesc.length < 10) {
+      missing.add(context.t('Description'));
     }
 
-    // Check location
+    for (final field in _category.customFields) {
+      if (!field.required) continue;
+      final value = _formValues[field.name];
+      final isEmpty = value == null ||
+          (value is String && value.isEmpty) ||
+          (value is List && value.isEmpty);
+      if (isEmpty) {
+        missing.add(field.getLocalizedLabelFromContext(context));
+      }
+    }
+
+    final requiresPhoto = _category.options.any((o) => o.requiresPhoto) ||
+        _selectedOption?.requiresPhoto == true ||
+        _category.fields.any((f) => f.type == 'photo' && f.required);
+    if (requiresPhoto && _capturedPhoto == null) {
+      missing.add(context.t('Photo'));
+    }
+
     if (_lat == null || _lng == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(context.t('Location unavailable. Please enable GPS and try again.')), backgroundColor: AppTheme.errorColor),
-      );
-      return;
+      missing.add(context.t('Location'));
+    }
+
+    return missing;
+  }
+
+  /// Returns an error message when submission failed, null on success.
+  Future<String?> _submitReport() async {
+    final missing = _collectMissingItems();
+    if (missing.isNotEmpty) {
+      return context.t('Please complete the missing information above');
+    }
+    if (!_formKey.currentState!.validate()) {
+      return context.t('Some fields need attention');
     }
 
     setState(() => _isSubmitting = true);
+    final failMsg = context.tr('Failed to submit report. Please try again.');
 
     try {
       final description = _buildDescription();
       final categoryId = widget.category.id;
-
+      // Resolve before any await below (use_build_context_synchronously).
       final provider = context.read<ReportProvider>();
+
+      // Location integrity: reuse the background result if ready, otherwise
+      // give the native detector one last short chance. On any timeout or
+      // failure we submit with an 'cannot_determine' result — integrity
+      // issues must never stop a legitimate report from being filed.
+      LocationIntegrityResult integrity;
+      try {
+        integrity = _locationIntegrity ??
+            await (_integrityFuture ?? _integrityService.check())
+                .timeout(const Duration(seconds: 2));
+      } on TimeoutException {
+        integrity =
+            LocationIntegrityResult.inconclusive('submission_timeout');
+      } catch (_) {
+        integrity =
+            LocationIntegrityResult.inconclusive('submission_error');
+      }
+
       final success = await provider.submitReport(
         description: description,
         categoryId: categoryId,
@@ -211,30 +288,37 @@ class _CategoryFormSheetState extends State<CategoryFormSheet> {
         photoPath: _capturedPhoto?.path,
         captureLatitude: _captureLocationService.captureLatitude,
         captureLongitude: _captureLocationService.captureLongitude,
+        locationAccuracy: _accuracy,
+        locationTimestamp: _locationTimestamp,
+        locationIntegrity: integrity.toRequestPayload(),
       );
 
       _captureLocationService.clear();
 
+      if (success && _capturedPhoto != null) {
+        await CameraService.cleanUp(_capturedPhoto!);
+      }
+
       if (mounted) {
         setState(() => _isSubmitting = false);
         if (success) {
-          if (_capturedPhoto != null) await CameraService.cleanUp(_capturedPhoto!);
-          Navigator.pop(context); // Close form sheet
-          Navigator.pop(context); // Close category selection
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(content: Text(context.t('Report submitted!')), backgroundColor: AppTheme.successColor),
           );
+          Navigator.pop(context); // Close preview sheet
+          Navigator.pop(context); // Close form sheet
           // Refresh reports
           unawaited(provider.fetchReports(lat: _lat, lng: _lng, radiusKm: 20.0));
+          return null;
         }
+        return context.tr(provider.submissionErrorMessage ?? failMsg);
       }
+      return failMsg;
     } catch (e) {
       if (mounted) {
         setState(() => _isSubmitting = false);
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(context.t('Failed to submit report. Please try again.')), backgroundColor: AppTheme.errorColor),
-        );
       }
+      return failMsg;
     }
   }
 
@@ -247,7 +331,7 @@ class _CategoryFormSheetState extends State<CategoryFormSheet> {
     }
 
     // Add custom field values
-    for (final field in widget.category.customFields) {
+    for (final field in _category.customFields) {
       final value = _formValues[field.name];
       if (value != null && value.toString().isNotEmpty) {
         final label = field.getLocalizedLabel(context.read<LocalizationService>());
@@ -270,12 +354,14 @@ class _CategoryFormSheetState extends State<CategoryFormSheet> {
 
   void _showPreview() {
     final description = _buildDescription();
+    final missing = _collectMissingItems();
+    final baseDesc = _formValues['description']?.toString().trim() ?? '';
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
       builder: (ctx) => PreviewSheet(
-        category: widget.category,
+        category: _category,
         selectedOption: _selectedOption,
         description: description,
         formValues: _formValues,
@@ -285,14 +371,17 @@ class _CategoryFormSheetState extends State<CategoryFormSheet> {
         district: _district,
         onEdit: () => Navigator.pop(ctx),
         onSubmit: _submitReport,
-        isSubmitting: _isSubmitting,
+        missingItems: missing,
+        descriptionError: baseDesc.length < 10
+            ? context.t('Description must be at least 10 characters')
+            : null,
       ),
     );
   }
 
   @override
   Widget build(BuildContext context) {
-    final categoryName = widget.category.getLocalizedName(context);
+    final categoryName = _category.getLocalizedNameFromContext(context);
 
     return DraggableScrollableSheet(
       initialChildSize: 0.95,
@@ -329,13 +418,13 @@ class _CategoryFormSheetState extends State<CategoryFormSheet> {
                       width: 40,
                       height: 40,
                       decoration: BoxDecoration(
-                        color: IconMapper.getCategoryColor(widget.category.icon).withOpacity(0.12),
+                        color: IconMapper.getCategoryColor(_category.icon).withOpacity(0.12),
                         borderRadius: BorderRadius.circular(12),
                       ),
                       child: Icon(
-                        IconMapper.getIconData(widget.category.icon ?? 'assignment'),
+                        IconMapper.getIconData(_category.icon ?? 'assignment'),
                         size: 22,
-                        color: IconMapper.getCategoryColor(widget.category.icon),
+                        color: IconMapper.getCategoryColor(_category.icon),
                       ),
                     ),
                     const SizedBox(width: 12),
@@ -351,9 +440,9 @@ class _CategoryFormSheetState extends State<CategoryFormSheet> {
                               color: AppTheme.textPrimary,
                             ),
                           ),
-                          if (widget.category.description != null)
+                          if (_category.description != null)
                             Text(
-                              widget.category.getLocalizedDescription(context) ?? '',
+                              _category.getLocalizedDescriptionFromContext(context) ?? '',
                               style: const TextStyle(
                                 fontSize: AppTheme.textSm,
                                 color: AppTheme.textSecondary,
@@ -382,19 +471,19 @@ class _CategoryFormSheetState extends State<CategoryFormSheet> {
                           padding: const EdgeInsets.fromLTRB(16, 8, 16, 100),
                           children: [
                             // Option selection (if category has options)
-                            if (widget.category.options.isNotEmpty) ...[
+                            if (_category.options.isNotEmpty) ...[
                               _buildOptionSelector(),
                               const SizedBox(height: 16),
                             ],
 
                             // Custom fields
-                            ...widget.category.customFields.map((field) => Padding(
+                            ..._category.customFields.map((field) => Padding(
                                   padding: const EdgeInsets.only(bottom: 16),
                                   child: _buildField(field),
                                 )),
 
                             // Base description field (always required)
-                            if (!widget.category.customFields.any((f) => f.name == 'description')) ...[
+                            if (!_category.customFields.any((f) => f.name == 'description')) ...[
                               _buildDescriptionField(),
                               const SizedBox(height: 16),
                             ],
@@ -436,11 +525,11 @@ class _CategoryFormSheetState extends State<CategoryFormSheet> {
         Wrap(
           spacing: 8,
           runSpacing: 8,
-          children: widget.category.options.map((option) {
+          children: _category.options.map((option) {
             final isSelected = _selectedOption?.id == option.id;
-            final optionName = option.getLocalizedName(context);
+            final optionName = option.getLocalizedNameFromContext(context);
             final iconData = IconMapper.getIconData(option.icon ?? 'help');
-            final categoryColor = IconMapper.getCategoryColor(widget.category.icon);
+            final categoryColor = IconMapper.getCategoryColor(_category.icon);
 
             return GestureDetector(
               onTap: () => setState(() => _selectedOption = isSelected ? null : option),
@@ -483,9 +572,9 @@ class _CategoryFormSheetState extends State<CategoryFormSheet> {
   }
 
   Widget _buildField(rc.ReportCategoryField field) {
-    final label = field.getLocalizedLabel(context);
-    final placeholder = field.getLocalizedPlaceholder(context);
-    final helpText = field.getLocalizedHelpText(context);
+    final label = field.getLocalizedLabelFromContext(context);
+    final placeholder = field.getLocalizedPlaceholderFromContext(context);
+    final helpText = field.getLocalizedHelpTextFromContext(context);
     final error = _fieldErrors[field.name];
 
     Widget inputWidget;
@@ -496,7 +585,7 @@ class _CategoryFormSheetState extends State<CategoryFormSheet> {
           value: _formValues[field.name] as String?,
           decoration: _inputDecoration(label, placeholder, error),
           items: field.options.map((opt) {
-            final optLabel = opt.getLocalizedLabel(context);
+            final optLabel = opt.getLocalizedLabelFromContext(context);
             return DropdownMenuItem(value: opt.value, child: Text(optLabel));
           }).toList(),
           onChanged: (v) => setState(() {
@@ -513,7 +602,7 @@ class _CategoryFormSheetState extends State<CategoryFormSheet> {
           spacing: 8,
           runSpacing: 8,
           children: field.options.map((opt) {
-            final optLabel = opt.getLocalizedLabel(context);
+            final optLabel = opt.getLocalizedLabelFromContext(context);
             final isSelected = selected.contains(opt.value);
             return FilterChip(
               label: Text(optLabel),
@@ -530,8 +619,8 @@ class _CategoryFormSheetState extends State<CategoryFormSheet> {
                   _fieldErrors.remove(field.name);
                 });
               },
-              selectedColor: IconMapper.getCategoryColor(widget.category.icon).withOpacity(0.2),
-              checkmarkColor: IconMapper.getCategoryColor(widget.category.icon),
+              selectedColor: IconMapper.getCategoryColor(_category.icon).withOpacity(0.2),
+              checkmarkColor: IconMapper.getCategoryColor(_category.icon),
             );
           }).toList(),
         );
@@ -593,7 +682,7 @@ class _CategoryFormSheetState extends State<CategoryFormSheet> {
                   _formValues[field.name] = v;
                   _fieldErrors.remove(field.name);
                 }),
-                activeColor: IconMapper.getCategoryColor(widget.category.icon),
+                activeColor: IconMapper.getCategoryColor(_category.icon),
               ),
             ),
             Expanded(
@@ -605,7 +694,7 @@ class _CategoryFormSheetState extends State<CategoryFormSheet> {
                   _formValues[field.name] = v;
                   _fieldErrors.remove(field.name);
                 }),
-                activeColor: IconMapper.getCategoryColor(widget.category.icon),
+                activeColor: IconMapper.getCategoryColor(_category.icon),
               ),
             ),
           ],
@@ -702,7 +791,7 @@ class _CategoryFormSheetState extends State<CategoryFormSheet> {
       ),
       focusedBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(12),
-        borderSide: BorderSide(color: IconMapper.getCategoryColor(widget.category.icon), width: 2),
+        borderSide: BorderSide(color: IconMapper.getCategoryColor(_category.icon), width: 2),
       ),
       errorBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(12),
@@ -713,7 +802,7 @@ class _CategoryFormSheetState extends State<CategoryFormSheet> {
   }
 
   Widget _buildLocationCard() {
-    final categoryColor = IconMapper.getCategoryColor(widget.category.icon);
+    final categoryColor = IconMapper.getCategoryColor(_category.icon);
 
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
@@ -753,23 +842,11 @@ class _CategoryFormSheetState extends State<CategoryFormSheet> {
     );
   }
 
-  Widget _buildPhotoSection() {
-    final categoryColor = IconMapper.getCategoryColor(widget.category.icon);
+Widget _buildPhotoSection() {
+    final categoryColor = IconMapper.getCategoryColor(_category.icon);
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          context.t('Photo'),
-          style: const TextStyle(
-            fontSize: AppTheme.textLg,
-            fontWeight: FontWeight.w600,
-            color: AppTheme.textPrimary,
-          ),
-        ),
-        const SizedBox(height: 12),
-        if (_capturedPhoto != null) ...[
-          ClipRRect(
+    final photoWidget = _capturedPhoto != null
+        ? ClipRRect(
             borderRadius: BorderRadius.circular(12),
             child: Stack(
               children: [
@@ -796,9 +873,8 @@ class _CategoryFormSheetState extends State<CategoryFormSheet> {
                 ),
               ],
             ),
-          ),
-        ] else ...[
-          GestureDetector(
+          )
+        : GestureDetector(
             onTap: _isCapturingPhoto ? null : _capturePhoto,
             child: Container(
               height: 140,
@@ -831,8 +907,22 @@ class _CategoryFormSheetState extends State<CategoryFormSheet> {
                         ],
                       ],
                     ),
-            ),
+              ),
+            );
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          context.t('Photo'),
+          style: const TextStyle(
+            fontSize: AppTheme.textLg,
+            fontWeight: FontWeight.w600,
+            color: AppTheme.textPrimary,
           ),
+        ),
+        const SizedBox(height: 12),
+        photoWidget,
       ],
     );
   }
@@ -865,7 +955,7 @@ class _CategoryFormSheetState extends State<CategoryFormSheet> {
             onPressed: _isSubmitting ? null : _showPreview, // Preview first, then submit from preview
             style: ElevatedButton.styleFrom(
               padding: const EdgeInsets.symmetric(vertical: 16),
-              backgroundColor: IconMapper.getCategoryColor(widget.category.icon),
+              backgroundColor: IconMapper.getCategoryColor(_category.icon),
               foregroundColor: Colors.white,
               elevation: 0,
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),

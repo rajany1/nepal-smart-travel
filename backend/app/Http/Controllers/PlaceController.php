@@ -1031,7 +1031,7 @@ class PlaceController extends Controller
                 'moderation_status' => 'approved',
                 'moderated_at' => now(),
                 'ip_address' => $request->ip(),
-                'user_agent' => $request->userAgent(),
+                'user_agent' => substr((string) $request->userAgent(), 0, 500),
             ]
         );
 
