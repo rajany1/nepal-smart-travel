@@ -190,6 +190,7 @@ Route::prefix($adminPrefix)->name('admin.')->middleware(['auth', 'status', 'role
     // Places
     Route::get('/places', [AdminController::class, 'places'])->name('places');
     Route::get('/places/osm', [AdminController::class, 'placesOsm'])->name('places.osm');
+    Route::get('/places/import-osm/status', [AdminController::class, 'importOsmStatus'])->name('places.import-osm.status');
     Route::get('/places/corrections', [AdminController::class, 'corrections'])->name('places.corrections');
     Route::get('/places/{id}', [AdminController::class, 'showPlace'])->name('places.view');
     Route::get('/places/{id}/reviews', [AdminController::class, 'placeReviews'])->name('places.reviews');

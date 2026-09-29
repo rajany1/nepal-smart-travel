@@ -3,6 +3,7 @@ import "../../core/services/localization_service.dart";
 import 'dart:math' as math;
 import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
+import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:flutter_map/flutter_map.dart';
@@ -14,6 +15,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../../config/constants/app_constants.dart';
 import '../../config/themes/app_theme.dart';
 import '../../core/services/location_service.dart';
+import '../../core/services/nearby_map_cache.dart';
 import '../../core/services/offline_db_service.dart';
 import '../../core/services/offline_tile_provider.dart';
 import '../../core/services/app_settings_service.dart';
@@ -43,6 +45,13 @@ import '../../widgets/ad_inline_banner.dart';
 /// - Viewport-based place fetching
 /// - Offline caching
 /// - FABs for My Location, Filter, Add Place
+///
+/// Open sequence (cached experience):
+/// ```text
+/// restore cached camera + places  ->  render map immediately
+///           ->  fresh GPS in background  ->  refresh places in background
+/// ```
+/// The map never waits on GPS or the network to paint something useful.
 class NearbyMapScreen extends StatefulWidget {
   const NearbyMapScreen({
     super.key,
@@ -68,7 +77,7 @@ class NearbyMapScreen extends StatefulWidget {
 }
 
 class _NearbyMapScreenState extends State<NearbyMapScreen>
-    with SingleTickerProviderStateMixin {
+    with TickerProviderStateMixin {
   final LocationService _locationService = LocationService();
   final MapController _mapController = MapController();
   final DraggableScrollableController _sheetController =
@@ -94,6 +103,41 @@ class _NearbyMapScreenState extends State<NearbyMapScreen>
 
   // Current location
   LatLng? _currentLocation;
+
+  // ── Instant-restore / cached-open state ──────────────────────────────
+  // The map widget is only built once the previous session's camera has been
+  // restored (a single SharedPreferences read, ~1 frame) so the first painted
+  // frame is already the map the user left behind — never the blank default.
+  bool _initialCameraReady = false;
+
+  // Latest location-resolution result. Drives the "Waiting for your current
+  // location / Try Again" card so a denied permission is reported even while
+  // the cached map keeps rendering underneath it.
+  DeviceLocationStatus? _locationStatus;
+
+  // ── Blue-dot smoothing ───────────────────────────────────────────────
+  // _currentLocation is the raw target (latest GPS fix); the marker and the
+  // follow-camera chase _displayLocation, which interpolates toward the
+  // target every frame instead of teleporting on each fix.
+  LatLng? _displayLocation;
+  final ValueNotifier<LatLng?> _displayLocationNotifier = ValueNotifier(null);
+  final ValueNotifier<double> _accuracyNotifier = ValueNotifier<double>(20);
+  final ValueNotifier<double> _zoomNotifier =
+      ValueNotifier<double>(AppConstants.defaultMapZoom);
+  Ticker? _dotTicker;
+  DateTime _lastFixAt = DateTime.fromMillisecondsSinceEpoch(0);
+
+  // ── Follow / compass state machine ───────────────────────────────────
+  // _isTracking      — camera follows the blue dot (GPS controls center)
+  // _compassMode     — camera bearing follows the device heading
+  // Both can be on at the same time: center and bearing are independent.
+  bool _compassMode = false;
+  bool _hasRecenteredWithButton = false;
+
+  // Camera / location persistence (debounced)
+  Timer? _cameraPersistTimer;
+  Timer? _locationPersistTimer;
+  bool _persistLocationQueued = false;
 
   // Heading (degrees, clockwise from north): GPS bearing while moving,
   // compass fallback so the light rotates with the phone when standing.
@@ -172,10 +216,6 @@ class _NearbyMapScreenState extends State<NearbyMapScreen>
   VoidCallback? _cameraAnimListener;
   bool _isAnimating = false;
 
-  // Location button cycling state: 0=default recenter, 1=compass follow + tilt
-  int _locationTapState = 0;
-  StreamSubscription? _compassFollowSub;
-
   // OSM submission tracking
 
   Map<String, String> _osmSubmissionStatuses = {}; // osmId -> none/pending/approved
@@ -201,7 +241,10 @@ class _NearbyMapScreenState extends State<NearbyMapScreen>
     });
     NepalBoundaryService.instance.onLoaded(_onBoundaryLoaded);
     NepalBoundaryService.instance.load();
-    WidgetsBinding.instance.addPostFrameCallback((_) => _initMap());
+    // Started immediately rather than post-frame: the first await inside is
+    // the local camera restore, which has to finish BEFORE the first frame so
+    // the map opens on the previous view instead of the default Nepal centre.
+    unawaited(_initMap());
   }
 
   void _onBoundaryLoaded() {
@@ -230,43 +273,56 @@ class _NearbyMapScreenState extends State<NearbyMapScreen>
   void _initCompass() {
     final events = FlutterCompass.events;
     if (events == null) return;
+    // Single shared compass subscription — the blue-dot heading, the FAB state
+    // and compass-mode bearing all read from this one listener. (A second
+    // listener used to be created when compass-follow started, which meant
+    // duplicated sensor callbacks and two competing rotate() callers.)
     _compassSub = events.listen((event) {
       if (!mounted) return;
       final h = event.heading;
       if (h == null) return;
       // Throttle ~20Hz: the compass fires at 200Hz+; rebuilding the map at
-      // that rate is wasteful. Tiny changes are also ignored (tilt jitter).
+      // that rate is wasteful.
       final now = DateTime.now();
       if (now.difference(_lastCompassUi).inMilliseconds < 50) return;
       _lastCompassUi = now;
       final h360 = (h % 360 + 360) % 360;
-      final prev = _compassHeading;
-      if (prev != null && _shortestArc(prev, h360).abs() < 1) return;
       _compassHeading = h360;
       // When GPS bearing is stale (standing still), let the compass drive
       // the light so it follows the phone's rotation.
-      if (DateTime.now().difference(_lastGpsHeadingAt).inSeconds > 4) {
+      if (now.difference(_lastGpsHeadingAt).inSeconds > 4) {
         _useGpsHeading = false;
       }
+      // ValueNotifier swallows no-op writes, so jitter costs nothing here.
       _headingNotifier.value = _heading;
+      // Heading only ever drives the camera BEARING, and only while compass
+      // mode is on. Camera center is exclusively GPS-driven.
+      if (_compassMode) _applyCompassRotation(h360);
     });
   }
 
   @override
   void dispose() {
+    _persistNow();
     NepalBoundaryService.instance.removeOnLoaded(_onBoundaryLoaded);
     ProximityAlertService.instance.stopNavigationMonitoring();
     _debounceTimer?.cancel();
     _autoDownloadTimer?.cancel();
+    _cameraPersistTimer?.cancel();
+    _locationPersistTimer?.cancel();
     _positionStream?.cancel();
     _compassSub?.cancel();
-    _compassFollowSub?.cancel();
+    _dotTicker?.stop();
+    _dotTicker?.dispose();
     _syncStreamController?.close();
     _weatherDebounceTimer?.cancel();
     _sosRefreshTimer?.cancel();
     _rotationNotifier.dispose();
     _camVersion.dispose();
     _headingNotifier.dispose();
+    _displayLocationNotifier.dispose();
+    _accuracyNotifier.dispose();
+    _zoomNotifier.dispose();
     _searchTextNotifier.dispose();
     _sheetController.dispose();
     _searchController.dispose();
@@ -277,17 +333,19 @@ class _NearbyMapScreenState extends State<NearbyMapScreen>
   Future<void> _initMap() async {
     final provider = context.read<PlaceProvider>();
 
-    await provider.fetchCategories();
+    // ── 0) Restore the previous session BEFORE anything can block ──────
+    // One local read (no GPS, no network). This is what stops every reopen
+    // from feeling like the map is starting from zero.
+    await _restoreCachedCamera();
+    if (!mounted) return;
 
-    // Instant map: Nepal-wide dataset loads in parallel with GPS lookup —
-    // markers paint immediately (from SQLite cache or the 10-min Redis-backed
-    // /places/all), and the map recenters when GPS arrives.
-    // NOTE: setNepalCachedPlaces() populates from SQLite instantly (fast),
-    // but fetchNepalPlaces() MUST use force=true to ensure fresh API data
-    // is always fetched — the SQLite cache may be stale if new places were
-    // added since the last cache write.
+    // ── 1) Datasets load in parallel — never gate the map on them ──────
+    // setNepalCachedPlaces() restores markers from SQLite instantly;
+    // fetchNepalPlaces() only hits the network once the payload is stale
+    // (the server caches /places/all for 10 minutes too).
+    unawaited(provider.fetchCategories());
     unawaited(provider.setNepalCachedPlaces());
-    unawaited(provider.fetchNepalPlaces(force: true));
+    unawaited(provider.fetchNepalPlaces());
 
     if (widget.focusLat != null && widget.focusLng != null) {
       // Focus mode: open centered on a given point (e.g. an SOS location from
@@ -296,6 +354,9 @@ class _NearbyMapScreenState extends State<NearbyMapScreen>
         _lat = widget.focusLat;
         _lng = widget.focusLng;
         _currentLocation = LatLng(widget.focusLat!, widget.focusLng!);
+        _displayLocation = _currentLocation;
+        _displayLocationNotifier.value = _currentLocation;
+        _initialCameraReady = true;
       });
       WidgetsBinding.instance.addPostFrameCallback((_) {
         _recenterMap();
@@ -305,67 +366,48 @@ class _NearbyMapScreenState extends State<NearbyMapScreen>
       context
           .read<SosProvider>()
           .fetchNearbySos(widget.focusLat!, widget.focusLng!, radiusKm: 5);
-    } else {
-      // 1) Last-known location straight away — the map opens on a real spot
-      //    with zero "waiting for location" state.
-      final lastKnown = await _locationService.getLastKnownPosition();
-      if (lastKnown != null && mounted) {
-        setState(() {
-          _lat = lastKnown.latitude;
-          _lng = lastKnown.longitude;
-          _currentLocation = LatLng(lastKnown.latitude, lastKnown.longitude);
-        });
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          _recenterMap();
-        });
-      }
     }
 
     if (mounted && _lat != null && _lng != null) {
-      // Attempt to load cached data first
+      // Attempt to load cached data first (SQLite — instant, no spinner)
       await _loadCachedPlaces();
+      if (!mounted) return;
 
-      // Viewport places come from the on-device Nepal dataset (client-side
-      // nearest) — no Overpass round-trip on open.
-      await _fetchPlacesForViewport();
-      provider.fetchFeaturedPlaces(lat: _lat, lng: _lng);
+      // Viewport places: served from memory / the grid-keyed Redis cache when
+      // the same area was fetched recently, so reopening never re-issues it.
+      unawaited(_fetchPlacesForViewport());
+      unawaited(provider.fetchFeaturedPlaces(lat: _lat, lng: _lng));
       _fetchWeatherForViewport();
       context.read<SosProvider>().fetchNearbySos(_lat!, _lng!, radiusKm: 5);
     }
 
     if (widget.focusLat == null && widget.focusLng == null) {
-      // 2) Fresh GPS fix in the background. If it moved from the last-known
-      //    spot, glide the map smoothly to the live position.
-      final loc = await _locationService.getCurrentLocation();
-      if (loc != null && mounted) {
-        final distM = _currentLocation == null
-            ? double.infinity
-            : const Distance()
-                .as(LengthUnit.Meter, _currentLocation!, LatLng(loc.latitude, loc.longitude));
-        setState(() {
-          _lat = loc.latitude;
-          _lng = loc.longitude;
-          _currentLocation = LatLng(loc.latitude, loc.longitude);
-        });
-        _startPositionTracking();
-        if (distM > 50 && _mapReady) {
-          _smoothMoveTo(_currentLocation!);
-        }
-      }
+      // ── 2) Live GPS in the BACKGROUND ────────────────────────────────
+      // The stream starts immediately (blue dot + follow work off it) while
+      // the bounded resolver below settles permission / service status.
+      // Neither one delays the restored map.
+      _startPositionTracking();
+      unawaited(_resolveFreshLocation());
     }
 
     if (!mounted) return;
     if (_lat == null || _lng == null) {
       // No location at all — fall back to the default Nepal center so the
-      // map (and its Nepal-wide pins) is still usable.
+      // map (and its Nepal-wide pins) is still usable. _currentLocation is
+      // deliberately left null: no fake blue dot until a real fix arrives.
       setState(() {
         _lat = AppConstants.defaultLatitude;
         _lng = AppConstants.defaultLongitude;
-        _currentLocation = LatLng(AppConstants.defaultLatitude, AppConstants.defaultLongitude);
+        _initialCameraReady = true;
       });
       WidgetsBinding.instance.addPostFrameCallback((_) {
         _recenterMap();
       });
+    }
+
+    if (mounted && _lat != null) {
+      _zoomNotifier.value = _currentZoom;
+      _persistCameraSoon();
     }
 
     // Auto-fetch route to destination (Place Details "Directions")
@@ -386,16 +428,392 @@ class _NearbyMapScreenState extends State<NearbyMapScreen>
     });
   }
 
+  // ─────────────────────────────────────────────────────────────────────
+  // Cached open: restore the previous session, then resolve fresh GPS
+  // ─────────────────────────────────────────────────────────────────────
+
+  /// Rebuilds the previous camera + position from SharedPreferences.
+  ///
+  /// This is the first `await` in [_initMap] on purpose: one local read, no
+  /// GPS, no network — so the first frame is already the view the user left
+  /// behind instead of the default Nepal centre. Falls back to the OS
+  /// last-known fix on a first-ever open.
+  Future<void> _restoreCachedCamera() async {
+    try {
+      final saved = await NearbyMapCache.instance.read();
+      if (!mounted) return;
+
+      if (saved != null) {
+        // The camera is restored unconditionally (it is where the user
+        // *looked*); the blue dot is only restored when the stored fix is
+        // recent enough to honestly mean "you are here".
+        final loc = saved.freshLocation;
+        setState(() {
+          _lat = saved.centerLat;
+          _lng = saved.centerLng;
+          _currentZoom = saved.zoom;
+          _previousZoom = saved.zoom;
+          _isTracking = saved.isTracking;
+          if (loc != null) {
+            _currentLocation = loc;
+            _displayLocation = loc;
+            _displayLocationNotifier.value = loc;
+            if (saved.accuracy != null) {
+              _accuracyM = saved.accuracy!;
+              _accuracyNotifier.value = _accuracyM;
+            }
+            _lastFixAt = saved.fixedAt ?? _lastFixAt;
+          }
+        });
+        return;
+      }
+
+      // First-ever open: the OS last-known fix is free (no permission prompt).
+      final lastKnown = await _locationService.getLastKnownPosition();
+      if (!mounted) return;
+      setState(() {
+        if (lastKnown != null) {
+          _lat = lastKnown.latitude;
+          _lng = lastKnown.longitude;
+          _currentLocation = LatLng(lastKnown.latitude, lastKnown.longitude);
+          _displayLocation = _currentLocation;
+          _displayLocationNotifier.value = _currentLocation;
+          _accuracyM = lastKnown.accuracy;
+          _accuracyNotifier.value = _accuracyM;
+        }
+      });
+    } catch (e) {
+      debugPrint('Camera restore failed: $e');
+    } finally {
+      // Whatever happened, the map must build — an unreadable snapshot
+      // degrades to the default centre, it never leaves a spinner.
+      if (mounted) _initialCameraReady = true;
+    }
+  }
+
+  /// Resolves permission + service status once per open with a bounded
+  /// timeout, then applies the fix it returns. Never blocks the map: the
+  /// restored camera is already on screen by the time this runs.
+  Future<void> _resolveFreshLocation() async {
+    var status = DeviceLocationStatus.unavailable;
+    LatLng? fix;
+    double? accuracy;
+    DateTime? fixedAt;
+    try {
+      final result = await _locationService
+          .resolveDeviceLocation()
+          .timeout(const Duration(seconds: 12));
+      status = result.status;
+      if (result.hasCoordinates) {
+        fix = LatLng(result.latitude!, result.longitude!);
+        accuracy = result.accuracy;
+        fixedAt = result.fixedAt ?? DateTime.now();
+      }
+    } catch (_) {
+      status = DeviceLocationStatus.unavailable;
+    }
+    if (!mounted) return;
+    if (_locationStatus != status) {
+      setState(() => _locationStatus = status);
+    }
+    if (fix != null) {
+      _applyLocationFix(fix, accuracy: accuracy, fixedAt: fixedAt);
+    }
+  }
+
+  /// Accepts a raw GPS fix: stores it as the chase target, starts the smooth
+  /// blue-dot interpolation, and persists it for the next open.
+  ///
+  /// [snap] skips the interpolation — used when the user explicitly asked for
+  /// a fresh position, so the dot must land exactly where it was asked for
+  /// rather than easing in from wherever it was before.
+  void _applyLocationFix(
+    LatLng loc, {
+    double? accuracy,
+    DateTime? fixedAt,
+    bool snap = false,
+  }) {
+    if (!mounted) return;
+    // Reject out-of-order fixes so the dot never rewinds in time.
+    if (fixedAt != null) {
+      if (fixedAt.isBefore(_lastFixAt)) return;
+      _lastFixAt = fixedAt;
+    }
+    final firstFix = _currentLocation == null;
+    _currentLocation = loc;
+    if (accuracy != null && accuracy > 0) {
+      _accuracyM = accuracy;
+      _accuracyNotifier.value = accuracy;
+    }
+
+    final display = _displayLocation;
+    if (snap || display == null) {
+      // First fix (or an explicit request): snap, nothing to interpolate.
+      _displayLocation = loc;
+      _displayLocationNotifier.value = loc;
+      _stopDotChase();
+    } else if (const Distance().as(LengthUnit.Meter, display, loc) > 60000) {
+      // Huge jump (travelled while the app was closed): the dot cannot be
+      // eased across 60km+, so it teleports — and while following, the camera
+      // glides there in one smooth shot instead of snapping.
+      _displayLocation = loc;
+      _displayLocationNotifier.value = loc;
+      _stopDotChase();
+      if (_isTracking && _mapReady && !_isAnimating) {
+        _smoothMoveTo(
+          loc,
+          duration: const Duration(milliseconds: 700),
+          curve: Curves.easeOut,
+        );
+      }
+    } else {
+      _startDotChase();
+    }
+    // First fix on this screen: the map only starts showing the dot once
+    // _currentLocation is set, so a rebuild has to be requested explicitly.
+    if (firstFix) setState(() {});
+    _persistLocationSoon();
+  }
+
+  // ─────────────────────────────────────────────────────────────────────
+  // Blue-dot chase: exponential interpolation toward the latest GPS fix
+  // ─────────────────────────────────────────────────────────────────────
+
+  void _startDotChase() {
+    if (_currentLocation == null) return;
+    final ticker = _dotTicker ??= createTicker(_tickDot);
+    if (!ticker.isActive) ticker.start();
+  }
+
+  void _stopDotChase() => _dotTicker?.stop();
+
+  void _tickDot(Duration _) {
+    final target = _currentLocation;
+    final display = _displayLocation;
+    if (target == null || display == null) {
+      _stopDotChase();
+      return;
+    }
+
+    const double k = 0.18; // ~1/6 of the gap per frame at 60fps
+    const double maxStepDeg = 0.05; // ~5.5km — big jumps never teleport
+
+    var dLat = target.latitude - display.latitude;
+    var dLng = target.longitude - display.longitude;
+    if (dLng > 180) dLng -= 360;
+    if (dLng < -180) dLng += 360;
+
+    var stepLat = dLat * k;
+    var stepLng = dLng * k;
+    if (stepLat.abs() > maxStepDeg) stepLat = stepLat.sign * maxStepDeg;
+    if (stepLng.abs() > maxStepDeg) stepLng = stepLng.sign * maxStepDeg;
+
+    var newLat = display.latitude + stepLat;
+    var newLng = display.longitude + stepLng;
+    if (newLat > 90) newLat = 90;
+    if (newLat < -90) newLat = -90;
+    newLng = ((newLng + 540) % 360) - 180;
+
+    final next = LatLng(newLat, newLng);
+    final remaining =
+        const Distance().as(LengthUnit.Meter, next, target);
+    final settled = remaining < 0.4;
+
+    _displayLocation = settled ? target : next;
+    _displayLocationNotifier.value = _displayLocation;
+
+    // The camera chases the DISPLAYED dot (not the raw fix), so the map and
+    // the blue dot always move as one thing.
+    if (_isTracking && !_isAnimating && _routes.isEmpty && _mapReady) {
+      _moveCamera(_displayLocation!);
+    }
+
+    if (settled) _stopDotChase();
+  }
+
+  /// Applies the follow-camera glide (no gesture events, so it never flips
+  /// tracking off the way a user pan would).
+  void _moveCamera(LatLng center, {double? zoom}) {
+    if (!_mapReady) return;
+    try {
+      _mapController.move(center, zoom ?? _currentZoom);
+      final cam = _mapController.camera;
+      _currentZoom = cam.zoom;
+      _lat = cam.center.latitude;
+      _lng = cam.center.longitude;
+      if (_zoomNotifier.value != _currentZoom) {
+        _zoomNotifier.value = _currentZoom;
+      }
+      _persistCameraSoon();
+    } catch (e) {
+      debugPrint('Map move failed: $e');
+    }
+  }
+
+  // ─────────────────────────────────────────────────────────────────────
+  // Camera-state bookkeeping shared by gestures and programmatic moves
+  // ─────────────────────────────────────────────────────────────────────
+
+  void _handleViewportChanged(MapCamera camera) {
+    _currentZoom = camera.zoom;
+    _lat = camera.center.latitude;
+    _lng = camera.center.longitude;
+    if (_zoomNotifier.value != _currentZoom) {
+      _zoomNotifier.value = _currentZoom;
+    }
+
+    // Bump _camVersion only when crossing polygon zoom thresholds (7, 9).
+    // Toggling province/district layers must not rebuild on every pan.
+    final prev = _previousZoom;
+    final now = _currentZoom;
+    final crossedThreshold = (prev < 7 && now >= 7) || (prev >= 7 && now < 7) ||
+        (prev < 9 && now >= 9) || (prev >= 9 && now < 9);
+    _previousZoom = now;
+    if (crossedThreshold) _camVersion.value++;
+
+    // Throttle place fetching on map move - 300ms delay after movement stops
+    _debounceTimer?.cancel();
+    _debounceTimer = Timer(const Duration(milliseconds: 300), () {
+      if (!mounted) return;
+      _fetchPlacesForViewport();
+      if (_lat != null && _lng != null) {
+        context.read<SosProvider>().fetchNearbySos(_lat!, _lng!, radiusKm: 5);
+      }
+    });
+
+    // Throttle weather fetch on map move
+    _weatherDebounceTimer?.cancel();
+    _weatherDebounceTimer = Timer(const Duration(milliseconds: 300), () {
+      if (mounted) _fetchWeatherForViewport();
+    });
+
+    // Auto-download maps: background-cache the visible area once the map
+    // settles, so the region works offline later.
+    if (_currentZoom >= 8 && _lat != null && _lng != null) {
+      _autoDownloadTimer?.cancel();
+      _autoDownloadTimer = Timer(const Duration(seconds: 2), () async {
+        if (!await AppSettingsService.autoDownloadMaps) return;
+        OfflineTileDownloader.downloadRegion(
+          minLat: _lat! - 0.15,
+          maxLat: _lat! + 0.15,
+          minLng: _lng! - 0.2,
+          maxLng: _lng! + 0.2,
+          minZoom: 8,
+          maxZoom: 16,
+        );
+      });
+    }
+
+    _persistCameraSoon();
+  }
+
+  /// Turns off follow + compass — the user took manual control of the camera.
+  void _exitFollowModes() {
+    if (!_isTracking && !_compassMode) return;
+    _stopCompassFollow();
+    setState(() {
+      _isTracking = false;
+      _compassMode = false;
+    });
+    _persistCameraSoon();
+  }
+
+  /// True when the camera is showing the blue dot near the middle of the
+  /// screen — used to decide whether the FAB still needs a recenter.
+  bool _centeredOnUser({double tolerancePx = 80}) {
+    final loc = _displayLocation ?? _currentLocation;
+    if (loc == null || !_mapReady) return false;
+    try {
+      final cam = _mapController.camera;
+      final a = cam.latLngToScreenPoint(cam.center);
+      final b = cam.latLngToScreenPoint(loc);
+      final dx = a.x - b.x;
+      final dy = a.y - b.y;
+      return math.sqrt(dx * dx + dy * dy) <= tolerancePx;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Compass-mode bearing: shortest-arc smoothing so a small sensor jitter
+  /// never whips the map the long way round.
+  void _applyCompassRotation(double heading) {
+    if (!_compassMode || !_mapReady) return;
+    double target;
+    if (_smoothedCompassHeading == null) {
+      // Seed from the camera's current rotation so entering compass mode
+      // never snaps — the first sample just starts nudging from here.
+      target = -_mapController.camera.rotation;
+      _smoothedCompassHeading = target;
+    } else {
+      final arc = _shortestArc(_smoothedCompassHeading!, heading);
+      target = _smoothedCompassHeading! + arc * 0.15;
+    }
+    _smoothedCompassHeading = target;
+
+    // MapCamera.withRotation does NOT normalise the angle; keep it in
+    // [-180, 180) so _buildCompass's isNorthUp check stays correct.
+    final rotation = _normalizeRotation(-target);
+    if (_mapController.rotate(rotation)) {
+      _rotationNotifier.value = rotation;
+    }
+  }
+
+  static double _normalizeRotation(double deg) {
+    var r = deg % 360;
+    if (r >= 180) r -= 360;
+    if (r < -180) r += 360;
+    return r;
+  }
+
+  // ─────────────────────────────────────────────────────────────────────
+  // Persistence (debounced) — one key, camera + location written together
+  // ─────────────────────────────────────────────────────────────────────
+
+  void _persistCameraSoon() {
+    if (_cameraPersistTimer?.isActive ?? false) return;
+    _cameraPersistTimer = Timer(const Duration(milliseconds: 600), _persistNow);
+  }
+
+  void _persistLocationSoon() {
+    if (_persistLocationQueued) return;
+    _persistLocationQueued = true;
+    _locationPersistTimer?.cancel();
+    _locationPersistTimer = Timer(const Duration(seconds: 2), _persistNow);
+  }
+
+  void _persistNow() {
+    _cameraPersistTimer?.cancel();
+    _locationPersistTimer?.cancel();
+    _persistLocationQueued = false;
+    // A focus-mode open (SOS pin) must not overwrite the user's own view.
+    if (!_initialCameraReady || widget.focusLat != null) return;
+    final lat = _lat;
+    final lng = _lng;
+    if (lat == null || lng == null) return;
+    unawaited(NearbyMapCache.instance.save(
+      centerLat: lat,
+      centerLng: lng,
+      zoom: _currentZoom,
+      isTracking: _isTracking,
+      location: _currentLocation,
+      accuracy: _currentLocation == null ? null : _accuracyM,
+      fixedAt: _lastFixAt.millisecondsSinceEpoch == 0 ? null : _lastFixAt,
+    ));
+  }
+
   /// Smoothly glide the camera to [target] with optional zoom change.
   ///
   /// Uses [_cameraAnimController] with [curve] over [duration].
-  /// Sets [_isAnimating] to prevent [_onMapMoved] from disabling tracking
-  /// or running expensive per-frame work during the animation.
+  /// Sets [_isAnimating] so [_tickDot] and the GPS stream leave the camera
+  /// alone while the glide runs — a programmatic move is not a user gesture,
+  /// so it must NOT cancel follow the way a drag would.
   void _smoothMoveTo(
     LatLng target, {
     Duration duration = const Duration(milliseconds: 400),
     double? targetZoom,
     Curve curve = Curves.easeInOut,
+    double? targetRotation,
   }) {
     if (!_mapReady) return;
     // Cancel any in-progress animation cleanly
@@ -407,22 +825,38 @@ class _NearbyMapScreenState extends State<NearbyMapScreen>
       _cameraAnimController.stop();
     }
 
-    final start = _mapController.camera.center;
-    final startZoom = _mapController.camera.zoom;
+    final startCam = _mapController.camera;
+    final start = startCam.center;
+    final startZoom = startCam.zoom;
+    final startRot = startCam.rotation;
     final endZoom = targetZoom ?? startZoom;
+    final endRot =
+        targetRotation == null ? null : _normalizeRotation(targetRotation);
     _cameraAnimController.duration = duration;
     _isAnimating = true;
 
     final listener = () {
       final t = curve.transform(_cameraAnimController.value);
       try {
-        _mapController.move(
-          LatLng(
-            start.latitude + (target.latitude - start.latitude) * t,
-            start.longitude + (target.longitude - start.longitude) * t,
-          ),
-          startZoom + (endZoom - startZoom) * t,
+        final center = LatLng(
+          start.latitude + (target.latitude - start.latitude) * t,
+          start.longitude + (target.longitude - start.longitude) * t,
         );
+        final zoom = startZoom + (endZoom - startZoom) * t;
+        if (endRot == null) {
+          _mapController.move(center, zoom);
+        } else {
+          _mapController.moveAndRotate(
+            center,
+            zoom,
+            startRot + _shortestArc(startRot, endRot) * t,
+          );
+        }
+        // Keep the viewport bookkeeping live mid-flight so a debounced fetch
+        // during the glide asks for the area actually being shown.
+        _lat = center.latitude;
+        _lng = center.longitude;
+        _currentZoom = zoom;
       } catch (e) {
         debugPrint('Smooth camera move failed: $e');
       }
@@ -437,9 +871,8 @@ class _NearbyMapScreenState extends State<NearbyMapScreen>
         _cameraAnimController.removeListener(listener);
         _cameraAnimListener = null;
         _isAnimating = false;
-        // Final viewport update after animation settles
         if (mounted && _mapReady) {
-          _onMapMoved(_mapController.camera);
+          _handleViewportChanged(_mapController.camera);
         }
       });
   }
@@ -456,6 +889,9 @@ class _NearbyMapScreenState extends State<NearbyMapScreen>
   }
 
   void _startPositionTracking() {
+    // Re-entrant: the resolver, "Try Again" and the focus path all call this.
+    // A second subscription would double-apply every fix.
+    _positionStream?.cancel();
     _positionStream = _locationService
         .getPositionStream(intervalMs: 3000, distanceFilterM: 5)
         .listen((position) {
@@ -466,8 +902,6 @@ class _NearbyMapScreenState extends State<NearbyMapScreen>
       // two consecutive full-widget rebuilds per GPS fix.
       final gpsH = position.heading;
       setState(() {
-        _currentLocation = loc;
-        _accuracyM = position.accuracy;
         if (gpsH != null && gpsH > 0) {
           _gpsHeading = (gpsH % 360 + 360) % 360;
           _lastGpsHeadingAt = DateTime.now();
@@ -476,17 +910,12 @@ class _NearbyMapScreenState extends State<NearbyMapScreen>
           // No bearing (stationary) - compass takes over.
           _useGpsHeading = false;
         }
-        if (_isTracking) {
-          _lat = position.latitude;
-          _lng = position.longitude;
-        }
       });
       _headingNotifier.value = _heading;
-      if (!_isTracking) return;
-      if (_routes.isNotEmpty) {
-        // A route is displayed: keep it in view instead of dragging the
-        // camera to the user. Only re-fit (route + user) when they walk
-        // outside the current viewport, so the route never "disappears".
+
+      // Route on screen: keep it visible instead of dragging the camera to
+      // the user, re-fitting only when they walk outside the viewport.
+      if (_isTracking && _routes.isNotEmpty) {
         try {
           final vp = _getViewportBounds();
           final outside = position.latitude < vp.minLat ||
@@ -506,9 +935,19 @@ class _NearbyMapScreenState extends State<NearbyMapScreen>
         } catch (e) {
           debugPrint('Route-aware camera fit failed: $e');
         }
-      } else {
-        _mapController.move(loc, _currentZoom);
       }
+
+      // Feed the chase: the blue dot glides to this fix, and the camera
+      // follows the dot (never the raw fix) while tracking is on.
+      _applyLocationFix(
+        loc,
+        accuracy: position.accuracy,
+        fixedAt: position.timestamp,
+      );
+    }, onError: (Object e) {
+      // The stream starts before permission is resolved, so a denial can
+      // arrive as a stream error — the status card reports it instead.
+      debugPrint('Position stream error: $e');
     });
   }
 
@@ -598,62 +1037,6 @@ class _NearbyMapScreenState extends State<NearbyMapScreen>
     );
   }
 
-  void _onMapMoved(MapCamera camera) {
-    final wasTracking = _isTracking;
-    // During programmatic animation, preserve tracking state — the animation
-    // is moving the camera, not the user dragging.
-    if (!_isAnimating) {
-      _isTracking = false;
-    }
-    _currentZoom = camera.zoom;
-    // Update lat/lng to the center of the visible map viewport
-    // so place fetching uses the correct map area, not the stale device location
-    _lat = camera.center.latitude;
-    _lng = camera.center.longitude;
-    // Bump _camVersion only when crossing polygon zoom thresholds (7, 9).
-    // This toggles province/district layers without rebuilding on every pan.
-    final prev = _previousZoom;
-    final now = _currentZoom;
-    final crossedThreshold =
-        (prev < 7 && now >= 7) || (prev >= 7 && now < 7) ||
-        (prev < 9 && now >= 9) || (prev >= 9 && now < 9);
-    _previousZoom = now;
-    if (crossedThreshold) _camVersion.value++;
-    // Trigger one lightweight rebuild when tracking state changes (FAB color).
-    if (wasTracking && !_isAnimating) setState(() {});
-
-    // Throttle place fetching on map move - 300ms delay after movement stops
-    _debounceTimer?.cancel();
-    _debounceTimer = Timer(const Duration(milliseconds: 300), () {
-      _fetchPlacesForViewport();
-      if (_lat != null && _lng != null) {
-        context.read<SosProvider>().fetchNearbySos(_lat!, _lng!, radiusKm: 5);
-      }
-    });
-
-    // Throttle weather fetch on map move
-    _weatherDebounceTimer?.cancel();
-    _weatherDebounceTimer = Timer(const Duration(milliseconds: 300), () {
-      _fetchWeatherForViewport();
-    });
-
-    // Auto-download maps: background-cache the visible area once the map
-    // settles, so the region works offline later.
-    if (_currentZoom >= 8 && _lat != null && _lng != null) {
-      _autoDownloadTimer?.cancel();
-      _autoDownloadTimer = Timer(const Duration(seconds: 2), () async {
-        if (!await AppSettingsService.autoDownloadMaps) return;
-        OfflineTileDownloader.downloadRegion(
-          minLat: _lat! - 0.15,
-          maxLat: _lat! + 0.15,
-          minLng: _lng! - 0.2,
-          maxLng: _lng! + 0.2,
-          minZoom: 8,
-          maxZoom: 16,
-        );
-      });
-    }
-  }
 
   Future<void> _fetchPlacesForViewport({String? search}) async {
     if (_lat == null || _lng == null) return;
@@ -928,6 +1311,9 @@ class _NearbyMapScreenState extends State<NearbyMapScreen>
 
   void _onPlaceTap(PlaceModel place) async {
     setState(() => _selectedPlace = place);
+    // Inspecting another place means the camera is no longer about the user:
+    // stop following/compass before the glide, or the dot would drag it back.
+    _exitFollowModes();
     try {
       _smoothMoveTo(
         LatLng(place.latitude, place.longitude),
@@ -1121,6 +1507,81 @@ class _NearbyMapScreenState extends State<NearbyMapScreen>
     );
   }
 
+  /// Location status card: nothing to show while the status is still
+  /// resolving or when it is fine — only the states the user can fix.
+  List<Widget> _locationStatusCard() {
+    final status = _locationStatus;
+    if (status == null ||
+        status == DeviceLocationStatus.grantedFresh ||
+        status == DeviceLocationStatus.grantedLastKnown) {
+      return const [];
+    }
+
+    final String message;
+    final IconData icon;
+    switch (status) {
+      case DeviceLocationStatus.denied:
+        message = context
+            .t('Location permission is off. Allow location access to show your position on the map.');
+        icon = Icons.location_off;
+        break;
+      case DeviceLocationStatus.serviceDisabled:
+        message = context
+            .t('Your device location is turned off. Enable it to show your position.');
+        icon = Icons.gps_off;
+        break;
+      default:
+        message = context.t(
+            'Waiting for your current location... Please enable GPS and allow location permission.');
+        icon = Icons.my_location;
+    }
+
+    return [
+      Positioned(
+        top: MediaQuery.of(context).size.height * 0.22,
+        left: 20,
+        right: 20,
+        child: Card(
+          color: Colors.white.withOpacity(0.95),
+          elevation: 4,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(12, 12, 12, 4),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Icon(icon, color: AppTheme.errorColor),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Text(
+                        message,
+                        style: const TextStyle(
+                            fontSize: 13, color: AppTheme.textSecondary),
+                      ),
+                    ),
+                  ],
+                ),
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: TextButton.icon(
+                    onPressed: _retryLocation,
+                    icon: const Icon(Icons.refresh, size: 16),
+                    label: Text(context.t('Try Again')),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    ];
+  }
+
   @override
   Widget build(BuildContext context) {
     return AnnotatedRegion<SystemUiOverlayStyle>(
@@ -1133,23 +1594,27 @@ class _NearbyMapScreenState extends State<NearbyMapScreen>
         body: Stack(
         children: [
           // Map with tile mode switch (single map, single controller)
-          // _camVersion only bumps on zoom-threshold crossings (7/9) and
-          // boundary load. Camera pans no longer trigger full rebuilds.
-          ValueListenableBuilder<int>(
-            valueListenable: _camVersion,
-            builder: (context, _, __) {
-              return Consumer<MapViewProvider>(
-                builder: (context, mapView, _) {
-                  return _buildFlutterMap(
-                    isSatellite: mapView.isSatellite,
-                    placesVisible: mapView.showPlaces,
-                    showWeather: mapView.showWeather,
-                    showRoutes: mapView.showRoutes,
-                  );
-                },
-              );
-            },
-          ),
+          // Held back until the previous session's camera has been restored,
+          // so the FlutterMap's initialCenter/initialZoom are already the
+          // view the user left — no default-centre flash on open.
+          if (!_initialCameraReady)
+            const Center(child: CircularProgressIndicator())
+          else
+            ValueListenableBuilder<int>(
+              valueListenable: _camVersion,
+              builder: (context, _, __) {
+                return Consumer<MapViewProvider>(
+                  builder: (context, mapView, _) {
+                    return _buildFlutterMap(
+                      isSatellite: mapView.isSatellite,
+                      placesVisible: mapView.showPlaces,
+                      showWeather: mapView.showWeather,
+                      showRoutes: mapView.showRoutes,
+                    );
+                  },
+                );
+              },
+            ),
 
           // Map mode toggle button
           Positioned(
@@ -1273,48 +1738,10 @@ class _NearbyMapScreenState extends State<NearbyMapScreen>
               ),
             ),
 
-          if (_lat == null || _lng == null)
-            Positioned(
-              top: MediaQuery.of(context).size.height * 0.22,
-              left: 20,
-              right: 20,
-              child: Card(
-                color: Colors.white.withOpacity(0.95),
-                elevation: 4,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(16),
-                ),
-                child: Padding(
-                  padding: const EdgeInsets.fromLTRB(12, 12, 12, 4),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        children: [
-                          const Icon(Icons.my_location, color: AppTheme.errorColor),
-                          const SizedBox(width: 10),
-                          Expanded(
-                            child: Text(
-                              context.t('Waiting for your current location... Please enable GPS and allow location permission.'),
-                              style: const TextStyle(fontSize: 13, color: AppTheme.textSecondary),
-                            ),
-                          ),
-                        ],
-                      ),
-                      Align(
-                        alignment: Alignment.centerRight,
-                        child: TextButton.icon(
-                          onPressed: _retryLocation,
-                          icon: const Icon(Icons.refresh, size: 16),
-                          label: Text(context.t('Try Again')),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ),
+          // Location status card — only when the user can act on it. The
+          // restored map keeps rendering underneath, so a denied permission
+          // never blocks the screen the way the old "no location yet" card did.
+          ..._locationStatusCard(),
 
           _buildBottomSheet(),
         ],
@@ -1335,7 +1762,7 @@ class _NearbyMapScreenState extends State<NearbyMapScreen>
         initialCenter: LatLng(
             _lat ?? AppConstants.defaultLatitude,
             _lng ?? AppConstants.defaultLongitude),
-        initialZoom: AppConstants.defaultMapZoom,
+        initialZoom: _currentZoom,
         maxZoom: AppConstants.maxMapZoom,
         minZoom: 7.0,
         cameraConstraint: CameraConstraint.contain(
@@ -1348,12 +1775,40 @@ class _NearbyMapScreenState extends State<NearbyMapScreen>
           flags: InteractiveFlag.all,
         ),
         onMapEvent: (event) {
-          if (event is MapEventMoveEnd) {
-            _onMapMoved(event.camera);
+          // Programmatic moves emit MapEventMove / MapEventRotate only, so
+          // our own animations and the follow-camera never trip the checks
+          // below. The Start/End pairs (and the scroll-wheel event, which has
+          // no pair) are emitted exclusively by user gestures.
+          final isGestureEnd = event is MapEventMoveEnd ||
+              event is MapEventRotateEnd ||
+              event is MapEventDoubleTapZoomEnd ||
+              event is MapEventFlingAnimationEnd;
+          final isGestureBegun = event is MapEventMoveStart ||
+              event is MapEventRotateStart ||
+              event is MapEventDoubleTapZoomStart ||
+              event is MapEventFlingAnimationStart ||
+              event is MapEventScrollWheelZoom;
+
+          if ((isGestureBegun || isGestureEnd) && !_isAnimating) {
+            // Manual gesture = the user is taking the camera back.
+            _exitFollowModes();
+          }
+
+          if (isGestureEnd || event is MapEventScrollWheelZoom) {
+            _handleViewportChanged(event.camera);
+          } else if (event is MapEventRotate) {
+            // rotateRaw never fires onPositionChanged, so pure-rotation
+            // changes (our compass updates included) land here instead.
+            _rotationNotifier.value = event.camera.rotation;
           }
         },
         onPositionChanged: (camera, hasGesture) {
           _rotationNotifier.value = camera.rotation;
+          // Fires on every drag/pinch frame — keeps the blue dot's accuracy
+          // ring scaling live instead of waiting for the gesture to end.
+          if (_zoomNotifier.value != camera.zoom) {
+            _zoomNotifier.value = camera.zoom;
+          }
         },
         onTap: (_, __) {
           setState(() => _selectedPlace = null);
@@ -1447,29 +1902,46 @@ class _NearbyMapScreenState extends State<NearbyMapScreen>
             ],
           ),
         // "You are here" indicator - always visible regardless of places toggle
-        // Heading isolated via ValueListenableBuilder — compass changes only
-        // rebuild the blue dot, not the entire FlutterMap.
+        // Lives in its own listenable subtree: the chase tick, the compass
+        // heading, the accuracy and the zoom all update the dot without ever
+        // rebuilding the FlutterMap (which would cost a full layer diff).
         if (_currentLocation != null)
-          MarkerLayer(
-            markers: [
-              Marker(
-                point: _currentLocation!,
-                width: 200,
-                height: 200,
-                alignment: Alignment.center,
-                child: ValueListenableBuilder<double?>(
-                  valueListenable: _headingNotifier,
-                  builder: (context, heading, _) {
-                    return MapBlueDot(
-                      heading: heading,
-                      accuracyMeters: _accuracyM,
-                      zoom: _currentZoom,
-                      latitude: _currentLocation!.latitude,
-                    );
-                  },
-                ),
-              ),
-            ],
+          ValueListenableBuilder<LatLng?>(
+            valueListenable: _displayLocationNotifier,
+            builder: (context, displayed, _) {
+              final loc = displayed ?? _currentLocation!;
+              return MarkerLayer(
+                markers: [
+                  Marker(
+                    point: loc,
+                    width: 200,
+                    height: 200,
+                    alignment: Alignment.center,
+                    child: ValueListenableBuilder<double?>(
+                      valueListenable: _headingNotifier,
+                      builder: (context, heading, _) {
+                        return ValueListenableBuilder<double>(
+                          valueListenable: _zoomNotifier,
+                          builder: (context, zoom, _) {
+                            return ValueListenableBuilder<double>(
+                              valueListenable: _accuracyNotifier,
+                              builder: (context, accuracy, _) {
+                                return MapBlueDot(
+                                  heading: heading,
+                                  accuracyMeters: accuracy,
+                                  zoom: zoom,
+                                  latitude: loc.latitude,
+                                );
+                              },
+                            );
+                          },
+                        );
+                      },
+                    ),
+                  ),
+                ],
+              );
+            },
           ),
         if (_destinationLat != null && _destinationLng != null)
           MarkerLayer(
@@ -1582,8 +2054,21 @@ class _NearbyMapScreenState extends State<NearbyMapScreen>
   }
 
   void _resetRotationToNorth() {
-    _rotationNotifier.value = 0;
-    _mapController.rotate(0);
+    // Pointing north also ends bearing-follow: the compass FAB and the
+    // blue-dot state machine must not disagree about the current mode.
+    if (_compassMode) setState(() => _compassMode = false);
+    _stopCompassFollow();
+    if (!_mapReady) {
+      _rotationNotifier.value = 0;
+      _mapController.rotate(0);
+      return;
+    }
+    _smoothMoveTo(
+      _mapController.camera.center,
+      duration: const Duration(milliseconds: 300),
+      targetRotation: 0,
+    );
+    _persistCameraSoon();
   }
 
   Future<void> _loadRouteOverlays() async {
@@ -1777,15 +2262,15 @@ class _NearbyMapScreenState extends State<NearbyMapScreen>
       mainAxisSize: MainAxisSize.min,
       children: [
         _mapFAB(
-          icon: _locationTapState == 1
+          icon: _compassMode
               ? Icons.navigation
               : Icons.my_location,
-          color: _locationTapState == 1
+          color: _compassMode
               ? Colors.teal
               : _isTracking
                   ? AppTheme.primaryColor
                   : Colors.white,
-          iconColor: _locationTapState == 1
+          iconColor: _compassMode
               ? Colors.white
               : _isTracking
                   ? Colors.white
@@ -1852,42 +2337,61 @@ class _NearbyMapScreenState extends State<NearbyMapScreen>
     );
   }
 
+  /// Two-stage "Where I Am" button (plus a third tap to leave compass).
+  ///
+  ///  1. Not centred on the dot  -> glide to it, north-up, follow ON.
+  ///  2. Already centred         -> compass mode (bearing follows the phone).
+  ///  3. Compass on              -> back to north-up, still centred.
+  ///
+  /// Any manual gesture drops back to stage 1 via [_exitFollowModes].
   void _onMyLocationTap() {
-    final loc = _currentLocation ?? ((_lat != null && _lng != null) ? LatLng(_lat!, _lng!) : null);
-
+    // Centre on the dot the user can SEE (the chased display position):
+    // gliding to the raw fix would land the camera ahead of the dot and then
+    // get dragged back the moment the ticker resumes.
+    final loc = _displayLocation ?? _currentLocation;
     if (loc == null) {
       _requestLocationAndRecenter();
       return;
     }
 
-    // Cycle: 0 -> 1 -> 0 (only two states)
-    if (_locationTapState == 0) {
-      // State 1: Smooth recenter + compass follow
+    final centred =
+        _isTracking && _hasRecenteredWithButton && _centeredOnUser();
+
+    if (!centred) {
+      // Stage 1: take me there — smooth glide, north-up, follow on.
       setState(() {
-        _locationTapState = 1;
         _isTracking = true;
-      });
-      _smoothMoveTo(
-        loc,
-        duration: const Duration(milliseconds: 400),
-        targetZoom: 15.0,
-        curve: Curves.easeInOut,
-      );
-      _startCompassFollow();
-    } else {
-      // State 0: Smooth recenter, no rotation
-      setState(() {
-        _locationTapState = 0;
-        _isTracking = true;
+        _hasRecenteredWithButton = true;
       });
       _stopCompassFollow();
-      _mapController.rotate(0);
+      HapticFeedback.lightImpact();
       _smoothMoveTo(
         loc,
-        duration: const Duration(milliseconds: 400),
-        curve: Curves.easeInOut,
+        duration: const Duration(milliseconds: 500),
+        targetZoom: math.max(_currentZoom, 15.0),
+        targetRotation: 0,
       );
+      _showModeSnackbar(context.t('Centered on your location'));
+    } else if (!_compassMode) {
+      // Stage 2: already there — now rotate the map with the device.
+      if (FlutterCompass.events == null) return; // no magnetometer
+      setState(() => _compassMode = true);
+      HapticFeedback.lightImpact();
+      _startCompassFollow();
+      _showModeSnackbar(context.t('Compass mode on'));
+    } else {
+      // Stage 3: leave compass mode, stay centred, face north again.
+      setState(() => _compassMode = false);
+      HapticFeedback.lightImpact();
+      _stopCompassFollow();
+      _smoothMoveTo(
+        loc,
+        duration: const Duration(milliseconds: 300),
+        targetRotation: 0,
+      );
+      _showModeSnackbar(context.t('Compass mode off'));
     }
+    _persistCameraSoon();
   }
 
   void _showModeSnackbar(String msg) {
@@ -1902,29 +2406,25 @@ class _NearbyMapScreenState extends State<NearbyMapScreen>
     );
   }
 
+  /// Arms compass-mode bearing. The sensor listener itself lives in
+  /// [_initCompass] (a single shared subscription), so this only resets the
+  /// smoothing seed and applies the current heading once, so the map starts
+  /// turning immediately instead of waiting for the next sensor sample.
   void _startCompassFollow() {
-    _compassFollowSub?.cancel();
     _smoothedCompassHeading = null;
-    _compassFollowSub = FlutterCompass.events?.listen((event) {
-      if (_locationTapState != 1 || !mounted) return;
-      final h = event.heading;
-      if (h == null) return;
-      if (_smoothedCompassHeading == null) {
-        _smoothedCompassHeading = h;
-      } else {
-        final arc = _shortestArc(_smoothedCompassHeading!, h);
-        _smoothedCompassHeading = _smoothedCompassHeading! + arc * 0.15;
-      }
-      _mapController.rotate(-_smoothedCompassHeading!);
-    });
+    final heading = _compassHeading;
+    if (heading != null && _compassMode && _mapReady) {
+      _applyCompassRotation(heading);
+    }
   }
 
   void _stopCompassFollow() {
-    _compassFollowSub?.cancel();
-    _compassFollowSub = null;
     _smoothedCompassHeading = null;
   }
 
+  /// Explicit "get a fix now" path (first open with no fix, or a retry).
+  /// Uses the status-aware resolver so a denied permission is reported as
+  /// denied instead of showing a generic failure.
   Future<void> _requestLocationAndRecenter() async {
     final msgGettingLocation = context.t('Getting your exact location...');
     final msgLocationFailed = context.t('Could not get your location. Please enable GPS and allow location permission, then try again.');
@@ -1935,9 +2435,12 @@ class _NearbyMapScreenState extends State<NearbyMapScreen>
         duration: const Duration(seconds: 2),
       ),
     );
-    final loc = await _locationService.getCurrentLocation();
+    final result = await _locationService.resolveDeviceLocation();
     if (!mounted) return;
-    if (loc == null) {
+    if (result.status != _locationStatus) {
+      setState(() => _locationStatus = result.status);
+    }
+    if (!result.hasCoordinates) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(msgLocationFailed),
@@ -1948,51 +2451,60 @@ class _NearbyMapScreenState extends State<NearbyMapScreen>
       );
       return;
     }
+    final loc = LatLng(result.latitude!, result.longitude!);
+    _applyLocationFix(
+        loc, accuracy: result.accuracy, fixedAt: result.fixedAt, snap: true);
     setState(() {
-      _lat = loc.latitude;
-      _lng = loc.longitude;
-      _currentLocation = LatLng(loc.latitude, loc.longitude);
       _isTracking = true;
+      _hasRecenteredWithButton = true;
     });
     _startPositionTracking();
-    _mapController.move(_currentLocation!, 15.0);
+    _centerOn(loc, zoom: 15.0);
   }
 
+  /// "Try Again" from the location status card: re-resolve, re-centre and
+  /// refresh the surrounding places.
   Future<void> _retryLocation() async {
-    final msgLocationFailed = context.t('Could not get your location. Please enable GPS and allow location permission, then try again.');
-    final loc = await _locationService.getCurrentLocation();
+    final result = await _locationService.resolveDeviceLocation();
     if (!mounted) return;
-    if (loc == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(msgLocationFailed),
-          backgroundColor: AppTheme.errorColor,
-          behavior: SnackBarBehavior.floating,
-          duration: const Duration(seconds: 4),
-        ),
-      );
-      return;
+    if (result.status != _locationStatus) {
+      setState(() => _locationStatus = result.status);
     }
-    setState(() {
-      _lat = loc.latitude;
-      _lng = loc.longitude;
-      _currentLocation = LatLng(loc.latitude, loc.longitude);
-    });
+    if (!result.hasCoordinates) return; // the card now explains why
+
+    final loc = LatLng(result.latitude!, result.longitude!);
+    _applyLocationFix(
+        loc, accuracy: result.accuracy, fixedAt: result.fixedAt, snap: true);
+    setState(() => _isTracking = true);
     _startPositionTracking();
-    final provider = context.read<PlaceProvider>();
-    await _loadCachedPlaces();
-    await provider.fetchNearbyPlaces(lat: _lat!, lng: _lng!, radiusKm: 10.0);
-    _lastFetchLat = _lat;
-    _lastFetchLng = _lng;
-    _lastFetchRadius = 10.0;
+
+    _lastFetchLat = null;
+    _lastFetchLng = null;
+    _lastFetchRadius = -1;
     _cachedBoundsNorth = null;
     _cachedBoundsSouth = null;
     _cachedBoundsEast = null;
     _cachedBoundsWest = null;
+    await _loadCachedPlaces();
+    if (!mounted) return;
+    _centerOn(loc, zoom: 15.0);
+    _fetchPlacesForViewport();
+  }
+
+  /// Programmatic centre — also re-syncs the viewport bookkeeping (a plain
+  /// [MapController.move] never emits MapEventMoveEnd, so the shared handler
+  /// has to run explicitly).
+  void _centerOn(LatLng loc, {double? zoom}) {
+    if (!_mapReady) return;
     try {
-      _mapController.move(LatLng(_lat!, _lng!), 15.0);
+      _mapController.move(loc, zoom ?? _currentZoom);
+      _handleViewportChanged(_mapController.camera);
     } catch (e) {
       debugPrint('Map move failed: $e');
+      setState(() {
+        _lat = loc.latitude;
+        _lng = loc.longitude;
+      });
     }
   }
 
@@ -3092,24 +3604,32 @@ class _NearbyMapScreenState extends State<NearbyMapScreen>
   /// Nepal data is available yet (cold start), falls back to the nearby list.
   List<PlaceModel> _markerPlacesForViewport(PlaceProvider provider) {
     // Priority: viewportPlaces (from bbox API) > nepalPlaces (offline/cold) > places (legacy)
-    final source = provider.viewportPlaces.isNotEmpty
+    final vp = _getViewportBounds();
+    // Only trust the bbox result while it still covers what is on screen —
+    // right after a pan it can be from the previous area, and using it would
+    // make markers vanish until the debounced fetch lands.
+    final useViewportPlaces = provider.viewportPlaces.isNotEmpty &&
+        provider.viewportCovers(
+          minLat: vp.minLat,
+          maxLat: vp.maxLat,
+          minLng: vp.minLng,
+          maxLng: vp.maxLng,
+        );
+
+    final source = useViewportPlaces
         ? provider.viewportPlaces
         : provider.nepalPlaces.isNotEmpty
             ? provider.nepalPlaces
             : provider.places;
 
-    var filtered = _applyPlaceFilters(source);
+    final filtered = _applyPlaceFilters(source);
     if (filtered.isEmpty) return filtered;
-
-    // When using nepalPlaces (not bbox), apply client-side viewport filter
-    // to avoid showing all 11,825 places as markers.
-    if (provider.viewportPlaces.isNotEmpty) {
+    if (useViewportPlaces) {
       // bbox API already returned only viewport places — no extra filter needed
       return filtered;
     }
 
     // Fallback: client-side viewport filter for nepalPlaces/places
-    final vp = _getViewportBounds();
     const margin = 0.15;
     return filtered
         .where((p) =>
@@ -3143,6 +3663,9 @@ class _NearbyMapScreenState extends State<NearbyMapScreen>
   }
 
   void _zoomIntoCluster(double lat, double lng) {
+    // Zooming into a cluster is a deliberate look elsewhere — same rule as a
+    // place tap: give up follow/compass so the glide is not fought back.
+    _exitFollowModes();
     try {
       _smoothMoveTo(
         LatLng(lat, lng),
@@ -3346,14 +3869,12 @@ class _NearbyMapScreenState extends State<NearbyMapScreen>
 
     // ── Step 3: Label collision for individual markers only ─────────────
     final showAddress = _currentZoom >= 16;
-    final highZoom = _currentZoom >= 16;
-    final midZoom = _currentZoom >= 14;
     final placesHash = Object.hashAll(individualPlaces.map((p) => p.id));
     final stateKey = '${_currentZoom}|${camera.center.latitude}|${camera.center.longitude}|${camera.rotation}|$selectedId|$placesHash';
 
     if (stateKey != _lastLabelStateKey || placesHash != _lastPlacesHash) {
       _lastLabelAssignments = _computeLabelAssignments(
-        individualPlaces, showAddress, highZoom, midZoom, camera, viewport,
+        individualPlaces, showAddress, camera, viewport,
       );
       _lastLabelStateKey = stateKey;
       _lastPlacesHash = placesHash;
@@ -3482,7 +4003,7 @@ class _NearbyMapScreenState extends State<NearbyMapScreen>
   }
 
   List<_LabelAssignment> _computeLabelAssignments(
-    List<PlaceModel> places, bool showAddress, bool highZoom, bool midZoom,
+    List<PlaceModel> places, bool showAddress,
     MapCamera camera, Size viewport,
   ) {
     // ── Phase 1: Build label info for all places ──────────────────────
@@ -3491,9 +4012,10 @@ class _NearbyMapScreenState extends State<NearbyMapScreen>
     for (final place in places) {
       final isSelected = _selectedPlace?.id.toString() == place.id.toString();
       final isFeatured = place.isFeatured;
-      // Show labels at zoom >= 12 for featured/selected, zoom >= 14 for all
-      final showName = highZoom || (midZoom && (isFeatured || isSelected)) ||
-          (_currentZoom >= 12 && (isFeatured || isSelected));
+      // Labels appear much earlier than they used to: everything named from
+      // zoom 13, the important (featured / selected) ones from zoom 11.
+      final zoom = _currentZoom;
+      final showName = zoom >= 13 || (zoom >= 11 && (isFeatured || isSelected));
 
       if (!showName) {
         infos.add(_LabelInfo(placeId: place.id, showLabel: false, markerSize: markerSize));
@@ -3675,12 +4197,17 @@ class _NearbyMapScreenState extends State<NearbyMapScreen>
   }
 
   /// Maximum number of labels to show at each zoom level.
+  ///
+  /// Non-zero from zoom 10 so a mid-zoom view is never a wall of anonymous
+  /// pins; the numbers stay small enough that the collision pass has room.
   int _maxLabelsForZoom(double zoom) {
     if (zoom >= 17) return 50;
     if (zoom >= 16) return 40;
     if (zoom >= 15) return 30;
     if (zoom >= 14) return 20;
-    if (zoom >= 12) return 8;
+    if (zoom >= 13) return 12;
+    if (zoom >= 11) return 5;
+    if (zoom >= 10) return 3;
     return 0;
   }
 

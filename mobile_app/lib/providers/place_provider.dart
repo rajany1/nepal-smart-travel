@@ -140,6 +140,29 @@ class PlaceProvider extends ChangeNotifier {
   String? _errorMessage;
   int _selectedCategoryId = 0;
 
+  // ── Refresh gating ──────────────────────────────────────────────────
+  // Reopening the Nearby screen must not re-issue the same requests just
+  // because the screen was recreated. Each source remembers what it last
+  // fetched and only refetches once the data could plausibly have changed.
+  DateTime? _nepalFetchedAt;
+  String? _viewportSignature;
+  DateTime? _viewportFetchedAt;
+  String? _featuredSignature;
+  DateTime? _featuredFetchedAt;
+
+  /// Bounding box the last viewport (bbox API) response covers, used to
+  /// decide whether the in-memory viewport places still describe the
+  /// camera the user is actually looking at.
+  double? _viewportMinLat, _viewportMaxLat, _viewportMinLng, _viewportMaxLng;
+
+  /// Nepal-wide payload is valid for as long as the server caches it.
+  static const Duration nepalStaleness = Duration(minutes: 10);
+  static const Duration viewportStaleness = Duration(minutes: 2);
+  static const Duration featuredStaleness = Duration(minutes: 5);
+
+  static String _round(double v, [int digits = 3]) =>
+      v.toStringAsFixed(digits);
+
   List<CategoryModel> get categories => _categories;
   List<PlaceModel> get places => _places;
   List<PlaceModel> get featuredPlaces => _featuredPlaces;
@@ -151,6 +174,26 @@ class PlaceProvider extends ChangeNotifier {
   /// Viewport-specific places from the bbox API. Primary source for markers
   /// when available. Falls back to nepalPlaces for offline/initial load.
   List<PlaceModel> get viewportPlaces => _viewportPlaces;
+
+  /// True when the last bbox response is known to cover [minLat..maxLat] /
+  /// [minLng..maxLng]. False when the places came from another source or the
+  /// user has since moved the camera somewhere the payload does not describe.
+  bool viewportCovers({
+    required double minLat,
+    required double maxLat,
+    required double minLng,
+    required double maxLng,
+  }) {
+    if (_viewportPlaces.isEmpty) return false;
+    final n = _viewportMaxLat;
+    final s = _viewportMinLat;
+    final e = _viewportMaxLng;
+    final w = _viewportMinLng;
+    if (n == null || s == null || e == null || w == null) return false;
+    const slack = 0.01; // ~1 km — absorbs rounding of the viewport estimate
+    return minLat >= s - slack && maxLat <= n + slack &&
+        minLng >= w - slack && maxLng <= e + slack;
+  }
   bool get isLoading => _isLoading;
   bool get isLoadingNepal => _isLoadingNepal;
   bool get isLoadingViewport => _isLoadingViewport;
@@ -205,10 +248,21 @@ class PlaceProvider extends ChangeNotifier {
   }
 
   Future<void> fetchFeaturedPlaces({double? lat, double? lng}) async {
+    final signature = lat == null || lng == null
+        ? 'global'
+        : '${_round(lat)},${_round(lng)}';
+    final fetchedAt = _featuredFetchedAt;
+    if (fetchedAt != null &&
+        _featuredSignature == signature &&
+        DateTime.now().difference(fetchedAt) < featuredStaleness) {
+      return; // Same spot, still fresh — reopening the screen must not refetch.
+    }
     try {
       final response = await _api.getFeaturedPlaces(lat: lat, lng: lng);
       final data = response.data['data'] as List? ?? [];
       _featuredPlaces = data.map((j) => PlaceModel.fromJson(j)).toList();
+      _featuredSignature = signature;
+      _featuredFetchedAt = DateTime.now();
       notifyListeners();
     } catch (e) {
       print('❌ Failed to fetch featured places: $e');
@@ -233,13 +287,19 @@ class PlaceProvider extends ChangeNotifier {
   /// Nepal-wide places (max 1000) — fired in parallel with GPS lookup so the
   /// map paints instantly. Falls back to the SQLite cache when offline.
   ///
-  /// NOTE: Do NOT short-circuit when [_nepalPlaces] is already populated.
-  /// [setNepalCachedPlaces] populates from SQLite cache first (instant),
-  /// but this method must always attempt the network call to get fresh data.
-  /// The API may have newer places not yet in the local cache.
+  /// [force] always hits the network. Without it the payload is only
+  /// refetched once it is older than [nepalStaleness] (the same window the
+  /// server caches /places/all for), so reopening the Nearby screen does not
+  /// re-issue a request for data that cannot have changed yet. The SQLite
+  /// cache written below is what restores markers instantly on cold start.
   Future<void> fetchNepalPlaces({bool force = false}) async {
     if (_isLoadingNepal) return;
-    if (!force && _nepalPlaces.isNotEmpty) return;
+    if (!force &&
+        _nepalPlaces.isNotEmpty &&
+        _nepalFetchedAt != null &&
+        DateTime.now().difference(_nepalFetchedAt!) < nepalStaleness) {
+      return;
+    }
     _isLoadingNepal = true;
     notifyListeners();
 
@@ -249,6 +309,7 @@ class PlaceProvider extends ChangeNotifier {
       final places = data.map((j) => PlaceModel.fromJson(j)).toList();
       if (places.isNotEmpty) {
         _nepalPlaces = places;
+        _nepalFetchedAt = DateTime.now();
         try {
           await _offlineDb.cachePlacesBulk(
             data.map((j) => Map<String, dynamic>.from(j)).toList(),
@@ -291,6 +352,10 @@ class PlaceProvider extends ChangeNotifier {
   /// Fetch places for a specific viewport bounding box from the server.
   /// This is the primary data source for the map — returns only places
   /// inside the requested bbox, with zoom-aware density limiting.
+  ///
+  /// Repeated requests for the same (grid-normalised) area — e.g. reopening
+  /// the Nearby screen without moving the map — are served from memory for
+  /// [viewportStaleness] instead of hitting the API again.
   Future<void> fetchViewportPlaces({
     required double minLat,
     required double maxLat,
@@ -300,6 +365,25 @@ class PlaceProvider extends ChangeNotifier {
     String? category,
   }) async {
     if (_isLoadingViewport) return;
+
+    // Same 0.05° grid the server rounds its cache key to, so a request that
+    // the backend would answer from Redis is also skipped on the client.
+    String signatureOf(double lat) => (lat / 0.05).round().toString();
+    final signature = [
+      signatureOf(minLat),
+      signatureOf(maxLat),
+      signatureOf(minLng),
+      signatureOf(maxLng),
+      zoom ?? '',
+      category ?? '',
+    ].join(':');
+    final fetchedAt = _viewportFetchedAt;
+    if (fetchedAt != null &&
+        _viewportSignature == signature &&
+        DateTime.now().difference(fetchedAt) < viewportStaleness) {
+      return;
+    }
+
     _isLoadingViewport = true;
     notifyListeners();
 
@@ -317,6 +401,12 @@ class PlaceProvider extends ChangeNotifier {
       final places = data.map((j) => PlaceModel.fromJson(j)).toList();
       if (places.isNotEmpty) {
         _viewportPlaces = places;
+        _viewportMinLat = minLat;
+        _viewportMaxLat = maxLat;
+        _viewportMinLng = minLng;
+        _viewportMaxLng = maxLng;
+        _viewportSignature = signature;
+        _viewportFetchedAt = DateTime.now();
         notifyListeners();
       }
     } catch (e) {
@@ -331,6 +421,9 @@ class PlaceProvider extends ChangeNotifier {
   /// Set viewport places directly (used for client-side fallback from nepalPlaces).
   void setViewportPlacesDirect(List<PlaceModel> places) {
     _viewportPlaces = places;
+    // Deliberately do NOT record coverage bounds: these came from the
+    // Nepal-wide dataset, not from a bbox response, so the caller should
+    // keep treating them as an unbounded fallback.
     notifyListeners();
   }
 

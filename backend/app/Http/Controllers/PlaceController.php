@@ -243,12 +243,7 @@ class PlaceController extends Controller
 
         // Per-request privacy filter (not cached — depends on viewer)
         $viewerId = $request->user()?->id;
-        $hiddenAuthorIds = Cache::remember('places:hidden_authors', \App\Services\PlacesCache::ALL_TTL, function () {
-            return \App\Models\User::whereRaw("JSON_EXTRACT(settings, '$.show_on_map') = 'false'")
-                ->pluck('id')
-                ->map(fn($v) => (int) $v)
-                ->all();
-        });
+        $hiddenAuthorIds = \App\Services\PlacesCache::hiddenAuthors();
         $filtered = array_values(array_filter($data, function ($place) use ($hiddenAuthorIds, $viewerId) {
             if ($place['created_by'] === null) return true;
             if ($viewerId !== null && (int) $place['created_by'] === (int) $viewerId) return true;
@@ -341,14 +336,10 @@ class PlaceController extends Controller
             ), $raw);
         });
 
-        // Per-request "Show on Map" privacy filter (cached 10 min in Redis)
+        // Per-request "Show on Map" privacy filter (hidden author ids cached
+        // 10 min in Redis, shared with every other listing endpoint)
         $viewerId = $request->user()?->id;
-        $hiddenAuthorIds = Cache::remember('places:hidden_authors', \App\Services\PlacesCache::ALL_TTL, function () {
-            return \App\Models\User::whereRaw("JSON_EXTRACT(settings, '$.show_on_map') = 'false'")
-                ->pluck('id')
-                ->map(fn($v) => (int) $v)
-                ->all();
-        });
+        $hiddenAuthorIds = \App\Services\PlacesCache::hiddenAuthors();
         $filtered = array_values(array_filter($places, function ($place) use ($hiddenAuthorIds, $viewerId) {
             if ($place['created_by'] === null) return true;
             if ($viewerId !== null && (int) $place['created_by'] === (int) $viewerId) return true;
@@ -392,58 +383,85 @@ class PlaceController extends Controller
             'search' => 'nullable|string|max:255',
         ]);
 
-        $lat = $request->lat;
-        $lng = $request->lng;
-        $radius = $request->radius_km ?? 5.0;
-        $limit = $request->limit ?? 50;
+        $lat = (float) $request->lat;
+        $lng = (float) $request->lng;
+        $radius = (float) ($request->radius_km ?? 5.0);
+        $limit = (int) ($request->limit ?? 50);
+        $categoryId = $request->filled('category_id') ? (int) $request->category_id : null;
+        $search = $request->filled('search') ? (string) $request->search : null;
 
-        $query = Place::query()->with(['category', 'images'])->active();
+        // Redis cache — grid-normalised key so repeated pans/zooms inside one
+        // cell share a single entry. The payload is viewer-independent: the
+        // show-on-map privacy filter runs per request afterwards, exactly like
+        // bboxQuery() and all().
+        $cacheKey = \App\Services\PlacesCache::nearbyKey(
+            'nearby',
+            $lat,
+            $lng,
+            $radius,
+            $categoryId,
+            $search,
+            $limit
+        );
 
-        $this->applyShowOnMapFilter($query, $request->user()?->id);
+        $data = Cache::remember(
+            $cacheKey,
+            \App\Services\PlacesCache::NEARBY_TTL,
+            function () use ($lat, $lng, $radius, $limit, $categoryId, $search) {
+                $query = Place::query()->with(['category', 'images'])->active();
 
-        if ($request->filled('category_id')) {
-            $query->where('category_id', $request->category_id);
-        }
-        if ($request->filled('search')) {
-            $search = $request->search;
-            $query->where(function ($q) use ($search) {
-                $q->where('name', 'like', "%{$search}%")
-                  ->orWhere('description', 'like', "%{$search}%")
-                  ->orWhere('address', 'like', "%{$search}%")
-                  ->orWhere('district', 'like', "%{$search}%");
-            });
-        }
+                if ($categoryId !== null) {
+                    $query->where('category_id', $categoryId);
+                }
+                if ($search !== null) {
+                    $query->where(function ($q) use ($search) {
+                        $q->where('name', 'like', "%{$search}%")
+                          ->orWhere('description', 'like', "%{$search}%")
+                          ->orWhere('address', 'like', "%{$search}%")
+                          ->orWhere('district', 'like', "%{$search}%");
+                    });
+                }
 
-        $places = $query->selectRaw(
-            "*, (6371 * acos(cos(radians(?)) * cos(radians(latitude)) * cos(radians(longitude) - radians(?)) + sin(radians(?)) * sin(radians(latitude)))) AS distance",
-            [$lat, $lng, $lat]
-        )
-        ->having('distance', '<=', $radius)
-        ->orderBy('is_featured', 'desc')
-        ->orderBy('distance')
-        ->limit($limit)
-        ->get();
+                // Over-fetch a little: the privacy filter below can drop rows
+                // and the caller still expects $limit places back.
+                $fetch = min($limit + 50, 500);
 
-        $data = $places->map(fn($place) => [
-            'id' => $place->id,
-            'uuid' => $place->uuid,
-            'name' => $place->name,
-            'description' => $place->description,
-            'address' => $place->address,
-            'district' => $place->district,
-            'latitude' => $place->latitude !== null ? (float)$place->latitude : null,
-            'longitude' => $place->longitude !== null ? (float)$place->longitude : null,
-            'phone' => $place->phone,
-            'average_rating' => $place->average_rating !== null ? (float)$place->average_rating : null,
-            'total_reviews' => $place->total_reviews,
-            'distance_km' => round($place->distance, 2),
-            'category' => $place->category ? $place->category->name : null,
-            'is_verified' => $place->is_verified,
-            'is_featured' => $place->is_featured,
-            'is_active' => $place->is_active,
-            'source' => $place->source ?? 'admin',
-            'images' => $this->placeImageUrls($place->images),
-        ])->toArray();
+                return $query->selectRaw(
+                    "*, (6371 * acos(cos(radians(?)) * cos(radians(latitude)) * cos(radians(longitude) - radians(?)) + sin(radians(?)) * sin(radians(latitude)))) AS distance",
+                    [$lat, $lng, $lat]
+                )
+                ->having('distance', '<=', $radius)
+                ->orderBy('is_featured', 'desc')
+                ->orderBy('distance')
+                ->limit($fetch)
+                ->get()
+                ->map(fn($place) => [
+                    'id' => $place->id,
+                    'uuid' => $place->uuid,
+                    'created_by' => $place->created_by !== null ? (int) $place->created_by : null,
+                    'name' => $place->name,
+                    'description' => $place->description,
+                    'address' => $place->address,
+                    'district' => $place->district,
+                    'latitude' => $place->latitude !== null ? (float)$place->latitude : null,
+                    'longitude' => $place->longitude !== null ? (float)$place->longitude : null,
+                    'phone' => $place->phone,
+                    'average_rating' => $place->average_rating !== null ? (float)$place->average_rating : null,
+                    'total_reviews' => $place->total_reviews,
+                    'distance_km' => round($place->distance, 2),
+                    'category' => $place->category ? $place->category->name : null,
+                    'is_verified' => $place->is_verified,
+                    'is_featured' => $place->is_featured,
+                    'is_active' => $place->is_active,
+                    'source' => $place->source ?? 'admin',
+                    'images' => $this->placeImageUrls($place->images),
+                ])->values()->toArray();
+            }
+        );
+
+        // Per-request privacy filter (viewer-dependent — never cached)
+        $data = $this->filterHiddenAuthors($data, $request->user()?->id);
+        $data = array_slice($data, 0, $limit);
 
         $data = TranslationService::attachToPlaces($data);
 
@@ -454,22 +472,26 @@ class PlaceController extends Controller
     }
 
     /**
-     * Respect the "Show on Map" privacy setting: places submitted by users who
-     * opted out are hidden from public listings. OSM/admin places (no creator)
-     * and the requesting user's own places are always shown.
+     * "Show on Map" privacy rule, applied to an already-cached payload.
+     *
+     * Places submitted by users who opted out are hidden from public listings;
+     * OSM/admin places (no creator) and the requesting user's own places are
+     * always shown. Running it here instead of in the query keeps every cached
+     * payload viewer-independent (same pattern as all() and bboxQuery()).
+     *
+     * @param array<int, array> $places
+     * @return array<int, array>
      */
-    private function applyShowOnMapFilter($query, $viewerId = null)
+    private function filterHiddenAuthors(array $places, $viewerId): array
     {
-        $hiddenAuthorIds = \App\Models\User::whereRaw("JSON_EXTRACT(settings, '$.show_on_map') = 'false'")
-            ->pluck('id');
+        $hiddenAuthorIds = \App\Services\PlacesCache::hiddenAuthors();
 
-        $query->where(function ($q) use ($hiddenAuthorIds, $viewerId) {
-            $q->whereNull('created_by')
-              ->orWhere('created_by', $viewerId)
-              ->orWhereNotIn('created_by', $hiddenAuthorIds);
-        });
-
-        return $query;
+        return array_values(array_filter($places, function ($place) use ($hiddenAuthorIds, $viewerId) {
+            $author = $place['created_by'] ?? null;
+            if ($author === null) return true;
+            if ($viewerId !== null && (int) $author === (int) $viewerId) return true;
+            return !in_array((int) $author, $hiddenAuthorIds, true);
+        }));
     }
 
     /**
@@ -487,120 +509,149 @@ class PlaceController extends Controller
             'limit' => 'nullable|integer|min:1|max:100',
         ]);
 
-        $lat = $request->lat;
-        $lng = $request->lng;
-        $radius = $request->radius_km ?? 5.0;
-        $categoryId = $request->category_id;
-        $search = $request->search;
-        $limit = $request->limit ?? 50;
+        $lat = (float) $request->lat;
+        $lng = (float) $request->lng;
+        $radius = (float) ($request->radius_km ?? 5.0);
+        $categoryId = $request->filled('category_id') ? (int) $request->category_id : null;
+        $search = $request->filled('search') ? (string) $request->search : null;
+        $limit = (int) ($request->limit ?? 50);
 
-        // 1. Fetch from OpenStreetMap Overpass API
-        $osmPlaces = $this->fetchOsmNearby($lat, $lng, $radius);
-
-        // Filter OSM results by search if provided
-        if ($search) {
-            $osmPlaces = array_filter($osmPlaces, fn($p) =>
-                stripos($p['name'], $search) !== false ||
-                stripos($p['description'] ?? '', $search) !== false ||
-                stripos($p['category'], $search) !== false
-            );
-        }
-
-        // Filter OSM results by category if provided
-        if ($categoryId) {
-            $categoryName = \App\Models\PlaceCategories::find($categoryId)?->name;
-            if ($categoryName && $categoryName !== 'All') {
-                $osmPlaces = array_filter($osmPlaces, fn($p) =>
-                    strcasecmp($p['category'], $categoryName) === 0
-                );
-            }
-        }
-
-        $osmPlaces = array_values($osmPlaces);
-
-        // 2. Fetch Admin places with Haversine distance
-        $adminQuery = Place::with(['category', 'images'])->active()
-            ->selectRaw(
-                "*, (6371 * acos(cos(radians(?)) * cos(radians(latitude)) * cos(radians(longitude) - radians(?)) + sin(radians(?)) * sin(radians(latitude)))) AS distance",
-                [$lat, $lng, $lat]
-            )
-            ->having('distance', '<=', $radius);
-
-        $this->applyShowOnMapFilter($adminQuery, $request->user()?->id);
-
-        if ($categoryId) {
-            $adminQuery->where('category_id', $categoryId);
-        }
-        if ($search) {
-            $adminQuery->where(function ($q) use ($search) {
-                $q->where('name', 'like', "%{$search}%")
-                  ->orWhere('description', 'like', "%{$search}%")
-                  ->orWhere('address', 'like', "%{$search}%")
-                  ->orWhere('district', 'like', "%{$search}%");
-            });
-        }
-
-        $adminPlaces = $adminQuery->orderBy('is_featured', 'desc')
-            ->orderBy('distance')
-            ->limit($limit)
-            ->get()
-            ->map(fn($place) => [
-                'id' => 'admin_' . $place->id,
-                'name' => $place->name,
-                'description' => $place->description,
-                'address' => $place->address,
-                'district' => $place->district,
-                'latitude' => $place->latitude !== null ? (float)$place->latitude : null,
-                'longitude' => $place->longitude !== null ? (float)$place->longitude : null,
-                'phone' => $place->phone,
-                'average_rating' => $place->average_rating !== null ? (float)$place->average_rating : null,
-                'total_reviews' => $place->total_reviews,
-                'distance_km' => round($place->distance, 2),
-                'category' => $place->category ? $place->category->name : 'Place',
-                'is_verified' => $place->is_verified,
-                'is_featured' => $place->is_featured,
-                'source' => 'admin',
-                'images' => $this->placeImageUrls($place->images),
-            ])->toArray();
-
-        // Attach Nepali translations (name_ne, description_ne, etc.)
-        $adminPlaces = TranslationService::attachToPlaces($adminPlaces);
-
-        // 2b. Cross-source dedup: drop OSM results already stored in our DB
-        // (matched by osm_id, or by same name within ~100m for legacy admin rows).
-        $dbPlaces = Place::select('id', 'osm_id', 'name', 'latitude', 'longitude')
-            ->whereNotNull('osm_id')
-            ->orWhereNotNull('latitude')
-            ->get();
-        $dbOsmIds = $dbPlaces->map(fn($p) => $p->osm_id)
-            ->filter()
-            ->map(fn($v) => str_replace('osm_', '', (string)$v))
-            ->flip();
-        $dbByName = [];
-        foreach ($dbPlaces as $p) {
-            if (!$p->name || $p->latitude === null || $p->longitude === null) continue;
-            $dbByName[mb_strtolower(trim($p->name))][] = [(float)$p->latitude, (float)$p->longitude];
-        }
-        $osmPlaces = array_values(array_filter($osmPlaces, function ($p) use ($dbOsmIds, $dbByName) {
-            $osmKey = str_replace('osm_', '', $p['id'] ?? '');
-            if (isset($dbOsmIds[$osmKey])) return false;
-            $key = mb_strtolower(trim($p['name'] ?? ''));
-            foreach ($dbByName[$key] ?? [] as [$dLat, $dLng]) {
-                if ($this->haversineDistance($dLat, $dLng, $p['latitude'], $p['longitude']) <= 0.1) {
-                    return false;
-                }
-            }
-            return true;
-        }));
-
-        // 3. Merge all sources and sort purely by distance from the user
-        // (no OSM-on-top / DB-on-bottom bias — closest place wins).
-        $combined = array_merge($adminPlaces, $osmPlaces);
-        usort($combined, fn($a, $b) =>
-            ($a['distance_km'] ?? PHP_FLOAT_MAX) <=> ($b['distance_km'] ?? PHP_FLOAT_MAX)
+        // Grid-normalised Redis key: the expensive part of this endpoint is a
+        // full-table dedup scan plus an Overpass round-trip, and both repeat
+        // identically for every user looking at the same area. The payload is
+        // viewer-independent — the show-on-map privacy filter runs per request.
+        $cacheKey = \App\Services\PlacesCache::nearbyKey(
+            'nearby_combined',
+            $lat,
+            $lng,
+            $radius,
+            $categoryId,
+            $search,
+            $limit
         );
 
-        // Limit total results
+        $combined = Cache::remember(
+            $cacheKey,
+            \App\Services\PlacesCache::NEARBY_TTL,
+            function () use ($lat, $lng, $radius, $categoryId, $search, $limit) {
+                // 1. Fetch from OpenStreetMap Overpass API (itself Redis-cached
+                //    for 10 minutes per cell by fetchOsmNearby)
+                $osmPlaces = $this->fetchOsmNearby($lat, $lng, $radius);
+
+                // Filter OSM results by search if provided
+                if ($search) {
+                    $osmPlaces = array_filter($osmPlaces, fn($p) =>
+                        stripos($p['name'], $search) !== false ||
+                        stripos($p['description'] ?? '', $search) !== false ||
+                        stripos($p['category'], $search) !== false
+                    );
+                }
+
+                // Filter OSM results by category if provided
+                if ($categoryId) {
+                    $categoryName = \App\Models\PlaceCategories::find($categoryId)?->name;
+                    if ($categoryName && $categoryName !== 'All') {
+                        $osmPlaces = array_filter($osmPlaces, fn($p) =>
+                            strcasecmp($p['category'], $categoryName) === 0
+                        );
+                    }
+                }
+
+                $osmPlaces = array_values($osmPlaces);
+
+                // 2. Fetch Admin places with Haversine distance
+                $adminQuery = Place::with(['category', 'images'])->active()
+                    ->selectRaw(
+                        "*, (6371 * acos(cos(radians(?)) * cos(radians(latitude)) * cos(radians(longitude) - radians(?)) + sin(radians(?)) * sin(radians(latitude)))) AS distance",
+                        [$lat, $lng, $lat]
+                    )
+                    ->having('distance', '<=', $radius);
+
+                if ($categoryId !== null) {
+                    $adminQuery->where('category_id', $categoryId);
+                }
+                if ($search !== null) {
+                    $adminQuery->where(function ($q) use ($search) {
+                        $q->where('name', 'like', "%{$search}%")
+                          ->orWhere('description', 'like', "%{$search}%")
+                          ->orWhere('address', 'like', "%{$search}%")
+                          ->orWhere('district', 'like', "%{$search}%");
+                    });
+                }
+
+                // Over-fetch: the per-request privacy filter below can drop
+                // rows, and the caller still expects $limit results back.
+                $fetch = min($limit + 50, 500);
+
+                $adminPlaces = $adminQuery->orderBy('is_featured', 'desc')
+                    ->orderBy('distance')
+                    ->limit($fetch)
+                    ->get()
+                    ->map(fn($place) => [
+                        'id' => 'admin_' . $place->id,
+                        'created_by' => $place->created_by !== null ? (int) $place->created_by : null,
+                        'name' => $place->name,
+                        'description' => $place->description,
+                        'address' => $place->address,
+                        'district' => $place->district,
+                        'latitude' => $place->latitude !== null ? (float)$place->latitude : null,
+                        'longitude' => $place->longitude !== null ? (float)$place->longitude : null,
+                        'phone' => $place->phone,
+                        'average_rating' => $place->average_rating !== null ? (float)$place->average_rating : null,
+                        'total_reviews' => $place->total_reviews,
+                        'distance_km' => round($place->distance, 2),
+                        'category' => $place->category ? $place->category->name : 'Place',
+                        'is_verified' => $place->is_verified,
+                        'is_featured' => $place->is_featured,
+                        'source' => 'admin',
+                        'images' => $this->placeImageUrls($place->images),
+                    ])->toArray();
+
+                // Attach Nepali translations (name_ne, description_ne, etc.)
+                $adminPlaces = TranslationService::attachToPlaces($adminPlaces);
+
+                // 2b. Cross-source dedup: drop OSM results already stored in our DB
+                // (matched by osm_id, or by same name within ~100m for legacy admin rows).
+                $dbPlaces = Place::select('id', 'osm_id', 'name', 'latitude', 'longitude')
+                    ->whereNotNull('osm_id')
+                    ->orWhereNotNull('latitude')
+                    ->get();
+                $dbOsmIds = $dbPlaces->map(fn($p) => $p->osm_id)
+                    ->filter()
+                    ->map(fn($v) => str_replace('osm_', '', (string)$v))
+                    ->flip();
+                $dbByName = [];
+                foreach ($dbPlaces as $p) {
+                    if (!$p->name || $p->latitude === null || $p->longitude === null) continue;
+                    $dbByName[mb_strtolower(trim($p->name))][] = [(float)$p->latitude, (float)$p->longitude];
+                }
+                $osmPlaces = array_values(array_filter($osmPlaces, function ($p) use ($dbOsmIds, $dbByName) {
+                    $osmKey = str_replace('osm_', '', $p['id'] ?? '');
+                    if (isset($dbOsmIds[$osmKey])) return false;
+                    $key = mb_strtolower(trim($p['name'] ?? ''));
+                    foreach ($dbByName[$key] ?? [] as [$dLat, $dLng]) {
+                        if ($this->haversineDistance($dLat, $dLng, $p['latitude'], $p['longitude']) <= 0.1) {
+                            return false;
+                        }
+                    }
+                    return true;
+                }));
+
+                // 3. Merge all sources and sort purely by distance from the user
+                // (no OSM-on-top / DB-on-bottom bias — closest place wins).
+                $merged = array_merge($adminPlaces, $osmPlaces);
+                usort($merged, fn($a, $b) =>
+                    ($a['distance_km'] ?? PHP_FLOAT_MAX) <=> ($b['distance_km'] ?? PHP_FLOAT_MAX)
+                );
+
+                // Keep a little headroom for the per-request privacy filter;
+                // the exact $limit slice happens after the cache.
+                return array_slice($merged, 0, $fetch);
+            }
+        );
+
+        // Per-request privacy filter + final limit (viewer-dependent — never cached)
+        $combined = $this->filterHiddenAuthors($combined, $request->user()?->id);
         $combined = array_slice($combined, 0, $limit);
 
         return response()->json([

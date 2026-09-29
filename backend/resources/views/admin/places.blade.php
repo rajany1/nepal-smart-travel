@@ -291,6 +291,81 @@
                         </button>
                     </div>
                 </form>
+
+                <div id="osmImportProgress" class="hidden mt-4 border border-gray-200 rounded-lg bg-gray-50 p-4">
+                    <div class="flex items-center justify-between gap-2 mb-2">
+                        <span id="osmProgressLabel" class="text-sm font-medium text-gray-700"></span>
+                        <span id="osmProgressCounts" class="text-xs text-gray-500"></span>
+                    </div>
+                    <div class="w-full bg-gray-200 rounded-full h-2 overflow-hidden">
+                        <div id="osmProgressBar" class="bg-emerald-600 h-2 rounded-full transition-all duration-500" style="width:0%"></div>
+                    </div>
+                    <div id="osmProgressMeta" class="text-xs text-gray-500 mt-2"></div>
+                    <pre id="osmProgressOutput" class="hidden mt-2 max-h-40 overflow-auto whitespace-pre-wrap text-[11px] leading-relaxed text-gray-600 bg-white border border-gray-200 rounded p-2"></pre>
+                </div>
+                <script>
+                    (function () {
+                        const panel = document.getElementById('osmImportProgress');
+                        const label = document.getElementById('osmProgressLabel');
+                        const counts = document.getElementById('osmProgressCounts');
+                        const bar = document.getElementById('osmProgressBar');
+                        const meta = document.getElementById('osmProgressMeta');
+                        const output = document.getElementById('osmProgressOutput');
+                        const labels = {
+                            queued: 'Queued\u2026',
+                            running: 'Importing\u2026',
+                            completed: 'Import completed',
+                            failed: 'Import failed'
+                        };
+
+                        function render(s) {
+                            panel.classList.remove('hidden');
+                            const status = s.status || 'unknown';
+                            label.textContent = labels[status] || status;
+                            label.className = 'text-sm font-medium ' + (status === 'failed' ? 'text-red-600' : status === 'completed' ? 'text-emerald-600' : 'text-gray-700');
+
+                            const total = parseInt(s.total || 0, 10);
+                            const index = parseInt(s.index || 0, 10);
+                            const pct = total > 0 ? Math.min(100, Math.round((index / total) * 100)) : (status === 'completed' ? 100 : 0);
+                            bar.style.width = pct + '%';
+
+                            counts.textContent = total > 0 ? index + ' / ' + total + ' cities' : '';
+
+                            const bits = [];
+                            if (s.city) bits.push('City: ' + s.city);
+                            if (s.imported !== '' && s.imported !== undefined) bits.push(s.imported + ' imported');
+                            if (s.skipped !== '' && s.skipped !== undefined) bits.push(s.skipped + ' skipped');
+                            if (s.message) bits.push(s.message);
+                            meta.textContent = bits.join(' \u00b7 ');
+
+                            if (s.output && (status === 'completed' || status === 'failed')) {
+                                output.textContent = s.output;
+                                output.classList.remove('hidden');
+                            } else {
+                                output.classList.add('hidden');
+                            }
+                        }
+
+                        async function poll() {
+                            try {
+                                const res = await fetch(@json(route('admin.places.import-osm.status')), {
+                                    headers: { 'Accept': 'application/json', 'X-Requested-With': 'XMLHttpRequest' }
+                                });
+                                if (!res.ok) return;
+                                const s = await res.json();
+                                if (!s || !s.status) return;
+                                render(s);
+                                if (s.status === 'queued' || s.status === 'running') {
+                                    setTimeout(poll, 3000);
+                                }
+                            } catch (e) {
+                                // transient network error — stop until next page load
+                            }
+                        }
+
+                        poll();
+                    })();
+                </script>
             </div>
         </div>
 

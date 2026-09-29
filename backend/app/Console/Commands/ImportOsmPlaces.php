@@ -5,10 +5,30 @@ namespace App\Console\Commands;
 use Illuminate\Console\Command;
 use App\Models\Place;
 use App\Models\PlaceCategories;
+use App\Services\OsmOverpassService;
+use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Redis;
 use Illuminate\Support\Str;
 
 class ImportOsmPlaces extends Command
 {
+    /** Redis hash with the live progress of the current (or last) import run. */
+    public const STATUS_KEY = 'osm:import:city-run';
+
+    /** Atomic lock so only one import run executes at any time. */
+    public const LOCK_KEY = 'osm:import:city-run:lock';
+    public const LOCK_TTL = 4200; // seconds; must stay above the job timeout (3600s)
+
+    /**
+     * Client-side timeout (seconds) for one Overpass request.
+     *
+     * The city queries carry no [timeout:..] directive, so Overpass'
+     * server-side default (25s) applies. 60s leaves headroom for the response
+     * transfer while letting an unreachable/hanging mirror (overpass-api.de in
+     * production) fail over to the next one (maps.mail.ru) quickly.
+     */
+    public const OVERPASS_TIMEOUT = 60;
+
     protected $signature = 'places:import-osm 
         {--radius=10 : Search radius in km around each city}
         {--city= : Single city to import (default: all major Nepali cities)}
@@ -231,9 +251,31 @@ class ImportOsmPlaces extends Command
         ['name' => 'Dolalghat Bridge', 'lat' => 27.6167, 'lng' => 85.5000],
     ];
 
-    public function handle(): int
+    private OsmOverpassService $overpass;
+
+    /** City names accepted by --city (also used to validate the admin form). */
+    public static function cityNames(): array
+    {
+        return array_column((new self())->nepalCities, 'name');
+    }
+
+    /** Merge fields into the import progress hash (14 day retention). */
+    public static function writeStatus(array $fields): void
+    {
+        Redis::hMSet(self::STATUS_KEY, $fields);
+        Redis::expire(self::STATUS_KEY, 60 * 60 * 24 * 14);
+    }
+
+    /** Current import progress hash (empty array when nothing ran yet). */
+    public static function readStatus(): array
+    {
+        return Redis::hGetAll(self::STATUS_KEY) ?: [];
+    }
+
+    public function handle(OsmOverpassService $overpass): int
     {
         set_time_limit(0);
+        $this->overpass = $overpass;
 
         $radius = (int) $this->option('radius');
         $limit = (int) $this->option('limit');
@@ -274,25 +316,66 @@ class ImportOsmPlaces extends Command
         $totalImported = 0;
         $totalSkipped = 0;
 
-        $bar = $this->output->createProgressBar(count($cities));
-        $bar->start();
-
-        foreach ($cities as $i => $city) {
-            if ($i > 0 && $delay > 0) {
-                $this->line("  Waiting {$delay}s to avoid rate limit...");
-                sleep($delay);
-            }
-            $result = $this->importCityPlaces($city, $radius, $limit, $retries);
-            $totalImported += $result['imported'];
-            $totalSkipped += $result['skipped'];
-            $bar->advance();
+        $lock = Cache::lock(self::LOCK_KEY, self::LOCK_TTL);
+        if (!$lock->get()) {
+            $this->error('An OSM import is already running. Let it finish and try again.');
+            self::writeStatus([
+                'status' => 'failed',
+                'completed_at' => now()->toIso8601String(),
+                'message' => 'Rejected: another OSM import is already running.',
+            ]);
+            return 1;
         }
 
-        $bar->finish();
-        $this->newLine(2);
-        $this->info("✅ Import complete: {$totalImported} imported, {$totalSkipped} skipped (duplicates).");
+        try {
+            self::writeStatus([
+                'status' => 'running',
+                'started_at' => now()->toIso8601String(),
+                'completed_at' => '',
+                'city' => $specificCity ?: 'All cities',
+                'total' => count($cities),
+                'index' => 0,
+                'imported' => 0,
+                'skipped' => 0,
+                'message' => 'Importing...',
+                'output' => '',
+            ]);
 
-        return 0;
+            $bar = $this->output->createProgressBar(count($cities));
+            $bar->start();
+
+            foreach ($cities as $i => $city) {
+                if ($i > 0 && $delay > 0) {
+                    $this->line("  Waiting {$delay}s to avoid rate limit...");
+                    sleep($delay);
+                }
+                $result = $this->importCityPlaces($city, $radius, $limit, $retries);
+                $totalImported += $result['imported'];
+                $totalSkipped += $result['skipped'];
+                self::writeStatus([
+                    'city' => $city['name'],
+                    'index' => $i + 1,
+                    'total' => count($cities),
+                    'imported' => $totalImported,
+                    'skipped' => $totalSkipped,
+                    'message' => "Imported {$totalImported}, skipped {$totalSkipped} after " . ($i + 1) . ' of ' . count($cities) . ' cities',
+                ]);
+                $bar->advance();
+            }
+
+            $bar->finish();
+            $this->newLine(2);
+            $this->info("✅ Import complete: {$totalImported} imported, {$totalSkipped} skipped (duplicates).");
+            self::writeStatus([
+                'status' => 'completed',
+                'completed_at' => now()->toIso8601String(),
+                'message' => "Import complete: {$totalImported} imported, {$totalSkipped} skipped (duplicates).",
+            ]);
+
+            return 0;
+        } finally {
+            $lock->release();
+        }
     }
 
     private function importCityPlaces(array $city, int $radius, int $limit, int $maxRetries = 3): array
@@ -306,71 +389,46 @@ class ImportOsmPlaces extends Command
 
         $overpassQuery = $this->buildOverpassQuery($lat, $lng, $radiusMeters, $limit);
 
-        $responseBody = null;
-        $httpCode = 0;
+        // Mirror fallback (overpass-api.de -> maps.mail.ru -> kumi.systems),
+        // 429 backoff and the global rate limiter all live in
+        // OsmOverpassService. This loop only repeats the whole fetch when no
+        // mirror could answer, so the command keeps its --retries semantics
+        // without duplicating any Overpass HTTP logic.
+        $data = null;
 
         for ($attempt = 1; $attempt <= $maxRetries; $attempt++) {
+            $error = null;
+
             try {
-                $opts = [
-                    'http' => [
-                        'method' => 'POST',
-                        'header' => "Content-Type: application/x-www-form-urlencoded\r\nAccept: application/json\r\nUser-Agent: NepalSmartTravel/1.0",
-                        'content' => 'data=' . urlencode($overpassQuery),
-                        'timeout' => 120,
-                        'ignore_errors' => true,
-                    ]
-                ];
-                $context = stream_context_create($opts);
-                $responseBody = @file_get_contents('https://overpass-api.de/api/interpreter', false, $context);
+                $data = $this->overpass->fetchRaw($overpassQuery, null, null, self::OVERPASS_TIMEOUT);
 
-                if ($responseBody === false) {
-                    if ($attempt < $maxRetries) {
-                        $wait = $attempt * 5;
-                        $this->warn("  ⚠ Connection failed for {$cityName}, retrying in {$wait}s ({$attempt}/{$maxRetries})...");
-                        sleep($wait);
-                        continue;
-                    }
-                    $this->warn("  ⚠ Overpass API connection failed for {$cityName}");
-                    return ['imported' => 0, 'skipped' => 0];
+                if ($data !== null) {
+                    break;
                 }
 
-                $httpCode = 200;
-                if (isset($http_response_header[0]) && preg_match('/\d{3}/', $http_response_header[0], $m)) {
-                    $httpCode = (int)$m[0];
-                }
-
-                if ($httpCode === 429 || $httpCode === 504) {
-                    if ($attempt < $maxRetries) {
-                        $wait = $attempt * 5;
-                        $this->warn("  ⚠ Overpass API returned {$httpCode} for {$cityName}, retrying in {$wait}s ({$attempt}/{$maxRetries})...");
-                        sleep($wait);
-                        continue;
-                    }
-                    $this->warn("  ⚠ Overpass API returned status {$httpCode} for {$cityName} (gave up after {$maxRetries} retries)");
-                    return ['imported' => 0, 'skipped' => 0];
-                }
-
-                if ($httpCode !== 200) {
-                    $this->warn("  ⚠ Overpass API returned status {$httpCode} for {$cityName}");
-                    return ['imported' => 0, 'skipped' => 0];
-                }
-
-                break;
-
+                $error = 'no mirror answered';
             } catch (\Exception $e) {
-                if ($attempt < $maxRetries) {
-                    $wait = $attempt * 5;
-                    $this->warn("  ⚠ Error for {$cityName}: {$e->getMessage()}, retrying in {$wait}s ({$attempt}/{$maxRetries})...");
-                    sleep($wait);
-                    continue;
-                }
-                $this->error("  ✗ Overpass API error for {$cityName}: {$e->getMessage()}");
-                return ['imported' => 0, 'skipped' => 0];
+                $data = null;
+                $error = $e->getMessage();
             }
+
+            if ($attempt < $maxRetries) {
+                $wait = $attempt * 5;
+                $this->warn("  ⚠ Overpass request failed for {$cityName} ({$error}), retrying in {$wait}s ({$attempt}/{$maxRetries})...");
+                sleep($wait);
+                continue;
+            }
+
+            $this->warn("  ⚠ Overpass API connection failed for {$cityName}: {$error}");
+            return ['imported' => 0, 'skipped' => 0];
+        }
+
+        if ($data === null) {
+            $this->warn("  ⚠ Overpass API connection failed for {$cityName}");
+            return ['imported' => 0, 'skipped' => 0];
         }
 
         try {
-            $data = json_decode($responseBody, true);
             $elements = $data['elements'] ?? [];
 
             if (empty($elements)) {

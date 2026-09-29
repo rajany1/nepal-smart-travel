@@ -27,6 +27,8 @@ use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Str;
+use App\Console\Commands\ImportOsmPlaces;
+use App\Jobs\ImportOsmPlacesJob;
 use Carbon\Carbon;
 use App\Models\GameSetting;
 use App\Models\AdRevenueLedger;
@@ -2315,27 +2317,57 @@ class AdminController extends Controller
 
     public function importOsmPlaces(Request $request)
     {
-        set_time_limit(300);
-
         $this->requireAdmin($request);
         $this->requirePermission('manage_places');
 
         $city = $request->input('city');
         $radius = $request->input('radius', 10);
 
-        try {
-            $exitCode = \Illuminate\Support\Facades\Artisan::call('places:import-osm', [
-                '--radius' => $radius,
-                '--city' => $city,
-                '--limit' => 200,
-            ]);
-            $output = \Illuminate\Support\Facades\Artisan::output();
-            $this->logAction('place.osm-import', 'place', null, "OSM import from city: {$city}, radius: {$radius}");
-            \App\Services\PlacesCache::bump();
-            return back()->with('success', "OSM import complete. Output: " . nl2br(e($output)));
-        } catch (\Exception $e) {
-            return back()->with('error', 'OSM import failed: ' . $e->getMessage());
+        if ($city && !in_array($city, ImportOsmPlaces::cityNames(), true)) {
+            return back()->with('error', "City '{$city}' not found in predefined list.");
         }
+
+        $options = [
+            '--radius' => $radius,
+            '--limit' => 200,
+        ];
+        if ($city) {
+            $options['--city'] = $city;
+        }
+
+        // The import runs in the queue (ImportOsmPlacesJob) — a full run takes
+        // far longer than any proxy/FPM timeout, which is what caused the 504.
+        $running = (ImportOsmPlaces::readStatus()['status'] ?? '') === 'running';
+        if (!$running) {
+            ImportOsmPlaces::writeStatus([
+                'status' => 'queued',
+                'queued_at' => now()->toIso8601String(),
+                'started_at' => '',
+                'completed_at' => '',
+                'city' => $city ?: 'All cities',
+                'total' => 0,
+                'index' => 0,
+                'imported' => 0,
+                'skipped' => 0,
+                'message' => 'OSM import queued, waiting for the queue worker...',
+                'output' => '',
+            ]);
+        }
+
+        ImportOsmPlacesJob::dispatch($options);
+
+        $this->logAction('place.osm-import', 'place', null, "OSM import queued from city: " . ($city ?: 'all') . ", radius: {$radius}");
+
+        return back()->with('success', $running
+            ? 'An OSM import is already running — its live progress is shown below.'
+            : 'OSM import queued. Live progress is shown below.');
+    }
+
+    public function importOsmStatus(Request $request)
+    {
+        $this->requireAdmin($request);
+
+        return response()->json(ImportOsmPlaces::readStatus());
     }
 
     public function manageCategories(Request $request)

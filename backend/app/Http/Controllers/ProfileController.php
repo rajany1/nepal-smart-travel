@@ -482,7 +482,14 @@ class ProfileController extends Controller
         }
         $user->settings = $settings;
         $user->save();
-        
+
+        // The show-on-map choice drives which places every listing endpoint
+        // returns — invalidate the shared hidden-author cache so it applies
+        // now rather than after its 10-minute TTL.
+        if (array_key_exists('show_on_map', $validated)) {
+            \App\Services\PlacesCache::forgetHiddenAuthors();
+        }
+
         return response()->json([
             'success' => true,
             'message' => 'Settings updated successfully',
