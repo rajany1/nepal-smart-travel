@@ -37,6 +37,7 @@ import 'add_place_screen.dart';
 import 'filter_places_sheet.dart';
 import 'utils/route_polyline_utils.dart';
 import 'widgets/map_blue_dot.dart';
+import 'widgets/weather_card.dart';
 import '../../widgets/ad_inline_banner.dart';
 
 /// Nepal Smart Travel enhanced nearby map screen with:
@@ -77,11 +78,20 @@ class NearbyMapScreen extends StatefulWidget {
 }
 
 class _NearbyMapScreenState extends State<NearbyMapScreen>
-    with TickerProviderStateMixin {
+    with TickerProviderStateMixin, WidgetsBindingObserver {
   final LocationService _locationService = LocationService();
   final MapController _mapController = MapController();
+  // M7: built exactly once and reused for every FlutterMap rebuild. See
+  // _buildFlutterMap for why a fresh MapOptions per rebuild was so costly.
+  MapOptions? _mapOptions;
   final DraggableScrollableController _sheetController =
       DraggableScrollableController();
+
+  // Current size of the places sheet, as a fraction of the screen. Feeds the
+  // attribution chip so it can sit just above the sheet instead of on top of
+  // the map controls at the top of the screen.
+  final ValueNotifier<double> _sheetExtentNotifier =
+      ValueNotifier<double>(0.22);
   final TextEditingController _searchController = TextEditingController();
   final OfflineDbService _offlineDb = OfflineDbService.instance;
   final OfflineTileProvider _offlineTiles = OfflineTileProvider();
@@ -95,11 +105,21 @@ class _NearbyMapScreenState extends State<NearbyMapScreen>
   bool _isTracking = true;
   bool _isLoadingPlaces = false;
   bool _isFetchingPlaces = false;
+
+  // True once there is something on the map to look at (restored from the
+  // local snapshot, the SQLite cache, or a response). Guards the loading pill
+  // so a background refresh never replaces visible pins with a spinner.
+  bool _hasPlacesToDraw = false;
   PlaceModel? _selectedPlace;
   Timer? _debounceTimer;
   Timer? _autoDownloadTimer;
   StreamSubscription? _positionStream;
   StreamController<int>? _syncStreamController;
+
+  // H1: false while the app is not on screen. Drives a TickerMode so the
+  // blue-dot pulse, the SOS pulse and the follow-chase ticker stop scheduling
+  // frames instead of burning CPU/GPU behind a hidden map.
+  bool _mapTickersEnabled = true;
 
   // Current location
   LatLng? _currentLocation;
@@ -122,6 +142,10 @@ class _NearbyMapScreenState extends State<NearbyMapScreen>
   LatLng? _displayLocation;
   final ValueNotifier<LatLng?> _displayLocationNotifier = ValueNotifier(null);
   final ValueNotifier<double> _accuracyNotifier = ValueNotifier<double>(20);
+  // H2: bumped once per accepted location fix. The places sheet reads
+  // _distanceFromUser() while the map does not, so it gets its own
+  // rebuild signal — one fix, one sheet rebuild, no FlutterMap rebuild.
+  final ValueNotifier<int> _fixVersion = ValueNotifier<int>(0);
   final ValueNotifier<double> _zoomNotifier =
       ValueNotifier<double>(AppConstants.defaultMapZoom);
   Ticker? _dotTicker;
@@ -178,6 +202,11 @@ class _NearbyMapScreenState extends State<NearbyMapScreen>
   // Route / Directions (multi-route)
   List<Map<String, dynamic>> _routes = [];
   bool _isLoadingRoute = false;
+
+  // Place the currently drawn route was requested for. Selecting a different
+  // place clears the old direction instead of leaving it pointing at a place
+  // the user is no longer looking at.
+  dynamic _routeDestinationId;
   String _sortMode = 'nearest'; // nearest | rating | featured
 
   // Destination (e.g. opened from Place Details "Directions")
@@ -229,6 +258,7 @@ class _NearbyMapScreenState extends State<NearbyMapScreen>
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _destinationLat = widget.destinationLat;
     _destinationLng = widget.destinationLng;
     _destinationName = widget.destinationName;
@@ -241,10 +271,26 @@ class _NearbyMapScreenState extends State<NearbyMapScreen>
     });
     NepalBoundaryService.instance.onLoaded(_onBoundaryLoaded);
     NepalBoundaryService.instance.load();
+    _sheetController.addListener(_onSheetExtentChanged);
     // Started immediately rather than post-frame: the first await inside is
     // the local camera restore, which has to finish BEFORE the first frame so
     // the map opens on the previous view instead of the default Nepal centre.
     unawaited(_initMap());
+  }
+
+  /// Mirrors the places sheet's size into a ValueNotifier so the attribution
+  /// chip can track it without a setState (which would rebuild FlutterMap on
+  /// every drag frame).
+  void _onSheetExtentChanged() {
+    double extent;
+    try {
+      extent = _sheetController.size;
+    } catch (_) {
+      return; // Not attached to a sheet yet.
+    }
+    if (extent <= 0 || extent > 1) return;
+    if ((extent - _sheetExtentNotifier.value).abs() < 0.002) return;
+    _sheetExtentNotifier.value = extent;
   }
 
   void _onBoundaryLoaded() {
@@ -302,8 +348,19 @@ class _NearbyMapScreenState extends State<NearbyMapScreen>
   }
 
   @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    super.didChangeAppLifecycleState(state);
+    final visible = state == AppLifecycleState.resumed ||
+        state == AppLifecycleState.inactive;
+    if (!mounted || visible == _mapTickersEnabled) return;
+    setState(() => _mapTickersEnabled = visible);
+  }
+
+  @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _persistNow();
+    _sheetController.removeListener(_onSheetExtentChanged);
     NepalBoundaryService.instance.removeOnLoaded(_onBoundaryLoaded);
     ProximityAlertService.instance.stopNavigationMonitoring();
     _debounceTimer?.cancel();
@@ -322,8 +379,10 @@ class _NearbyMapScreenState extends State<NearbyMapScreen>
     _headingNotifier.dispose();
     _displayLocationNotifier.dispose();
     _accuracyNotifier.dispose();
+    _fixVersion.dispose();
     _zoomNotifier.dispose();
     _searchTextNotifier.dispose();
+    _sheetExtentNotifier.dispose();
     _sheetController.dispose();
     _searchController.dispose();
     _cameraAnimController.dispose();
@@ -337,6 +396,11 @@ class _NearbyMapScreenState extends State<NearbyMapScreen>
     // One local read (no GPS, no network). This is what stops every reopen
     // from feeling like the map is starting from zero.
     await _restoreCachedCamera();
+    if (!mounted) return;
+
+    // Same idea for the pins: the last successful nearby payload is on disk,
+    // so the map can paint markers immediately while the refresh runs behind.
+    await _restoreCachedPlaces();
     if (!mounted) return;
 
     // ── 1) Datasets load in parallel — never gate the map on them ──────
@@ -491,6 +555,37 @@ class _NearbyMapScreenState extends State<NearbyMapScreen>
     }
   }
 
+  /// Rehydrates the last successful nearby payload from the local snapshot.
+  ///
+  /// Camera and pins are written together, so the restored bounds describe
+  /// the view that was on screen when they were saved — the markers show in
+  /// the first frame while the network refresh runs behind them.
+  Future<void> _restoreCachedPlaces() async {
+    try {
+      final snapshot = await NearbyMapCache.instance.readPlaces();
+      if (!mounted || snapshot == null) return;
+      // A zeroed bbox means a corrupt payload — rendering pins for "the
+      // whole world" would be worse than fetching fresh.
+      if (snapshot.minLat == 0 &&
+          snapshot.maxLat == 0 &&
+          snapshot.minLng == 0 &&
+          snapshot.maxLng == 0) {
+        return;
+      }
+      final provider = context.read<PlaceProvider>();
+      provider.restoreViewportPlaces(
+        snapshot.places.map((j) => PlaceModel.fromJson(j)).toList(),
+        minLat: snapshot.minLat,
+        maxLat: snapshot.maxLat,
+        minLng: snapshot.minLng,
+        maxLng: snapshot.maxLng,
+      );
+      if (mounted) setState(() => _hasPlacesToDraw = true);
+    } catch (e) {
+      debugPrint('Nearby places restore failed: $e');
+    }
+  }
+
   /// Resolves permission + service status once per open with a bounded
   /// timeout, then applies the fix it returns. Never blocks the map: the
   /// restored camera is already on screen by the time this runs.
@@ -541,6 +636,7 @@ class _NearbyMapScreenState extends State<NearbyMapScreen>
     }
     final firstFix = _currentLocation == null;
     _currentLocation = loc;
+    _fixVersion.value++;
     if (accuracy != null && accuracy > 0) {
       _accuracyM = accuracy;
       _accuracyNotifier.value = accuracy;
@@ -688,18 +784,31 @@ class _NearbyMapScreenState extends State<NearbyMapScreen>
     });
 
     // Auto-download maps: background-cache the visible area once the map
-    // settles, so the region works offline later.
-    if (_currentZoom >= 8 && _lat != null && _lng != null) {
+    // settles, so the region works offline later. Skipped outright while the
+    // preference is off, so no timer — and therefore no region scan — is ever
+    // scheduled for a settle the user asked us not to act on.
+    if (_currentZoom >= 8 &&
+        _lat != null &&
+        _lng != null &&
+        AppSettingsService.autoDownloadMapsCached) {
       _autoDownloadTimer?.cancel();
       _autoDownloadTimer = Timer(const Duration(seconds: 2), () async {
+        if (!mounted) return;
         if (!await AppSettingsService.autoDownloadMaps) return;
-        OfflineTileDownloader.downloadRegion(
-          minLat: _lat! - 0.15,
-          maxLat: _lat! + 0.15,
-          minLng: _lng! - 0.2,
-          maxLng: _lng! + 0.2,
+        final lat = _lat;
+        final lng = _lng;
+        if (lat == null || lng == null) return;
+        await OfflineTileDownloader.downloadRegion(
+          minLat: lat - 0.15,
+          maxLat: lat + 0.15,
+          minLng: lng - 0.2,
+          maxLng: lng + 0.2,
           minZoom: 8,
           maxZoom: 16,
+          // Polled per tile so switching the preference off mid-scan stops
+          // the remaining iterations immediately instead of running to the
+          // end of the region.
+          isCancelled: () => !AppSettingsService.autoDownloadMapsCached,
         );
       });
     }
@@ -898,19 +1007,21 @@ class _NearbyMapScreenState extends State<NearbyMapScreen>
       final loc = LatLng(position.latitude, position.longitude);
       if (!mounted) return;
       _checkArrival(loc);
-      // Merge GPS heading + location into a single setState to avoid
-      // two consecutive full-widget rebuilds per GPS fix.
+      // H2: write the heading fields straight through. Nothing in this
+      // screen's build() reads _gpsHeading/_useGpsHeading — the only widget
+      // that shows heading is the blue-dot cone, and it listens to
+      // _headingNotifier below. The setState that used to live here rebuilt
+      // the whole screen (FlutterMap, every layer, _buildMarkers and the
+      // district labels) on every single GPS fix.
       final gpsH = position.heading;
-      setState(() {
-        if (gpsH != null && gpsH > 0) {
-          _gpsHeading = (gpsH % 360 + 360) % 360;
-          _lastGpsHeadingAt = DateTime.now();
-          _useGpsHeading = true;
-        } else {
-          // No bearing (stationary) - compass takes over.
-          _useGpsHeading = false;
-        }
-      });
+      if (gpsH != null && gpsH > 0) {
+        _gpsHeading = (gpsH % 360 + 360) % 360;
+        _lastGpsHeadingAt = DateTime.now();
+        _useGpsHeading = true;
+      } else {
+        // No bearing (stationary) - compass takes over.
+        _useGpsHeading = false;
+      }
       _headingNotifier.value = _heading;
 
       // Route on screen: keep it visible instead of dragging the camera to
@@ -999,8 +1110,14 @@ class _NearbyMapScreenState extends State<NearbyMapScreen>
       );
       if (cached.isNotEmpty && mounted) {
         final provider = context.read<PlaceProvider>();
-        final places = cached.map((j) => PlaceModel.fromJson(j)).toList();
-        provider.setCachedPlaces(places);
+        _hasPlacesToDraw = true;
+        // Cold-start fallback only. Overwriting an already-loaded payload
+        // would throw away the nearby-combined rows — the sole source of the
+        // live OSM categorized places the canonical collection is built from.
+        if (provider.places.isEmpty) {
+          final places = cached.map((j) => PlaceModel.fromJson(j)).toList();
+          provider.setCachedPlaces(places);
+        }
       }
     } catch (e) {
       debugPrint('Failed to load cached places: $e');
@@ -1073,17 +1190,32 @@ class _NearbyMapScreenState extends State<NearbyMapScreen>
     if (search == null && _currentZoom >= 8) {
       if (_isFetchingPlaces) return;
       _isFetchingPlaces = true;
+      // Cold start with nothing on disk: show the pill for this first request.
+      // Warm opens already have restored pins, so they stay spinner-free.
+      final announceColdStart = !_hasPlacesToDraw;
+      if (announceColdStart && mounted) setState(() => _isLoadingPlaces = true);
+
+      // The bbox API filters by category *name*, which only exists once the
+      // category list has loaded. Waiting for it here is what stops a filter
+      // from being silently dropped from the request (and therefore showing
+      // every category while the sheet says otherwise).
+      String? categoryName;
+      if (_activeFilter?.categoryId != null) {
+        categoryName = _getCategoryName(_activeFilter!.categoryId!);
+        if (categoryName == null) {
+          await provider.fetchCategories();
+          categoryName = _getCategoryName(_activeFilter!.categoryId!);
+        }
+      }
 
       try {
-        await provider.fetchViewportPlaces(
+        final raw = await provider.fetchViewportPlaces(
           minLat: bboxMinLat,
           maxLat: bboxMaxLat,
           minLng: bboxMinLng,
           maxLng: bboxMaxLng,
           zoom: _currentZoom.round(),
-          category: _activeFilter?.categoryId != null
-              ? _getCategoryName(_activeFilter!.categoryId!)
-              : null,
+          category: categoryName,
         );
 
         // Update cached bounds for smart skip
@@ -1092,12 +1224,34 @@ class _NearbyMapScreenState extends State<NearbyMapScreen>
         _cachedBoundsEast = bboxMaxLng;
         _cachedBoundsWest = bboxMinLng;
 
+        if (raw.isNotEmpty) {
+          _hasPlacesToDraw = true;
+          // Remember the last good payload so the next open paints these
+          // pins before the network answers. A failed fetch never gets here,
+          // so an empty response cannot wipe a usable snapshot. Only the
+          // unfiltered view is worth keeping — active filters are not
+          // restored, so a filtered payload would render as a sparse map
+          // until the refresh landed.
+          if (categoryName == null) {
+            await NearbyMapCache.instance.savePlaces(
+              raw,
+              minLat: bboxMinLat,
+              maxLat: bboxMaxLat,
+              minLng: bboxMinLng,
+              maxLng: bboxMaxLng,
+            );
+          }
+        }
+
         _checkOsmSubmissionStatuses();
       } catch (e) {
         debugPrint('bbox API failed, falling back to nepalPlaces: $e');
       }
 
       _isFetchingPlaces = false;
+      if (announceColdStart && mounted && _isLoadingPlaces) {
+        setState(() => _isLoadingPlaces = false);
+      }
       return;
     }
 
@@ -1117,6 +1271,7 @@ class _NearbyMapScreenState extends State<NearbyMapScreen>
           .toList()
         ..sort((a, b) => (a.distanceKm ?? 0).compareTo(b.distanceKm ?? 0));
       provider.setViewportPlacesDirect(sorted.take(200).toList());
+      if (filtered.isNotEmpty) _hasPlacesToDraw = true;
       _checkOsmSubmissionStatuses();
       return;
     }
@@ -1127,7 +1282,9 @@ class _NearbyMapScreenState extends State<NearbyMapScreen>
 
     final radius = _zoomToRadius(_currentZoom);
     _isFetchingPlaces = true;
-    setState(() => _isLoadingPlaces = true);
+    // Only announce "loading" when the map is actually empty. A background
+    // refresh while pins are already on screen must not swap them for a pill.
+    if (!_hasPlacesToDraw && mounted) setState(() => _isLoadingPlaces = true);
 
     try {
       final fetchRadius = radius * 2;
@@ -1154,7 +1311,7 @@ class _NearbyMapScreenState extends State<NearbyMapScreen>
     }
 
     _isFetchingPlaces = false;
-    if (mounted) setState(() => _isLoadingPlaces = false);
+    if (mounted && _isLoadingPlaces) setState(() => _isLoadingPlaces = false);
   }
 
   double _zoomToRadius(double zoom) {
@@ -1310,6 +1467,15 @@ class _NearbyMapScreenState extends State<NearbyMapScreen>
   }
 
   void _onPlaceTap(PlaceModel place) async {
+    // Selecting a different place invalidates the directions drawn for the
+    // previous one — a route pointing at a place the user moved away from is
+    // just a lie. The launched (detail-screen) destination flow keeps its
+    // route: there the destination is not a tapped marker.
+    if (_destinationLat == null &&
+        _routes.isNotEmpty &&
+        _routeDestinationId != place.id) {
+      _clearRoute();
+    }
     setState(() => _selectedPlace = place);
     // Inspecting another place means the camera is no longer about the user:
     // stop following/compass before the glide, or the dot would drag it back.
@@ -1384,7 +1550,10 @@ class _NearbyMapScreenState extends State<NearbyMapScreen>
       }
       if (parsed.isNotEmpty) {
         debugPrint('Directions OK: ${parsed.length} route(s) for ${place.name}');
-        setState(() => _routes = parsed);
+        setState(() {
+          _routes = parsed;
+          _routeDestinationId = place.id;
+        });
         // Following a route -> watch for alerts/reports along the way.
         ProximityAlertService.instance.startNavigationMonitoring();
         final allPoints = parsed.expand((r) => r['points'] as List<LatLng>).toList();
@@ -1419,6 +1588,7 @@ class _NearbyMapScreenState extends State<NearbyMapScreen>
 
   void _clearRoute() {
     _hasArrived = false;
+    _routeDestinationId = null;
     ProximityAlertService.instance.stopNavigationMonitoring();
     setState(() => _routes = []);
   }
@@ -1600,38 +1770,37 @@ class _NearbyMapScreenState extends State<NearbyMapScreen>
           if (!_initialCameraReady)
             const Center(child: CircularProgressIndicator())
           else
-            ValueListenableBuilder<int>(
-              valueListenable: _camVersion,
-              builder: (context, _, __) {
-                return Consumer<MapViewProvider>(
-                  builder: (context, mapView, _) {
-                    return _buildFlutterMap(
-                      isSatellite: mapView.isSatellite,
-                      placesVisible: mapView.showPlaces,
-                      showWeather: mapView.showWeather,
-                      showRoutes: mapView.showRoutes,
-                    );
-                  },
-                );
-              },
+            TickerMode(
+              // H1: while this is false no ticker inside the map subtree
+              // schedules a frame, so the blue-dot ring, the SOS marker ring
+              // and the follow chase go quiet with the screen.
+              enabled: _mapTickersEnabled,
+              child: ValueListenableBuilder<int>(
+                valueListenable: _camVersion,
+                builder: (context, _, __) {
+                  return Consumer<MapViewProvider>(
+                    builder: (context, mapView, _) {
+                      return _buildFlutterMap(
+                        isSatellite: mapView.isSatellite,
+                        placesVisible: mapView.showPlaces,
+                        showWeather: mapView.showWeather,
+                        showRoutes: mapView.showRoutes,
+                      );
+                    },
+                  );
+                },
+              ),
             ),
 
-          // Map mode toggle button
-          Positioned(
-            top: MediaQuery.of(context).padding.top + 50,
-            left: 16,
-            child: _buildMapModeToggle(),
-          ),
-
-          // Visible source attribution for the active tile provider
+          // Visible source attribution for the active tile provider — pinned
+          // to the bottom of the screen instead of fighting the top-right
+          // controls for space (see _buildMapAttribution).
           _buildMapAttribution(),
 
-          // Trekking & curated routes button
-          Positioned(
-            top: MediaQuery.of(context).padding.top + 104,
-            left: 16,
-            child: _buildRoutesButton(),
-          ),
+          // Weather chip — bottom-left above the attribution, rides the
+          // places sheet's height. Non-interactive: taps and drags fall
+          // straight through to the map (see _buildWeatherChip).
+          _buildWeatherChip(),
 
           // Compass (N) indicator - top right, shows north direction
           Positioned(
@@ -1690,10 +1859,11 @@ class _NearbyMapScreenState extends State<NearbyMapScreen>
             child: _buildSearchBar(),
           ),
 
-          // Floating action buttons (right side)
+          // Control stack: one column of uniform buttons hanging straight
+          // under the compass, on the right edge.
           Positioned(
+            top: MediaQuery.of(context).padding.top + 116,
             right: 16,
-            bottom: 140,
             child: _buildFloatingActions(),
           ),
 
@@ -1743,24 +1913,79 @@ class _NearbyMapScreenState extends State<NearbyMapScreen>
           // never blocks the screen the way the old "no location yet" card did.
           ..._locationStatusCard(),
 
-          _buildBottomSheet(),
+          // H2: the sheet's distance labels depend on the user's position,
+          // the map does not — so the sheet takes its own rebuild signal
+          // (_fixVersion, one bump per GPS fix) instead of riding along with
+          // a full-screen setState that used to rebuild FlutterMap too.
+          ValueListenableBuilder<int>(
+            valueListenable: _fixVersion,
+            builder: (context, _, __) => _buildBottomSheet(),
+          ),
         ],
       ),
       ),
     );
   }
 
-  Widget _buildFlutterMap({
-    required bool isSatellite,
-    required bool placesVisible,
-    required bool showWeather,
-    required bool showRoutes,
-  }) {
-    return FlutterMap(
-      mapController: _mapController,
-      options: MapOptions(
-        initialCenter: LatLng(
-            _lat ?? AppConstants.defaultLatitude,
+  // ── M7: MapOptions callbacks live on the State, not as fresh closures ──
+  //
+  // MapOptions has a field-wise operator==, but two closure literals are
+  // never equal, so FlutterMap.didUpdateWidget concluded the options had
+  // changed on EVERY rebuild and called `_mapController.options = ...`.
+  // That setter unconditionally writes MapControllerImpl.value, and because
+  // _MapControllerState has no operator== every write notifies listeners —
+  // i.e. MapInteractiveViewerState.setState() with a camera that never
+  // moved, dragging the whole map subtree through a rebuild for nothing.
+  void _onMapEvent(MapEvent event) {
+    // Programmatic moves emit MapEventMove / MapEventRotate only, so
+    // our own animations and the follow-camera never trip the checks
+    // below. The Start/End pairs (and the scroll-wheel event, which has
+    // no pair) are emitted exclusively by user gestures.
+    final isGestureEnd = event is MapEventMoveEnd ||
+        event is MapEventRotateEnd ||
+        event is MapEventDoubleTapZoomEnd ||
+        event is MapEventFlingAnimationEnd;
+    final isGestureBegun = event is MapEventMoveStart ||
+        event is MapEventRotateStart ||
+        event is MapEventDoubleTapZoomStart ||
+        event is MapEventFlingAnimationStart ||
+        event is MapEventScrollWheelZoom;
+
+    if ((isGestureBegun || isGestureEnd) && !_isAnimating) {
+      // Manual gesture = the user is taking the camera back.
+      _exitFollowModes();
+    }
+
+    if (isGestureEnd || event is MapEventScrollWheelZoom) {
+      _handleViewportChanged(event.camera);
+    } else if (event is MapEventRotate) {
+      // rotateRaw never fires onPositionChanged, so pure-rotation
+      // changes (our compass updates included) land here instead.
+      _rotationNotifier.value = event.camera.rotation;
+    }
+  }
+
+  void _onPositionChanged(MapCamera camera, bool hasGesture) {
+    _rotationNotifier.value = camera.rotation;
+    // Fires on every drag/pinch frame — keeps the blue dot's accuracy
+    // ring scaling live instead of waiting for the gesture to end.
+    if (_zoomNotifier.value != camera.zoom) {
+      _zoomNotifier.value = camera.zoom;
+    }
+  }
+
+  void _onMapTap(TapPosition tapPosition, LatLng latLng) {
+    setState(() => _selectedPlace = null);
+  }
+
+  // ── M7: one MapOptions for the life of the screen ─────────────────────
+  //
+  // initialCenter / initialZoom are only read while the controller is first
+  // attached — which happens on the build that runs right after
+  // _initialCameraReady flips — so freezing them changes nothing about the
+  // view the map opens on.
+  MapOptions _buildMapOptions() => _mapOptions ??= MapOptions(
+        initialCenter: LatLng(_lat ?? AppConstants.defaultLatitude,
             _lng ?? AppConstants.defaultLongitude),
         initialZoom: _currentZoom,
         maxZoom: AppConstants.maxMapZoom,
@@ -1774,53 +1999,31 @@ class _NearbyMapScreenState extends State<NearbyMapScreen>
         interactionOptions: const InteractionOptions(
           flags: InteractiveFlag.all,
         ),
-        onMapEvent: (event) {
-          // Programmatic moves emit MapEventMove / MapEventRotate only, so
-          // our own animations and the follow-camera never trip the checks
-          // below. The Start/End pairs (and the scroll-wheel event, which has
-          // no pair) are emitted exclusively by user gestures.
-          final isGestureEnd = event is MapEventMoveEnd ||
-              event is MapEventRotateEnd ||
-              event is MapEventDoubleTapZoomEnd ||
-              event is MapEventFlingAnimationEnd;
-          final isGestureBegun = event is MapEventMoveStart ||
-              event is MapEventRotateStart ||
-              event is MapEventDoubleTapZoomStart ||
-              event is MapEventFlingAnimationStart ||
-              event is MapEventScrollWheelZoom;
+        onMapEvent: _onMapEvent,
+        onPositionChanged: _onPositionChanged,
+        onTap: _onMapTap,
+      );
 
-          if ((isGestureBegun || isGestureEnd) && !_isAnimating) {
-            // Manual gesture = the user is taking the camera back.
-            _exitFollowModes();
-          }
-
-          if (isGestureEnd || event is MapEventScrollWheelZoom) {
-            _handleViewportChanged(event.camera);
-          } else if (event is MapEventRotate) {
-            // rotateRaw never fires onPositionChanged, so pure-rotation
-            // changes (our compass updates included) land here instead.
-            _rotationNotifier.value = event.camera.rotation;
-          }
-        },
-        onPositionChanged: (camera, hasGesture) {
-          _rotationNotifier.value = camera.rotation;
-          // Fires on every drag/pinch frame — keeps the blue dot's accuracy
-          // ring scaling live instead of waiting for the gesture to end.
-          if (_zoomNotifier.value != camera.zoom) {
-            _zoomNotifier.value = camera.zoom;
-          }
-        },
-        onTap: (_, __) {
-          setState(() => _selectedPlace = null);
-        },
-      ),
+  Widget _buildFlutterMap({
+    required bool isSatellite,
+    required bool placesVisible,
+    required bool showWeather,
+    required bool showRoutes,
+  }) {
+    return FlutterMap(
+      mapController: _mapController,
+      options: _buildMapOptions(),
       children: [
         if (isSatellite) ...[
           TileLayer(
             urlTemplate:
                 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
             userAgentPackageName: 'np.com.nepalsmarttravel',
-            maxZoom: 19,
+            // Both tile sources end at z19; the camera is capped there too,
+            // so no layer ever asks for a zoom the source cannot serve.
+            maxZoom: AppConstants.maxMapZoom,
+            maxNativeZoom: 19,
+            minZoom: 7.0,
             tileProvider: _satelliteTiles,
           ),
         ] else
@@ -1831,7 +2034,8 @@ class _NearbyMapScreenState extends State<NearbyMapScreen>
                 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
             userAgentPackageName: 'np.com.nepalsmarttravel',
             minZoom: 7.0,
-            maxZoom: 19,
+            maxZoom: AppConstants.maxMapZoom,
+            maxNativeZoom: 19,
             tileProvider: _offlineTiles,
           ),
         // Nepal boundary + provinces + districts
@@ -1842,7 +2046,8 @@ class _NearbyMapScreenState extends State<NearbyMapScreen>
           if (_currentZoom >= 9)
             PolygonLayer(polygons: NepalBoundaryService.instance.buildDistrictPolygons()),
           if (_currentZoom >= 9)
-            MarkerLayer(markers: NepalBoundaryService.instance.buildDistrictLabels()),
+            MarkerLayer(
+                markers: NepalBoundaryService.instance.buildDistrictLabels()),
         ],
         if (showWeather && _weatherGrid.isNotEmpty)
           PolygonLayer(polygons: _buildWeatherPolygons()),
@@ -1850,6 +2055,9 @@ class _NearbyMapScreenState extends State<NearbyMapScreen>
           PolylineLayer(
             polylines: [
               for (int i = 0; i < _routes.length; i++)
+                // Selected route: solid, strong. Alternatives: same blue,
+                // dashed and lighter — "grey" read as a rendering bug, not
+                // as a secondary option.
                 ...buildRoutePolylines(
                   _routes[i]['points'] as List<LatLng>,
                   _routes[i]['offRoad'] as List<bool>? ??
@@ -1857,8 +2065,11 @@ class _NearbyMapScreenState extends State<NearbyMapScreen>
                           (_routes[i]['points'] as List<LatLng>).length, false),
                   color: i == 0
                       ? const Color(0xFF4285F4).withOpacity(0.85)
-                      : Colors.grey.withOpacity(0.5),
+                      : const Color(0xFF4285F4).withOpacity(0.55),
                   strokeWidth: i == 0 ? 5 : 3,
+                  pattern: i == 0
+                      ? const StrokePattern.solid()
+                      : StrokePattern.dashed(segments: const [10.0, 8.0]),
                 ),
             ],
           ),
@@ -2121,92 +2332,39 @@ class _NearbyMapScreenState extends State<NearbyMapScreen>
     );
   }
 
+  /// Icon-only entry to the curated/trekking routes list — same tile as the
+  /// rest of the stack; the label lives in the tooltip.
   Widget _buildRoutesButton() {
-    return Material(
-      elevation: 3,
-      color: Colors.white,
-      borderRadius: BorderRadius.circular(24),
-      shadowColor: Colors.black26,
-      child: InkWell(
-        borderRadius: BorderRadius.circular(24),
-        onTap: () {
-          HapticFeedback.lightImpact();
-          Navigator.push(
-            context,
-            MaterialPageRoute(builder: (_) => const RoutesScreen()),
-          );
-        },
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Icon(Icons.hiking, size: 20, color: Color(0xFFB45309)),
-              const SizedBox(width: 6),
-              Text(
-                context.t('Routes'),
-                style: const TextStyle(
-                  fontSize: AppTheme.textSm,
-                  fontWeight: FontWeight.w600,
-                  color: AppTheme.textPrimary,
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
+    return _mapFAB(
+      icon: Icons.hiking,
+      iconColor: const Color(0xFFB45309),
+      onTap: () {
+        HapticFeedback.lightImpact();
+        Navigator.push(
+          context,
+          MaterialPageRoute(builder: (_) => const RoutesScreen()),
+        );
+      },
+      message: context.t('Routes'),
     );
   }
 
+  /// Icon-only Standard/Satellite switch — the old pill carried a text label
+  /// and a different shape, which is what made the column look improvised.
   Widget _buildMapModeToggle() {
     return Consumer<MapViewProvider>(
       builder: (context, mapView, _) {
-        return AnimatedContainer(
-          duration: const Duration(milliseconds: 200),
-          decoration: BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.circular(24),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withOpacity(0.15),
-                blurRadius: 8,
-                offset: const Offset(0, 2),
-              ),
-            ],
-          ),
-          child: Material(
-            color: Colors.transparent,
-            child: InkWell(
-              borderRadius: BorderRadius.circular(24),
-              onTap: () {
-                HapticFeedback.lightImpact();
-                mapView.toggleMapMode();
-              },
-              child: Padding(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(
-                      mapView.isSatellite ? Icons.map : Icons.satellite,
-                      size: 18,
-                      color: AppTheme.primaryColor,
-                    ),
-                    const SizedBox(width: 6),
-                    Text(
-                      mapView.isSatellite ? context.t('Standard') : context.t('Satellite'),
-                      style: const TextStyle(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w600,
-                        color: AppTheme.textPrimary,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ),
+        return _mapFAB(
+          icon: mapView.isSatellite ? Icons.map : Icons.satellite,
+          color: Colors.white,
+          iconColor: AppTheme.primaryColor,
+          onTap: () {
+            HapticFeedback.lightImpact();
+            mapView.toggleMapMode();
+          },
+          message: mapView.isSatellite
+              ? context.t('Standard')
+              : context.t('Satellite'),
         );
       },
     );
@@ -2216,55 +2374,174 @@ class _NearbyMapScreenState extends State<NearbyMapScreen>
   /// '© Esri, Maxar, Earthstar Geographics' for Satellite (Esri World Imagery)
   /// and '© OpenStreetMap contributors' for Standard mode. Tapping opens the
   /// provider's attribution page.
+  ///
+  /// Sits bottom-left, just clear of wherever the places sheet currently is.
+  /// The height is tracked through [_sheetExtentNotifier] so only this chip
+  /// rebuilds while the sheet is dragged.
   Widget _buildMapAttribution() {
     return Consumer<MapViewProvider>(
       builder: (context, mapView, _) {
         final isSatellite = mapView.isSatellite;
-        return Positioned(
-          top: MediaQuery.of(context).padding.top + 114,
-          right: 16,
-          child: Material(
-            color: const Color(0xE6FFFFFF),
-            borderRadius: BorderRadius.circular(6),
-            elevation: 2,
-            child: InkWell(
-              borderRadius: BorderRadius.circular(6),
-              onTap: () {
-                final Uri url = Uri.parse(isSatellite
-                    ? 'https://www.esri.com/en-us/home'
-                    : 'https://www.openstreetmap.org/copyright');
-                launchUrl(url, mode: LaunchMode.externalApplication);
-              },
-              child: Padding(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                child: Text(
-                  isSatellite
-                      ? '© Esri, Maxar, Earthstar Geographics'
-                      : '© OpenStreetMap contributors',
-                  style: const TextStyle(
-                    fontSize: 10,
-                    height: 1.2,
-                    fontWeight: FontWeight.w500,
-                    color: AppTheme.textSecondary,
+        return ValueListenableBuilder<double>(
+          valueListenable: _sheetExtentNotifier,
+          builder: (context, extent, _) {
+            final sheetHeight =
+                MediaQuery.of(context).size.height * extent.clamp(0.0, 1.0);
+            return Positioned(
+              left: 16,
+              bottom: sheetHeight + 12,
+              child: Material(
+                color: const Color(0xE6FFFFFF),
+                borderRadius: BorderRadius.circular(6),
+                elevation: 2,
+                child: InkWell(
+                  borderRadius: BorderRadius.circular(6),
+                  onTap: () {
+                    final Uri url = Uri.parse(isSatellite
+                        ? 'https://www.esri.com/en-us/home'
+                        : 'https://www.openstreetmap.org/copyright');
+                    launchUrl(url, mode: LaunchMode.externalApplication);
+                  },
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 8, vertical: 4),
+                    child: Text(
+                      isSatellite
+                          ? '© Esri, Maxar, Earthstar Geographics'
+                          : '© OpenStreetMap contributors',
+                      style: const TextStyle(
+                        fontSize: 10,
+                        height: 1.2,
+                        fontWeight: FontWeight.w500,
+                        color: AppTheme.textSecondary,
+                      ),
+                    ),
                   ),
                 ),
               ),
-            ),
-          ),
+            );
+          },
         );
       },
     );
   }
 
+  /// Weather chip — a small white card pinned bottom-left above the map
+  /// attribution (left: 16, bottom: sheet height + 44) showing the current
+  /// area's temperature/condition with a subtle condition-tied animation
+  /// (WeatherChip). Non-interactive: [IgnorePointer] passes taps and drags
+  /// straight through to the map beneath.
+  ///
+  /// Hidden while the location-status card is up (that card owns the
+  /// screen in exactly the states the chip would contradict) and until the
+  /// first weather grid arrives — a chip that blinks away on fetch errors
+  /// would be worse than no chip.
+  Widget _buildWeatherChip() {
+    final status = _locationStatus;
+    final statusBlocks = status != null &&
+        status != DeviceLocationStatus.grantedFresh &&
+        status != DeviceLocationStatus.grantedLastKnown;
+    if (statusBlocks || _weatherGrid.isEmpty) return const SizedBox.shrink();
+
+    final anchorLat = _lat ?? _currentLocation?.latitude;
+    final anchorLng = _lng ?? _currentLocation?.longitude;
+    if (anchorLat == null || anchorLng == null) return const SizedBox.shrink();
+
+    // Nearest grid point to the camera centre: recomputed once per weather
+    // fetch rebuild (setState), never per frame.
+    final point = _nearestWeatherPoint(anchorLat, anchorLng);
+    if (point == null) return const SizedBox.shrink();
+
+    return Consumer<PlaceProvider>(
+      builder: (context, provider, _) {
+        final areaLabel = _deriveAreaLabel(provider, anchorLat, anchorLng);
+        return ValueListenableBuilder<double>(
+          valueListenable: _sheetExtentNotifier,
+          builder: (context, extent, _) {
+            final sheetHeight =
+                MediaQuery.of(context).size.height * extent.clamp(0.0, 1.0);
+            return Positioned(
+              left: 16,
+              bottom: sheetHeight + 44,
+              child: TickerMode(
+                // H1: outside the map's own TickerMode — mirror its
+                // lifecycle gate so the effect freezes with the screen.
+                enabled: _mapTickersEnabled,
+                child: IgnorePointer(
+                  child: WeatherChip(
+                    code: point.code,
+                    temperatureC: point.temp,
+                    areaLabel: areaLabel,
+                  ),
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  /// Grid point closest to the camera centre. O(n) over the viewport grid,
+  /// called once per weather fetch rebuild; squared-degree distance with a
+  /// longitude cosine correction (sub-km accurate, no square roots).
+  _WeatherGridPoint? _nearestWeatherPoint(double lat, double lng) {
+    _WeatherGridPoint? best;
+    var bestDist = double.infinity;
+    final lngScale = math.cos(lat * math.pi / 180);
+    for (final p in _weatherGrid) {
+      final dLat = p.lat - lat;
+      final dLng = (p.lng - lng) * lngScale;
+      final d2 = dLat * dLat + dLng * dLng;
+      if (d2 < bestDist) {
+        bestDist = d2;
+        best = p;
+      }
+    }
+    return best;
+  }
+
+  /// Line 2 of the weather chip: the district of the closest loaded place —
+  /// or its name only when we are effectively standing next to it (≤ 1 km).
+  /// Omitted entirely when nothing is close enough to name truthfully; a
+  /// wrong area label is worse than none. Prefers the viewport-scoped set
+  /// (server-culled to the visible map) and falls back to the merged set.
+  String? _deriveAreaLabel(PlaceProvider provider, double lat, double lng) {
+    final places = provider.viewportPlaces.isNotEmpty
+        ? provider.viewportPlaces
+        : provider.displayablePlaces;
+    PlaceModel? nearest;
+    var bestKm = double.infinity;
+    final mPerDegLat = 111.0;
+    final mPerDegLng = 111.0 * math.cos(lat * math.pi / 180);
+    for (final p in places) {
+      final dLat = (p.latitude - lat) * mPerDegLat;
+      final dLng = (p.longitude - lng) * mPerDegLng;
+      final km = math.sqrt(dLat * dLat + dLng * dLng);
+      if (km < bestKm) {
+        bestKm = km;
+        nearest = p;
+      }
+    }
+    if (nearest == null) return null;
+    if (bestKm <= 5.0) {
+      final district = nearest.district;
+      if (district != null && district.isNotEmpty) return district;
+    }
+    if (bestKm <= 1.0 && nearest.name.isNotEmpty) return nearest.name;
+    return null;
+  }
+
+  /// Right-hand control stack: one column of identical 44x44 buttons, 10px
+  /// apart, hanging directly under the compass. Where I Am sits first — it is
+  /// the button people reach for — and the least-used controls (routes list,
+  /// layer switch) close the column.
   Widget _buildFloatingActions() {
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
         _mapFAB(
-          icon: _compassMode
-              ? Icons.navigation
-              : Icons.my_location,
+          icon: _compassMode ? Icons.navigation : Icons.my_location,
           color: _compassMode
               ? Colors.teal
               : _isTracking
@@ -2276,34 +2553,49 @@ class _NearbyMapScreenState extends State<NearbyMapScreen>
                   ? Colors.white
                   : AppTheme.primaryColor,
           onTap: _onMyLocationTap,
+          message: context.t('Where I Am'),
         ),
-        const SizedBox(height: 8),
-        Container(width: 32, height: 1, color: Colors.grey.shade200),
-        const SizedBox(height: 8),
+        const SizedBox(height: 10),
         _mapFAB(
           icon: Icons.filter_list,
           color: Colors.white,
           iconColor: AppTheme.textPrimary,
           onTap: _onFilterTap,
+          message: context.t('Filters'),
         ),
-        const SizedBox(height: 4),
+        const SizedBox(height: 10),
         _mapFAB(
           icon: Icons.add_location,
           color: AppTheme.secondaryColor,
           iconColor: Colors.white,
           onTap: _onAddPlaceTap,
+          message: context.t('Add place'),
         ),
+        const SizedBox(height: 10),
+        _buildRoutesButton(),
+        const SizedBox(height: 10),
+        _buildMapModeToggle(),
       ],
     );
   }
 
+  /// Every map button is this same 44x44 white tile (radius 12, elevation 3)
+  /// so the right-hand stack reads as one control group instead of a pile of
+  /// different shapes.
   Widget _mapFAB({
     required IconData icon,
     required VoidCallback onTap,
     Color? color,
     Color? iconColor,
+    String? message,
   }) {
     final isCompassMode = icon == Icons.navigation;
+    final label = Container(
+      width: 44,
+      height: 44,
+      alignment: Alignment.center,
+      child: Icon(icon, size: 22, color: iconColor ?? AppTheme.textPrimary),
+    );
     return Container(
       decoration: isCompassMode
           ? BoxDecoration(
@@ -2326,12 +2618,9 @@ class _NearbyMapScreenState extends State<NearbyMapScreen>
         child: InkWell(
           borderRadius: BorderRadius.circular(12),
           onTap: onTap,
-          child: Container(
-            width: 44,
-            height: 44,
-            alignment: Alignment.center,
-            child: Icon(icon, size: 22, color: iconColor ?? AppTheme.textPrimary),
-          ),
+          child: (message == null || message.isEmpty)
+              ? label
+              : Tooltip(message: message, child: label),
         ),
       ),
     );
@@ -2789,7 +3078,10 @@ class _NearbyMapScreenState extends State<NearbyMapScreen>
   }
 
   Widget _buildBottomSheetContent(PlaceProvider provider) {
-    final displayPlaces = _sortedPlaces(_applyPlaceFilters(provider.places));
+    // Canonical collection: every source merged, deduped and already stripped
+    // of `category == "All"` — the same collection the markers are built from.
+    final displayPlaces =
+        _sortedPlaces(_applyPlaceFilters(provider.displayablePlaces));
     return DraggableScrollableSheet(
       controller: _sheetController,
       initialChildSize: 0.22,
@@ -3599,12 +3891,19 @@ class _NearbyMapScreenState extends State<NearbyMapScreen>
     );
   }
 
-  /// Nepal-wide dataset filtered to the current viewport (with margin) so
-  /// marker/label work stays proportional to what's on screen. When no
-  /// Nepal data is available yet (cold start), falls back to the nearby list.
+  /// Canonical displayable collection (nearby-combined + bbox + Nepal-wide,
+  /// merged, deduped, `category != "All"`) culled to the current viewport so
+  /// marker/label work stays proportional to what's on screen. Only the cull
+  /// runs per camera tick — the merge itself is memoized in the provider and
+  /// rebuilds when source data changes.
   List<PlaceModel> _markerPlacesForViewport(PlaceProvider provider) {
-    // Priority: viewportPlaces (from bbox API) > nepalPlaces (offline/cold) > places (legacy)
     final vp = _getViewportBounds();
+
+    // User filters (category/featured/verified/search) still apply on top of
+    // the canonical collection.
+    final filtered = _applyPlaceFilters(provider.displayablePlaces);
+    if (filtered.isEmpty) return filtered;
+
     // Only trust the bbox result while it still covers what is on screen —
     // right after a pan it can be from the previous area, and using it would
     // make markers vanish until the debounced fetch lands.
@@ -3616,28 +3915,33 @@ class _NearbyMapScreenState extends State<NearbyMapScreen>
           maxLng: vp.maxLng,
         );
 
-    final source = useViewportPlaces
-        ? provider.viewportPlaces
-        : provider.nepalPlaces.isNotEmpty
-            ? provider.nepalPlaces
-            : provider.places;
-
-    final filtered = _applyPlaceFilters(source);
-    if (filtered.isEmpty) return filtered;
     if (useViewportPlaces) {
-      // bbox API already returned only viewport places — no extra filter needed
-      return filtered;
+      // Rows the server already scoped to the viewport (plus its prefetch
+      // buffer) pass untouched; the rest of the canonical collection is
+      // culled so markers stay viewport-proportional.
+      final bboxScoped = provider.viewportPlaceKeys;
+      return [
+        for (final place in filtered)
+          if (bboxScoped.contains(placeIdentityKey(place)) ||
+              isWithinViewport(
+                place,
+                minLat: vp.minLat,
+                maxLat: vp.maxLat,
+                minLng: vp.minLng,
+                maxLng: vp.maxLng,
+              ))
+            place,
+      ];
     }
 
-    // Fallback: client-side viewport filter for nepalPlaces/places
-    const margin = 0.15;
-    return filtered
-        .where((p) =>
-            p.latitude >= vp.minLat - margin &&
-            p.latitude <= vp.maxLat + margin &&
-            p.longitude >= vp.minLng - margin &&
-            p.longitude <= vp.maxLng + margin)
-        .toList();
+    // Cold start / offline: client-side viewport filter for the merged set.
+    return placesWithinViewport(
+      filtered,
+      minLat: vp.minLat,
+      maxLat: vp.maxLat,
+      minLng: vp.minLng,
+      maxLng: vp.maxLng,
+    );
   }
 
   Widget _buildClusterBadge(int count) {
@@ -4012,10 +4316,11 @@ class _NearbyMapScreenState extends State<NearbyMapScreen>
     for (final place in places) {
       final isSelected = _selectedPlace?.id.toString() == place.id.toString();
       final isFeatured = place.isFeatured;
-      // Labels appear much earlier than they used to: everything named from
-      // zoom 13, the important (featured / selected) ones from zoom 11.
+      // Non-clustered pins carry their name at neighbourhood zoom (11) and
+      // important ones even further out (9); clustered pins get a badge
+      // instead, so this never fights the cluster renderer.
       final zoom = _currentZoom;
-      final showName = zoom >= 13 || (zoom >= 11 && (isFeatured || isSelected));
+      final showName = zoom >= 11 || (zoom >= 9 && (isFeatured || isSelected));
 
       if (!showName) {
         infos.add(_LabelInfo(placeId: place.id, showLabel: false, markerSize: markerSize));
@@ -4204,10 +4509,12 @@ class _NearbyMapScreenState extends State<NearbyMapScreen>
     if (zoom >= 17) return 50;
     if (zoom >= 16) return 40;
     if (zoom >= 15) return 30;
-    if (zoom >= 14) return 20;
-    if (zoom >= 13) return 12;
-    if (zoom >= 11) return 5;
-    if (zoom >= 10) return 3;
+    if (zoom >= 14) return 24;
+    if (zoom >= 13) return 18;
+    if (zoom >= 12) return 14;
+    if (zoom >= 11) return 10;
+    if (zoom >= 10) return 6;
+    if (zoom >= 9) return 4;
     return 0;
   }
 
@@ -4433,7 +4740,9 @@ class _NearbyMapScreenState extends State<NearbyMapScreen>
         minLng: bounds.west,
         maxLng: bounds.east,
       );
-    } catch (_) {}
+    } catch (_) {
+      // Camera not ready yet: the map's own move listener retries.
+    }
   }
 
   Future<void> _fetchWeatherGrid({
@@ -4455,7 +4764,7 @@ class _NearbyMapScreenState extends State<NearbyMapScreen>
         });
       }
     } catch (e) {
-      print('Weather grid fetch failed: $e');
+      debugPrint('Weather grid fetch failed: $e');
     }
   }
 

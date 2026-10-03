@@ -250,11 +250,15 @@ class PlaceController extends Controller
             return !in_array((int) $place['created_by'], $hiddenAuthorIds, true);
         }));
 
-        // Category filter
+        // Category filter — exact, case-insensitive. The client always sends a
+        // full category name (from place_categories.name, which is also what
+        // the payload's `category` field holds), so a substring match only
+        // introduced false positives: 'Bank' swallowing 'Blood Bank', or 'All'
+        // swallowing 'Mall'.
         if ($request->filled('category')) {
-            $needle = mb_strtolower($request->category);
+            $needle = mb_strtolower(trim($request->category));
             $filtered = array_values(array_filter($filtered, fn($place) => $place['category'] !== null
-                && mb_strpos(mb_strtolower($place['category']), $needle) !== false));
+                && mb_strtolower(trim($place['category'])) === $needle));
         }
 
         $result = array_slice($filtered, 0, $limit);
@@ -299,7 +303,11 @@ class PlaceController extends Controller
         // because it depends on the requesting viewer.
         $places = Cache::remember(\App\Services\PlacesCache::allKey(), \App\Services\PlacesCache::ALL_TTL, function () {
             $raw = Place::with(['category', 'images'])->active()
-                ->whereIn('source', ['admin', 'osm', 'user_submitted'])
+                // 'seed' rows are the gazetteer every other listing endpoint
+                // already returns (bbox has no source filter) — leaving it out
+                // here made /places/all answer with zero rows, which killed the
+                // offline/cold-start fallback the map depends on.
+                ->whereIn('source', ['admin', 'osm', 'user_submitted', 'seed'])
                 ->orderBy('is_featured', 'desc')
                 ->orderBy('average_rating', 'desc')
                 ->orderBy('total_reviews', 'desc')
@@ -346,10 +354,11 @@ class PlaceController extends Controller
             return !in_array((int) $place['created_by'], $hiddenAuthorIds, true);
         }));
 
+        // Exact, case-insensitive category match (mirrors bboxQuery()).
         if ($request->filled('category')) {
-            $needle = mb_strtolower($request->category);
+            $needle = mb_strtolower(trim($request->category));
             $filtered = array_values(array_filter($filtered, fn($place) => $place['category'] !== null
-                && mb_strpos(mb_strtolower($place['category']), $needle) !== false));
+                && mb_strtolower(trim($place['category'])) === $needle));
         }
 
         $data = array_slice($filtered, 0, $limit);

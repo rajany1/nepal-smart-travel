@@ -17,6 +17,7 @@ List<Polyline> buildRoutePolylines(
   List<bool> offRoad, {
   required Color color,
   required double strokeWidth,
+  StrokePattern pattern = const StrokePattern.solid(),
 }) {
   final polylines = <Polyline>[];
   if (points.length < 2) {
@@ -25,6 +26,7 @@ List<Polyline> buildRoutePolylines(
         points: points,
         color: color,
         strokeWidth: strokeWidth,
+        pattern: pattern,
       ));
     }
     return polylines;
@@ -64,6 +66,7 @@ List<Polyline> buildRoutePolylines(
           points: segment,
           color: color,
           strokeWidth: strokeWidth,
+          pattern: pattern,
         ));
       }
     }

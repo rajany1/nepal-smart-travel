@@ -25,10 +25,9 @@
     a { color: inherit; }
     html { scroll-behavior: smooth; }
 
-    /* Navbar/footer sit on the light legal body — opaque landing dark only;
-       fixed positioning + compact-on-scroll come from the shared layout. */
-    .k-nav { background: #020e0e; backdrop-filter: none; }
-    .k-footer { background: #020e0e; }
+    /* Navbar/footer come from the shared landing chrome (web/partials/site_header,
+       site_footer) — identical to web/home.blade.php. */
+    html { scroll-padding-top: var(--header-height); }
 
     /* Layout */
     .wrap { max-width: 1120px; margin: 0 auto; padding: 36px 20px 64px; line-height: 1.65; }

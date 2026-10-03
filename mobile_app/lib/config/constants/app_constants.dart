@@ -100,7 +100,12 @@ class AppConstants {
   // Maps
   static const double defaultMapZoom = 14.0;
   static const double minMapZoom = 5.0;
-  static const double maxMapZoom = 20.0;
+
+  // Ceiling shared by the map camera and both tile sources (OpenStreetMap
+  // and Esri World Imagery both stop at z19). Going past it makes the tile
+  // layer request zooms the source cannot answer, which is what produced the
+  // "Map data not yet available" tile.
+  static const double maxMapZoom = 19.0;
 
   // Emergency
   static const String ambulanceNumber = '102';

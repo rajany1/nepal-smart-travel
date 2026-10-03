@@ -3,1147 +3,1543 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta name="description" content="Nepal Smart Travel & Local Intelligence Platform — discover places, live road conditions, routes, and exclusive local offers.">
-    <title>Nepal Smart Travel - Discover Nepal, Live & Local</title>
-    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800;900&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <meta name="description" content="Oripori is Nepal's all-in-one local intelligence platform — live community insights, emergency SOS, detailed maps, curated routes and real-time alerts right where you stand.">
+    <title>Oripori — What's Around You</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
     <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
+        /* ==========================================================================
+           CSS VARIABLES & BRAND DESIGN SYSTEM
+           ========================================================================== */
+        :root {
+            --primary: #49C5B6;
+            --primary-dark: #015048;
+            --primary-deep: #002824;
+            --primary-light: #EBF7F5;
+            --primary-border: rgba(73, 197, 182, 0.25);
+
+            --accent-red: #bf1706;
+            --accent-red-bg: #fdf2f0;
+            --accent-red-border: rgba(191, 23, 6, 0.2);
+
+            --dark: #081715;
+            --black: #000000;
+            --white: #ffffff;
+            --gray-50: #F7FAF9;
+            --gray-100: #EDF3F1;
+            --gray-200: #D8E4E1;
+            --gray-600: #516360;
+            --gray-800: #1C2B29;
+
+            --font-main: 'Manrope', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+
+            --header-height: 80px;
+            --shadow-sm: 0 4px 12px rgba(1, 80, 72, 0.05);
+            --shadow-md: 0 10px 30px rgba(1, 80, 72, 0.08);
+            --shadow-lg: 0 20px 45px rgba(1, 80, 72, 0.12);
+            --shadow-glow: 0 0 35px rgba(73, 197, 182, 0.3);
+
+            --radius-sm: 10px;
+            --radius-md: 18px;
+            --radius-lg: 28px;
+            --radius-full: 9999px;
+        }
+
+        /* ==========================================================================
+           BASE & RESET
+           ========================================================================== */
+        *, *::before, *::after {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        html {
+            scroll-behavior: smooth;
+            scroll-padding-top: var(--header-height);
+            font-family: var(--font-main);
+            background-color: var(--white);
+            color: var(--gray-800);
+            line-height: 1.6;
+            -webkit-font-smoothing: antialiased;
+        }
 
         body {
-            font-family: 'Plus Jakarta Sans', sans-serif;
-            background: #020e0e;
-            color: #fff;
+            padding-top: var(--header-height);
             overflow-x: hidden;
             position: relative;
-            padding-top: 76px; /* reserves fixed navbar height (refined by script) */
         }
 
-        body::before {
-            content: '';
+        h1, h2, h3, h4, h5 {
+            color: var(--primary-dark);
+            font-weight: 800;
+            line-height: 1.2;
+            letter-spacing: -0.02em;
+        }
+
+        p {
+            color: var(--gray-600);
+            font-size: 1.05rem;
+            line-height: 1.7;
+        }
+
+        a {
+            text-decoration: none;
+            color: inherit;
+            transition: all 0.25s ease;
+        }
+
+        img {
+            max-width: 100%;
+            height: auto;
+            display: block;
+            object-fit: cover;
+        }
+
+        .container {
+            width: 100%;
+            max-width: 1240px;
+            margin: 0 auto;
+            padding: 0 24px;
+        }
+
+        .section-padding {
+            padding: 100px 0;
+        }
+
+        .section-title-wrap {
+            text-align: center;
+            max-width: 720px;
+            margin: 0 auto 60px auto;
+        }
+
+        .badge-pill {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 6px 16px;
+            background-color: var(--primary-light);
+            border: 1px solid var(--primary-border);
+            color: var(--primary-dark);
+            font-size: 0.875rem;
+            font-weight: 700;
+            border-radius: var(--radius-full);
+            margin-bottom: 16px;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        .badge-pill i {
+            color: var(--primary);
+        }
+
+        .section-title {
+            font-size: 2.75rem;
+            margin-bottom: 18px;
+            color: var(--primary-dark);
+        }
+
+        .section-subtitle {
+            font-size: 1.15rem;
+            color: var(--gray-600);
+        }
+
+        /* ==========================================================================
+           HEADER & NAVIGATION
+           ========================================================================== */
+        .site-header {
             position: fixed;
-            inset: 0;
-            background:
-                radial-gradient(ellipse at 15% 20%, rgba(245,158,11,0.15) 0%, transparent 50%),
-                radial-gradient(ellipse at 85% 80%, rgba(16,185,129,0.1) 0%, transparent 50%),
-                radial-gradient(ellipse at 50% 50%, rgba(245,158,11,0.06) 0%, transparent 60%);
-            pointer-events: none;
-            z-index: 0;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: var(--header-height);
+            background-color: rgba(255, 255, 255, 0.92);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border-bottom: 1px solid var(--gray-200);
+            z-index: 300;
+            display: flex;
+            align-items: center;
         }
 
-        .orb {
-            position: fixed;
-            border-radius: 50%;
-            filter: blur(100px);
-            pointer-events: none;
-            z-index: 0;
-        }
-        .orb-1 { width: 500px; height: 500px; background: rgba(245,158,11,0.12); top: -150px; right: -100px; animation: orbFloat 25s ease-in-out infinite; }
-        .orb-2 { width: 400px; height: 400px; background: rgba(16,185,129,0.08); bottom: 5%; left: -150px; animation: orbFloat 30s ease-in-out infinite reverse; }
-        .orb-3 { width: 300px; height: 300px; background: rgba(245,158,11,0.06); top: 50%; right: 10%; animation: orbFloat 20s ease-in-out infinite 3s; }
-
-        @keyframes orbFloat {
-            0%,100% { transform: translate(0,0) scale(1); }
-            33% { transform: translate(40px,-40px) scale(1.1); }
-            66% { transform: translate(-30px,30px) scale(0.9); }
-        }
-
-        /* NAVBAR */
-        .k-nav {
+        .header-container {
             display: flex;
             align-items: center;
             justify-content: space-between;
-            padding: 0.75rem 3rem;
-            position: fixed;
-            top: 0; left: 0; right: 0;
-            z-index: 100;
-            backdrop-filter: blur(24px);
-            background: rgba(2,14,14,0.7);
-            border-bottom: 1px solid rgba(255,255,255,0.04);
-            transition: padding 0.25s ease;
+            width: 100%;
         }
 
-        .k-logo {
+        .brand-logo img {
+            height: 38px;
+            width: auto;
+            object-fit: contain;
+        }
+
+        .nav-menu {
             display: flex;
             align-items: center;
-            gap: 0.75rem;
+            gap: 32px;
+            list-style: none;
         }
 
-        .k-logo-icon {
-            width: 42px; height: 42px;
-            background: linear-gradient(135deg, #f59e0b, #ea580c);
-            border-radius: 12px;
-            display: flex; align-items: center; justify-content: center;
-            box-shadow: 0 8px 32px rgba(245,158,11,0.3);
-            position: relative; overflow: hidden;
+        .nav-link {
+            font-size: 0.95rem;
+            font-weight: 600;
+            color: var(--primary-dark);
+            position: relative;
+            padding: 6px 0;
         }
-        .k-logo-icon::after {
+
+        .nav-link::after {
             content: '';
             position: absolute;
-            inset: -50%;
-            background: linear-gradient(45deg, transparent 30%, rgba(255,255,255,0.25) 50%, transparent 70%);
-            animation: shine 4s infinite;
-        }
-        @keyframes shine {
-            0% { transform: translateX(-100%) rotate(45deg); }
-            100% { transform: translateX(100%) rotate(45deg); }
-        }
-
-        .k-logo-text h1 {
-            font-family: 'Outfit', sans-serif;
-            font-size: 1.2rem; font-weight: 800;
-            background: linear-gradient(135deg, #fff, #e2e8f0);
-            -webkit-background-clip: text; -webkit-text-fill-color: transparent;
-            margin: 0; line-height: 1.1;
-        }
-        .k-logo-text span {
-            font-size: 0.65rem; color: #5eead4;
-            font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase;
+            bottom: 0;
+            left: 0;
+            width: 0%;
+            height: 2px;
+            background-color: var(--primary);
+            transition: width 0.3s ease;
         }
 
-        .k-nav-links {
-            display: flex; gap: 2rem; list-style: none; margin: 0; padding: 0;
-        }
-        .k-nav-links a {
-            color: rgba(255,255,255,0.55);
-            text-decoration: none; font-size: 0.85rem; font-weight: 500;
-            transition: all 0.3s ease; position: relative; padding: 0.25rem 0;
-        }
-        .k-nav-links a:hover { color: #fff; }
-        .k-nav-links a::after {
-            content: ''; position: absolute; bottom: -2px; left: 50%;
-            width: 0; height: 2px;
-            background: linear-gradient(90deg, #f59e0b, #ea580c);
-            transition: all 0.3s ease; transform: translateX(-50%); border-radius: 2px;
-        }
-        .k-nav-links a:hover::after { width: 100%; }
-
-        .k-nav-cta {
-            background: linear-gradient(135deg, #f59e0b, #ea580c);
-            color: #fff; border: none; padding: 0.6rem 1.4rem;
-            border-radius: 10px; font-weight: 600; font-size: 0.85rem;
-            cursor: pointer; display: inline-flex; align-items: center; gap: 0.5rem;
-            box-shadow: 0 4px 20px rgba(245,158,11,0.25);
-            transition: all 0.3s ease; text-decoration: none;
-        }
-        .k-nav-cta:hover { transform: translateY(-2px); box-shadow: 0 8px 30px rgba(245,158,11,0.4); }
-
-        /* HERO */
-        .k-hero {
-            display: grid; grid-template-columns: 1fr 1fr;
-            align-items: center; max-width: 1400px;
-            margin: 0 auto; padding: 5rem 3rem 7rem;
-            gap: 4rem; position: relative; z-index: 2;
-            min-height: calc(100vh - 80px);
+        .nav-link:hover::after {
+            width: 100%;
         }
 
-        .k-hero-left { animation: slideInLeft 1s cubic-bezier(0.4,0,0.2,1); }
-
-        .k-badge {
-            display: inline-flex; align-items: center; gap: 0.5rem;
-            background: rgba(245,158,11,0.08);
-            border: 1px solid rgba(245,158,11,0.15);
-            padding: 0.4rem 1rem; border-radius: 100px;
-            font-size: 0.8rem; color: #fbbf24; font-weight: 500;
-            margin-bottom: 1.5rem; backdrop-filter: blur(10px);
-        }
-        .k-badge-dot {
-            width: 6px; height: 6px; background: #f59e0b;
-            border-radius: 50%; box-shadow: 0 0 12px rgba(245,158,11,0.6);
-            animation: pulse 2s infinite;
-        }
-
-        .k-hero h2 {
-            font-family: 'Outfit', sans-serif;
-            font-size: clamp(3rem, 5.5vw, 5rem);
-            font-weight: 900; line-height: 1.05;
-            margin: 0 0 1.25rem; letter-spacing: -0.03em;
-        }
-        .k-hero .line1 {
-            display: block;
-            background: linear-gradient(135deg, #fff, #94a3b8);
-            -webkit-background-clip: text; -webkit-text-fill-color: transparent;
-        }
-        .k-hero .line2 {
-            display: block;
-            background: linear-gradient(135deg, #f59e0b, #fb923c, #ea580c);
-            -webkit-background-clip: text; -webkit-text-fill-color: transparent;
-            margin-top: 0.125rem;
+        .btn-cta-placeholder {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            padding: 12px 24px;
+            background-color: var(--primary-dark);
+            color: var(--white);
+            font-weight: 700;
+            font-size: 0.95rem;
+            border-radius: var(--radius-full);
+            box-shadow: 0 4px 14px rgba(1, 80, 72, 0.2);
+            border: 2px solid var(--primary-dark);
+            transition: all 0.3s ease;
+            white-space: nowrap;
         }
 
-        .k-hero p {
-            font-size: 1.15rem; color: rgba(255,255,255,0.5);
-            line-height: 1.8; margin: 0 0 2rem; max-width: 500px;
+        .btn-cta-placeholder:hover {
+            background-color: var(--primary);
+            border-color: var(--primary);
+            color: var(--primary-dark);
+            transform: translateY(-2px);
+            box-shadow: var(--shadow-glow);
         }
 
-        .k-hero-btns { display: flex; gap: 1rem; margin-bottom: 3rem; }
-
-        .k-btn-primary {
-            background: linear-gradient(135deg, #f59e0b, #ea580c);
-            color: #fff; border: none; padding: 0.9rem 2rem;
-            border-radius: 14px; font-weight: 600; font-size: 1rem;
-            cursor: pointer; display: inline-flex; align-items: center; gap: 0.625rem;
-            box-shadow: 0 10px 40px rgba(245,158,11,0.3);
-            transition: all 0.3s cubic-bezier(0.4,0,0.2,1);
-            text-decoration: none; position: relative; overflow: hidden;
-        }
-        .k-btn-primary:hover { transform: translateY(-3px) scale(1.02); box-shadow: 0 14px 50px rgba(245,158,11,0.4); }
-
-        .k-btn-secondary {
-            background: rgba(255,255,255,0.04);
-            color: #fff; border: 1px solid rgba(255,255,255,0.1);
-            padding: 0.9rem 2rem; border-radius: 14px;
-            font-weight: 600; font-size: 1rem; cursor: pointer;
-            display: inline-flex; align-items: center; gap: 0.625rem;
-            backdrop-filter: blur(20px);
-            transition: all 0.3s ease; text-decoration: none;
-        }
-        .k-btn-secondary:hover { background: rgba(255,255,255,0.08); border-color: rgba(255,255,255,0.2); transform: translateY(-3px); }
-
-        .k-hero-stats { display: flex; gap: 3rem; }
-        .k-hstat { position: relative; }
-        .k-hstat::after {
-            content: ''; position: absolute; right: -1.5rem; top: 50%;
-            transform: translateY(-50%); width: 1px; height: 35px;
-            background: rgba(255,255,255,0.08);
-        }
-        .k-hstat:last-child::after { display: none; }
-        .k-hstat-num {
-            font-family: 'Outfit', sans-serif; font-size: 2rem; font-weight: 800;
-            background: linear-gradient(135deg, #f59e0b, #fb923c);
-            -webkit-background-clip: text; -webkit-text-fill-color: transparent;
-            display: block; line-height: 1;
-        }
-        .k-hstat-label {
-            font-size: 0.7rem; color: rgba(255,255,255,0.35);
-            text-transform: uppercase; letter-spacing: 0.12em;
-            margin-top: 0.5rem; font-weight: 500;
-        }
-
-        /* Hero Right - Phone Mockup */
-        .k-hero-right {
-            position: relative; animation: slideInRight 1s cubic-bezier(0.4,0,0.2,1) 0.2s both;
-            display: flex; justify-content: center;
-        }
-
-        .k-phone {
-            width: 280px; height: 560px;
-            background: linear-gradient(180deg, #0a1f1f 0%, #061414 100%);
-            border-radius: 40px; padding: 12px;
-            border: 1px solid rgba(255,255,255,0.08);
-            box-shadow:
-                0 50px 100px -20px rgba(0,0,0,0.7),
-                0 30px 60px -30px rgba(245,158,11,0.15),
-                inset 0 1px 0 rgba(255,255,255,0.1);
-            position: relative; overflow: hidden;
-        }
-        .k-phone::before {
-            content: ''; position: absolute; top: 0; left: 50%; transform: translateX(-50%);
-            width: 120px; height: 30px; background: #020e0e;
-            border-bottom-left-radius: 16px; border-bottom-right-radius: 16px;
-            z-index: 5;
-        }
-
-        .k-phone-screen {
-            width: 100%; height: 100%;
-            background: linear-gradient(180deg, rgba(245,158,11,0.05) 0%, transparent 40%, #020e0e 100%);
-            border-radius: 32px; overflow: hidden; position: relative;
-            border: 1px solid rgba(255,255,255,0.04);
-        }
-
-        .k-phone-header {
-            padding: 2.5rem 1.5rem 1rem;
-            display: flex; align-items: center; gap: 0.75rem;
-        }
-        .k-ph-avatar {
-            width: 36px; height: 36px; border-radius: 50%;
-            background: linear-gradient(135deg, #f59e0b, #ea580c);
-            display: flex; align-items: center; justify-content: center;
-            font-size: 0.75rem; font-weight: 700; color: #fff;
-        }
-        .k-ph-info h4 { margin: 0; font-size: 0.8rem; font-weight: 600; color: #fff; }
-        .k-ph-info span { font-size: 0.65rem; color: rgba(255,255,255,0.4); }
-
-        .k-phone-map {
-            height: 160px; margin: 0 1rem;
-            background: linear-gradient(135deg, rgba(245,158,11,0.08), rgba(16,185,129,0.03));
-            border-radius: 16px; position: relative; overflow: hidden;
-            border: 1px solid rgba(255,255,255,0.04);
-        }
-        .k-ph-grid {
-            position: absolute; inset: 0;
-            background-image:
-                linear-gradient(rgba(255,255,255,0.02) 1px, transparent 1px),
-                linear-gradient(90deg, rgba(255,255,255,0.02) 1px, transparent 1px);
-            background-size: 16px 16px;
-        }
-        .k-ph-route {
-            position: absolute; top: 35%; left: 15%; right: 15%;
-            height: 3px; background: linear-gradient(90deg, #f59e0b, #ea580c);
-            border-radius: 3px; box-shadow: 0 0 20px rgba(245,158,11,0.3);
-        }
-        .k-ph-route::before, .k-ph-route::after {
-            content: ''; position: absolute; width: 10px; height: 10px;
-            background: #f59e0b; border-radius: 50%; top: 50%; transform: translateY(-50%);
-            box-shadow: 0 0 15px rgba(245,158,11,0.5);
-        }
-        .k-ph-route::before { left: 0; }
-        .k-ph-route::after { right: 0; }
-
-        .k-phone-cards {
-            padding: 1rem; display: flex; flex-direction: column; gap: 0.75rem;
-        }
-        .k-ph-card {
-            background: rgba(255,255,255,0.03);
-            border: 1px solid rgba(255,255,255,0.06);
-            border-radius: 12px; padding: 0.875rem;
-            display: flex; align-items: center; gap: 0.75rem;
-            backdrop-filter: blur(10px);
-        }
-        .k-ph-card-icon {
-            width: 32px; height: 32px; border-radius: 8px;
-            background: rgba(245,158,11,0.1);
-            display: flex; align-items: center; justify-content: center;
-            color: #f59e0b; flex-shrink: 0;
-        }
-        .k-ph-card-info h5 { margin: 0; font-size: 0.75rem; font-weight: 600; color: #fff; }
-        .k-ph-card-info span { font-size: 0.65rem; color: rgba(255,255,255,0.4); }
-
-        /* Floating elements around phone */
-        .k-float-tag {
-            position: absolute; background: rgba(255,255,255,0.04);
-            border: 1px solid rgba(255,255,255,0.08);
-            border-radius: 12px; padding: 0.75rem 1rem;
-            backdrop-filter: blur(20px); font-size: 0.8rem; font-weight: 500;
-            box-shadow: 0 10px 30px rgba(0,0,0,0.3);
-            animation: floatTag 6s ease-in-out infinite;
-        }
-        .k-float-tag-1 { top: 10%; left: -20px; animation-delay: 0s; }
-        .k-float-tag-2 { bottom: 20%; right: -30px; animation-delay: -3s; }
-        .k-float-tag-3 { top: 50%; left: -40px; animation-delay: -1.5s; }
-
-        @keyframes floatTag {
-            0%,100% { transform: translateY(0); }
-            50% { transform: translateY(-15px); }
-        }
-
-        @keyframes slideInLeft {
-            from { opacity: 0; transform: translateX(-60px); }
-            to { opacity: 1; transform: translateX(0); }
-        }
-        @keyframes slideInRight {
-            from { opacity: 0; transform: translateX(60px); }
-            to { opacity: 1; transform: translateX(0); }
-        }
-        @keyframes pulse {
-            0%,100% { opacity: 1; transform: scale(1); box-shadow: 0 0 10px rgba(245,158,11,0.5); }
-            50% { opacity: 0.5; transform: scale(1.4); box-shadow: 0 0 25px rgba(245,158,11,0.8); }
-        }
-
-        /* SECTION HEADERS */
-        .k-section {
-            position: relative; z-index: 2;
-            padding: 6rem 3rem; max-width: 1400px; margin: 0 auto;
-        }
-
-        .k-section-header {
-            text-align: center; margin-bottom: 4rem;
-        }
-        .k-section-tag {
-            display: inline-block;
-            background: rgba(245,158,11,0.08); border: 1px solid rgba(245,158,11,0.15);
-            padding: 0.4rem 1rem; border-radius: 100px;
-            font-size: 0.8rem; color: #fbbf24; font-weight: 600;
-            margin-bottom: 1rem; text-transform: uppercase; letter-spacing: 0.1em;
-        }
-        .k-section-header h3 {
-            font-family: 'Outfit', sans-serif;
-            font-size: clamp(2rem, 4vw, 3rem); font-weight: 800;
-            margin: 0 0 1rem; letter-spacing: -0.02em;
-        }
-        .k-section-header p {
-            font-size: 1.1rem; color: rgba(255,255,255,0.45);
-            max-width: 600px; margin: 0 auto; line-height: 1.7;
-        }
-
-        /* SERVICES */
-        .k-services-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-            gap: 1.5rem;
-        }
-
-        .k-service-card {
-            background: rgba(255,255,255,0.02);
-            border: 1px solid rgba(255,255,255,0.06);
-            border-radius: 20px; padding: 2rem;
-            backdrop-filter: blur(20px);
-            transition: all 0.4s cubic-bezier(0.4,0,0.2,1);
-            position: relative; overflow: hidden;
+        .nav-mobile-toggle {
+            display: none;
+            font-size: 1.4rem;
+            color: var(--primary-dark);
             cursor: pointer;
+            background: none;
+            border: none;
+            line-height: 1;
+            padding: 6px;
         }
-        .k-service-card::before {
-            content: ''; position: absolute; top: 0; left: 0; right: 0; height: 1px;
-            background: linear-gradient(90deg, transparent, rgba(255,255,255,0.1), transparent);
-        }
-        .k-service-card:hover {
-            transform: translateY(-8px);
-            border-color: rgba(245,158,11,0.2);
-            box-shadow: 0 20px 60px rgba(0,0,0,0.4), 0 0 40px rgba(245,158,11,0.05);
+        /* ==========================================================================
+           HERO SECTION
+           ========================================================================== */
+        .hero-section {
+            position: relative;
+            background-color: var(--primary-dark);
+            color: var(--white);
+            padding: 90px 0 120px 0;
+            overflow: hidden;
         }
 
-        .k-svc-icon {
-            width: 56px; height: 56px; border-radius: 16px;
-            background: linear-gradient(135deg, rgba(245,158,11,0.15), rgba(234,88,12,0.1));
-            border: 1px solid rgba(245,158,11,0.15);
-            display: flex; align-items: center; justify-content: center;
-            margin-bottom: 1.25rem; color: #f59e0b;
+        .hero-bg-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            opacity: 0.18;
+            pointer-events: none;
+            background-size: cover;
+            background-position: center;
+        }
+
+        .hero-section::before {
+            content: '';
+            position: absolute;
+            inset: 0;
+            z-index: 1;
+            pointer-events: none;
+            background: linear-gradient(100deg, rgba(1, 80, 72, 0.94) 0%, rgba(1, 80, 72, 0.78) 45%, rgba(1, 80, 72, 0.35) 100%);
+        }
+
+        .hero-grid {
+            display: grid;
+            grid-template-columns: 1.1fr 0.9fr;
+            gap: 60px;
+            align-items: center;
+            position: relative;
+            z-index: 2;
+        }
+
+        .hero-content {
+            max-width: 620px;
+        }
+
+        .hero-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 10px;
+            background: rgba(255, 255, 255, 0.12);
+            backdrop-filter: blur(8px);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            padding: 8px 18px;
+            border-radius: var(--radius-full);
+            font-size: 0.9rem;
+            font-weight: 700;
+            color: var(--primary);
+            margin-bottom: 24px;
+        }
+
+        .hero-title {
+            font-size: 3.75rem;
+            color: var(--white);
+            line-height: 1.1;
+            margin-bottom: 20px;
+        }
+
+        .hero-title span {
+            color: var(--primary);
+            display: block;
+        }
+
+        .hero-description {
+            font-size: 1.2rem;
+            color: rgba(255, 255, 255, 0.85);
+            margin-bottom: 36px;
+            line-height: 1.6;
+        }
+
+        .hero-cta-group {
+            display: flex;
+            align-items: center;
+            gap: 20px;
+            flex-wrap: wrap;
+        }
+
+        .hero-tagline-chip {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 12px 20px;
+            background: rgba(0, 0, 0, 0.3);
+            border-radius: var(--radius-md);
+            border: 1px solid rgba(73, 197, 182, 0.3);
+        }
+
+        .hero-tagline-chip i {
+            color: var(--primary);
+            font-size: 1.25rem;
+        }
+
+        .hero-tagline-chip span {
+            font-weight: 600;
+            font-size: 0.95rem;
+            color: var(--white);
+        }
+
+        .hero-app-btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 10px;
+            padding: 14px 26px;
+            background-color: var(--primary);
+            color: var(--primary-deep);
+            font-weight: 800;
+            font-size: 0.95rem;
+            border-radius: var(--radius-full);
+            border: 2px solid var(--primary);
+            box-shadow: 0 8px 24px rgba(73, 197, 182, 0.3);
+        }
+
+        .hero-app-btn:hover {
+            background-color: var(--white);
+            border-color: var(--white);
+            transform: translateY(-2px);
+        }
+
+        .hero-visual {
+            position: relative;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+
+        .hero-phone-card {
+            width: 280px;
+            background: var(--dark);
+            border-radius: 36px;
+            padding: 10px;
+            box-shadow: 0 25px 60px rgba(0, 0, 0, 0.5);
+            border: 4px solid rgba(255, 255, 255, 0.15);
+            position: relative;
+            z-index: 2;
+            transition: transform 0.4s ease;
+        }
+
+        .hero-phone-card:hover {
+            transform: translateY(-8px);
+        }
+
+        .hero-phone-screen {
+            border-radius: 28px;
+            background: var(--white);
+            overflow: hidden;
+        }
+
+        .hero-phone-screen img {
+            width: 100%;
+            border-radius: 26px;
+            object-fit: cover;
+        }
+
+        .floating-card {
+            position: absolute;
+            background: var(--white);
+            border-radius: var(--radius-md);
+            padding: 14px;
+            box-shadow: 0 15px 35px rgba(0, 0, 0, 0.25);
+            z-index: 3;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            border: 1px solid var(--gray-200);
+            animation: floatAnim 4s ease-in-out infinite alternate;
+        }
+
+        .floating-card-1 {
+            top: 10%;
+            left: -20px;
+            width: 200px;
+        }
+
+        .floating-card-2 {
+            bottom: 12%;
+            right: -20px;
+            width: 220px;
+            animation-delay: -2s;
+        }
+
+        @keyframes floatAnim {
+            0% { transform: translateY(0); }
+            100% { transform: translateY(-12px); }
+        }
+
+        .floating-card-icon {
+            width: 42px;
+            height: 42px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.1rem;
+            flex-shrink: 0;
+        }
+
+        .floating-card-icon.red {
+            background-color: var(--accent-red-bg);
+            color: var(--accent-red);
+        }
+
+        .floating-card-icon.teal {
+            background-color: var(--primary-light);
+            color: var(--primary-dark);
+        }
+
+        .floating-card-text {
+            display: flex;
+            flex-direction: column;
+        }
+
+        .floating-card-title {
+            font-weight: 800;
+            font-size: 0.85rem;
+            color: var(--primary-dark);
+        }
+
+        .floating-card-sub {
+            font-size: 0.75rem;
+            color: var(--gray-600);
+        }
+
+        /* ==========================================================================
+           OVERVIEW & STATS BAR
+           ========================================================================== */
+        .overview-bar {
+            background-color: var(--white);
+            margin-top: -50px;
+            position: relative;
+            z-index: 10;
+            border-radius: var(--radius-lg);
+            box-shadow: var(--shadow-lg);
+            padding: 36px 40px;
+            border: 1px solid var(--gray-200);
+        }
+
+        .overview-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 30px;
+        }
+
+        .overview-item {
+            text-align: center;
+            padding: 0 10px;
+            border-right: 1px solid var(--gray-200);
+        }
+
+        .overview-item:last-child {
+            border-right: none;
+        }
+
+        .overview-number {
+            font-size: 2.2rem;
+            font-weight: 800;
+            color: var(--primary-dark);
+            margin-bottom: 4px;
+        }
+
+        .overview-label {
+            font-size: 0.9rem;
+            color: var(--gray-600);
+            font-weight: 600;
+        }
+        /* ==========================================================================
+           FEATURE ROWS
+           ========================================================================== */
+        .feature-row {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 60px;
+            align-items: center;
+            margin-bottom: 100px;
+        }
+
+        .feature-row.reverse {
+            direction: rtl;
+        }
+
+        .feature-row.reverse > * {
+            direction: ltr;
+        }
+
+        .feature-text {
+            max-width: 520px;
+        }
+
+        .feature-title {
+            font-size: 2.25rem;
+            margin-bottom: 20px;
+        }
+
+        .feature-desc {
+            margin-bottom: 28px;
+        }
+
+        .feature-list {
+            list-style: none;
+            display: flex;
+            flex-direction: column;
+            gap: 14px;
+            margin-bottom: 32px;
+        }
+
+        .feature-list-item {
+            display: flex;
+            align-items: flex-start;
+            gap: 12px;
+            font-weight: 600;
+            color: var(--gray-800);
+        }
+
+        .feature-list-item i {
+            color: var(--primary);
+            font-size: 1.1rem;
+            margin-top: 3px;
+        }
+
+        .feature-cta {
+            display: flex;
+            align-items: center;
+            gap: 14px;
+            flex-wrap: wrap;
+        }
+
+        .btn-pill {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 12px 22px;
+            background-color: var(--primary-dark);
+            color: var(--white);
+            font-weight: 700;
+            font-size: 0.9rem;
+            border-radius: var(--radius-full);
+            border: 2px solid var(--primary-dark);
             transition: all 0.3s ease;
         }
-        .k-service-card:hover .k-svc-icon {
-            transform: scale(1.1) rotate(-5deg);
-            box-shadow: 0 8px 25px rgba(245,158,11,0.2);
+
+        .btn-pill:hover {
+            background-color: var(--primary);
+            border-color: var(--primary);
+            color: var(--primary-deep);
+            transform: translateY(-2px);
+            box-shadow: var(--shadow-glow);
         }
 
-        .k-service-card h4 {
-            font-family: 'Outfit', sans-serif;
-            font-size: 1.15rem; font-weight: 700; margin: 0 0 0.5rem;
-        }
-        .k-service-card p {
-            font-size: 0.9rem; color: rgba(255,255,255,0.45);
-            line-height: 1.6; margin: 0;
+        .btn-pill.ghost {
+            background-color: var(--white);
+            color: var(--primary-dark);
+            border-color: var(--gray-200);
         }
 
-        /* PLACES CARDS */
-        .k-places-grid {
-            display: grid; grid-template-columns: repeat(5, 1fr); gap: 1.25rem;
-        }
-        .k-place-card {
-            position: relative; border-radius: 20px; overflow: hidden;
-            aspect-ratio: 3/4; cursor: pointer;
-            border: 1px solid rgba(255,255,255,0.06);
-            transition: all 0.4s cubic-bezier(0.4,0,0.2,1);
-        }
-        .k-place-card:hover {
-            transform: translateY(-8px) scale(1.02);
-            border-color: rgba(245,158,11,0.3);
-            box-shadow: 0 20px 60px rgba(0,0,0,0.5), 0 0 40px rgba(245,158,11,0.1);
-        }
-        .k-place-card-img {
-            position: absolute; inset: 0;
-            background-size: cover; background-position: center;
-            transition: transform 0.6s cubic-bezier(0.4,0,0.2,1);
-        }
-        .k-place-card:hover .k-place-card-img {
-            transform: scale(1.1);
-        }
-        .k-place-card-overlay {
-            position: absolute; inset: 0;
-            background: linear-gradient(180deg, transparent 30%, rgba(2,14,14,0.85) 70%, rgba(2,14,14,0.95) 100%);
-        }
-        .k-place-card-content {
-            position: absolute; bottom: 0; left: 0; right: 0;
-            padding: 1.5rem; z-index: 2;
-        }
-        .k-place-card-icon {
-            width: 40px; height: 40px; border-radius: 12px;
-            background: rgba(245,158,11,0.15);
-            border: 1px solid rgba(245,158,11,0.2);
-            display: flex; align-items: center; justify-content: center;
-            color: #f59e0b; margin-bottom: 0.75rem;
-            backdrop-filter: blur(10px);
-        }
-        .k-place-card h4 {
-            font-family: 'Outfit', sans-serif;
-            font-size: 1.1rem; font-weight: 700; margin: 0 0 0.25rem; color: #fff;
-        }
-        .k-place-card p {
-            font-size: 0.8rem; color: rgba(255,255,255,0.5); margin: 0;
-        }
-        .k-place-card-count {
-            position: absolute; top: 1rem; right: 1rem; z-index: 2;
-            background: rgba(2,14,14,0.6); backdrop-filter: blur(12px);
-            border: 1px solid rgba(255,255,255,0.1);
-            border-radius: 100px; padding: 0.3rem 0.75rem;
-            font-size: 0.7rem; font-weight: 600; color: #fbbf24;
+        .btn-pill.ghost:hover {
+            background-color: var(--primary-light);
+            border-color: var(--primary);
+            box-shadow: none;
         }
 
-        /* FEATURES */
-        .k-features-grid {
-            display: grid; grid-template-columns: repeat(3, 1fr); gap: 1.5rem;
-        }
-        .k-feature {
-            background: rgba(255,255,255,0.02);
-            border: 1px solid rgba(255,255,255,0.05);
-            border-radius: 20px; padding: 2rem;
-            backdrop-filter: blur(20px);
-            transition: all 0.4s ease;
-        }
-        .k-feature:hover {
-            border-color: rgba(245,158,11,0.15);
-            transform: translateY(-5px);
-        }
-        .k-feature-icon {
-            width: 48px; height: 48px; border-radius: 14px;
-            background: rgba(245,158,11,0.08);
-            border: 1px solid rgba(245,158,11,0.12);
-            display: flex; align-items: center; justify-content: center;
-            color: #f59e0b; margin-bottom: 1rem;
-        }
-        .k-feature h4 {
-            font-family: 'Outfit', sans-serif;
-            font-size: 1.1rem; font-weight: 700; margin: 0 0 0.5rem;
-        }
-        .k-feature p {
-            font-size: 0.9rem; color: rgba(255,255,255,0.4);
-            line-height: 1.6; margin: 0;
+        .app-screen-grid {
+            display: flex;
+            gap: 20px;
+            justify-content: center;
         }
 
-        /* STATS BAR */
-        .k-stats-bar {
-            display: flex; justify-content: center; gap: 5rem;
-            padding: 3rem; margin: 2rem auto; max-width: 1000px;
-            background: rgba(255,255,255,0.02);
-            border: 1px solid rgba(255,255,255,0.05);
-            border-radius: 24px; backdrop-filter: blur(20px);
-            position: relative; z-index: 2;
-        }
-        .k-sbar-stat { text-align: center; }
-        .k-sbar-num {
-            font-family: 'Outfit', sans-serif; font-size: 2.5rem; font-weight: 800;
-            background: linear-gradient(135deg, #f59e0b, #fb923c);
-            -webkit-background-clip: text; -webkit-text-fill-color: transparent;
-        }
-        .k-sbar-label {
-            font-size: 0.8rem; color: rgba(255,255,255,0.4);
-            text-transform: uppercase; letter-spacing: 0.1em; margin-top: 0.5rem;
+        .app-mockup-frame {
+            background: var(--gray-50);
+            border-radius: var(--radius-md);
+            padding: 12px;
+            border: 1px solid var(--gray-200);
+            box-shadow: var(--shadow-md);
+            max-width: 260px;
+            transition: transform 0.3s ease;
         }
 
-        /* TRENDING DESTINATIONS */
-        .k-dest-grid {
-            display: grid; grid-template-columns: repeat(2, 1fr); gap: 1.5rem;
+        .app-mockup-frame:hover {
+            transform: translateY(-6px);
+            border-color: var(--primary);
         }
-        .k-dest-card {
-            position: relative; border-radius: 20px; overflow: hidden;
-            height: 320px; cursor: pointer;
-            border: 1px solid rgba(255,255,255,0.06);
-            transition: all 0.4s cubic-bezier(0.4,0,0.2,1);
+
+        .app-mockup-frame img {
+            border-radius: var(--radius-sm);
+            width: 100%;
         }
-        .k-dest-card:hover {
-            transform: translateY(-8px);
-            border-color: rgba(245,158,11,0.3);
-            box-shadow: 0 20px 60px rgba(0,0,0,0.5), 0 0 40px rgba(245,158,11,0.1);
+
+        /* ==========================================================================
+           SAFETY & EMERGENCY SUPPORT SECTION
+           ========================================================================== */
+        .safety-section {
+            background-color: #0A1C1A;
+            color: var(--white);
+            position: relative;
+            border-radius: var(--radius-lg);
+            padding: 80px 60px;
+            margin: 60px 0;
+            box-shadow: 0 20px 50px rgba(0, 0, 0, 0.3);
         }
-        .k-dest-card-img {
-            position: absolute; inset: 0;
-            background-size: cover; background-position: center;
-            transition: transform 0.6s cubic-bezier(0.4,0,0.2,1);
+
+        .safety-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 60px;
+            align-items: center;
         }
-        .k-dest-card:hover .k-dest-card-img {
-            transform: scale(1.08);
+
+        .badge-pill-danger {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 6px 16px;
+            background-color: rgba(191, 23, 6, 0.2);
+            border: 1px solid var(--accent-red-border);
+            color: #ff5242;
+            font-size: 0.875rem;
+            font-weight: 700;
+            border-radius: var(--radius-full);
+            margin-bottom: 20px;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
         }
-        .k-dest-card-overlay {
-            position: absolute; inset: 0;
-            background: linear-gradient(180deg, transparent 40%, rgba(2,14,14,0.9) 100%);
+
+        .safety-title {
+            color: var(--white);
+            font-size: 2.5rem;
+            margin-bottom: 20px;
         }
-        .k-dest-card-content {
-            position: absolute; bottom: 0; left: 0; right: 0;
-            padding: 1.75rem; z-index: 2;
+
+        .safety-desc {
+            color: rgba(255, 255, 255, 0.8);
+            margin-bottom: 32px;
         }
-        .k-dest-card-tag {
-            display: inline-flex; align-items: center; gap: 0.4rem;
-            background: rgba(245,158,11,0.15); backdrop-filter: blur(10px);
-            border: 1px solid rgba(245,158,11,0.2);
-            border-radius: 100px; padding: 0.3rem 0.75rem;
-            font-size: 0.7rem; font-weight: 600; color: #fbbf24;
-            margin-bottom: 0.75rem;
+
+        .safety-features-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
         }
-        .k-dest-card h4 {
-            font-family: 'Outfit', sans-serif;
-            font-size: 1.4rem; font-weight: 800; margin: 0 0 0.25rem; color: #fff;
+
+        .safety-card {
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            padding: 20px;
+            border-radius: var(--radius-md);
+            transition: background 0.3s ease;
         }
-        .k-dest-card p {
-            font-size: 0.85rem; color: rgba(255,255,255,0.55); margin: 0 0 1rem;
+
+        .safety-card:hover {
+            background: rgba(255, 255, 255, 0.09);
+            border-color: var(--accent-red);
+        }
+
+        .safety-card-icon {
+            font-size: 1.5rem;
+            color: var(--accent-red);
+            margin-bottom: 12px;
+        }
+
+        .safety-card h4 {
+            color: var(--white);
+            font-size: 1.1rem;
+            margin-bottom: 8px;
+        }
+
+        .safety-card p {
+            color: rgba(255, 255, 255, 0.7);
+            font-size: 0.9rem;
+        }
+
+        .safety-visual {
+            display: flex;
+            gap: 16px;
+            justify-content: center;
+            flex-wrap: wrap;
+        }
+
+        .safety-visual img {
+            width: 210px;
+            max-width: 100%;
+            border-radius: var(--radius-md);
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.4);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            object-fit: cover;
+        }
+        /* ==========================================================================
+           COMMUNITY & REWARDS SECTION
+           ========================================================================== */
+        .rewards-banner {
+            background: linear-gradient(135deg, var(--primary-light) 0%, #FFFFFF 100%);
+            border: 1px solid var(--primary-border);
+            border-radius: var(--radius-lg);
+            padding: 60px;
+            display: grid;
+            grid-template-columns: 1.2fr 0.8fr;
+            gap: 50px;
+            align-items: center;
+            margin: 80px 0;
+        }
+
+        .rewards-content h3 {
+            font-size: 2.2rem;
+            margin-bottom: 16px;
+        }
+
+        .payout-badges {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            margin-top: 24px;
+            flex-wrap: wrap;
+        }
+
+        .payout-chip {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 18px;
+            background: var(--white);
+            border: 1px solid var(--gray-200);
+            border-radius: var(--radius-full);
+            font-weight: 700;
+            font-size: 0.9rem;
+            color: var(--primary-dark);
+            box-shadow: var(--shadow-sm);
+        }
+
+        .rewards-link {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            margin-top: 22px;
+            font-weight: 700;
+            font-size: 0.95rem;
+            color: var(--primary-dark);
+        }
+
+        .rewards-link:hover {
+            color: var(--primary);
+            gap: 12px;
+        }
+
+        .rewards-visual img {
+            max-width: 280px;
+            margin: 0 auto;
+            border-radius: var(--radius-md);
+            box-shadow: var(--shadow-lg);
+        }
+
+        /* ==========================================================================
+           CORE VALUES GRID
+           ========================================================================== */
+        .values-section {
+            background-color: var(--gray-50);
+            padding: 100px 0;
+            border-top: 1px solid var(--gray-200);
+            border-bottom: 1px solid var(--gray-200);
+        }
+
+        .values-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 24px;
+        }
+
+        .value-card {
+            background: var(--white);
+            padding: 30px 24px;
+            border-radius: var(--radius-md);
+            border: 1px solid var(--gray-200);
+            box-shadow: var(--shadow-sm);
+            transition: all 0.3s ease;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .value-card:hover {
+            transform: translateY(-6px);
+            box-shadow: var(--shadow-md);
+            border-color: var(--primary);
+        }
+
+        .value-icon {
+            width: 48px;
+            height: 48px;
+            border-radius: var(--radius-sm);
+            background-color: var(--primary-light);
+            color: var(--primary-dark);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.35rem;
+        }
+
+        .value-title {
+            font-size: 1.2rem;
+            color: var(--primary-dark);
+        }
+
+        .value-desc {
+            font-size: 0.92rem;
+            color: var(--gray-600);
             line-height: 1.5;
         }
-        .k-dest-card-meta {
-            display: flex; align-items: center; gap: 1.25rem;
-            font-size: 0.75rem; color: rgba(255,255,255,0.5);
-        }
-        .k-dest-card-meta span {
-            display: inline-flex; align-items: center; gap: 0.35rem;
-        }
-        .k-dest-card-meta i { color: #f59e0b; }
 
-        /* CTA SECTION */
-        .k-cta {
-            text-align: center; padding: 6rem 3rem;
-            position: relative; z-index: 2;
-            background: linear-gradient(180deg, transparent 0%, rgba(245,158,11,0.03) 50%, transparent 100%);
-        }
-        .k-cta-inner {
-            max-width: 800px; margin: 0 auto;
-            background: rgba(255,255,255,0.02);
-            border: 1px solid rgba(255,255,255,0.06);
-            border-radius: 32px; padding: 4rem 3rem;
-            backdrop-filter: blur(30px);
-            position: relative; overflow: hidden;
-        }
-        .k-cta-inner::before {
-            content: ''; position: absolute; top: 0; left: 0; right: 0; height: 1px;
-            background: linear-gradient(90deg, transparent, rgba(245,158,11,0.3), transparent);
-        }
-        .k-cta h3 {
-            font-family: 'Outfit', sans-serif;
-            font-size: clamp(2rem, 4vw, 3rem); font-weight: 800;
-            margin: 0 0 1rem;
-        }
-        .k-cta p {
-            font-size: 1.1rem; color: rgba(255,255,255,0.5);
-            margin: 0 0 2rem; line-height: 1.7;
-        }
-        .k-cta-btns { display: flex; gap: 1rem; justify-content: center; flex-wrap: wrap; }
-
-        .k-store-btn {
-            background: rgba(255,255,255,0.05);
-            border: 1px solid rgba(255,255,255,0.1);
-            border-radius: 14px; padding: 0.875rem 1.5rem;
-            display: inline-flex; align-items: center; gap: 0.75rem;
-            color: #fff; text-decoration: none;
-            transition: all 0.3s ease; backdrop-filter: blur(20px);
-        }
-        .k-store-btn:hover {
-            background: rgba(255,255,255,0.1);
-            border-color: rgba(255,255,255,0.2);
-            transform: translateY(-3px);
-        }
-        .k-store-btn strong { display: block; font-size: 0.9rem; }
-        .k-store-btn span { font-size: 0.7rem; color: rgba(255,255,255,0.5); }
-
-        /* FOOTER */
-        .k-footer {
-            border-top: 1px solid rgba(255,255,255,0.04);
-            padding: 4rem 3rem 2rem; position: relative; z-index: 2;
-            background: rgba(0,0,0,0.2);
-        }
-        .k-footer-inner {
-            max-width: 1400px; margin: 0 auto;
-            display: grid; grid-template-columns: 2fr 1fr 1fr 1fr;
-            gap: 3rem; margin-bottom: 3rem;
-        }
-        .k-footer-brand h4 {
-            font-family: 'Outfit', sans-serif; font-size: 1.3rem; font-weight: 800;
-            margin: 0 0 1rem;
-            background: linear-gradient(135deg, #fff, #e2e8f0);
-            -webkit-background-clip: text; -webkit-text-fill-color: transparent;
-        }
-        .k-footer-brand p {
-            font-size: 0.9rem; color: rgba(255,255,255,0.4);
-            line-height: 1.7; margin: 0 0 1.5rem; max-width: 300px;
-        }
-        .k-footer-col h5 {
-            font-family: 'Outfit', sans-serif; font-size: 0.9rem; font-weight: 700;
-            margin: 0 0 1.25rem; color: #fff;
-        }
-        .k-footer-col ul { list-style: none; margin: 0; padding: 0; }
-        .k-footer-col li { margin-bottom: 0.75rem; }
-        .k-footer-col a {
-            color: rgba(255,255,255,0.4); text-decoration: none;
-            font-size: 0.85rem; transition: all 0.3s ease;
-        }
-        .k-footer-col a:hover { color: #f59e0b; }
-        .k-footer-bottom {
-            text-align: center; padding-top: 2rem;
-            border-top: 1px solid rgba(255,255,255,0.04);
-            font-size: 0.8rem; color: rgba(255,255,255,0.3);
+        /* ==========================================================================
+           APP INTERFACE SHOWCASE GALLERY
+           ========================================================================== */
+        .gallery-grid {
+            display: grid;
+            grid-template-columns: repeat(5, 1fr);
+            gap: 16px;
+            margin-top: 40px;
         }
 
-        /* MOBILE */
+        .gallery-item {
+            background: var(--white);
+            border-radius: var(--radius-md);
+            padding: 8px;
+            border: 1px solid var(--gray-200);
+            box-shadow: var(--shadow-sm);
+            transition: transform 0.3s ease;
+        }
+
+        .gallery-item:hover {
+            transform: scale(1.03);
+            box-shadow: var(--shadow-md);
+        }
+
+        .gallery-item img {
+            border-radius: var(--radius-sm);
+            width: 100%;
+        }
+        /* ==========================================================================
+           FOOTER
+           ========================================================================== */
+        .site-footer {
+            background-color: var(--primary-deep);
+            color: var(--white);
+            padding: 80px 0 40px 0;
+            border-top: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .footer-top {
+            display: grid;
+            grid-template-columns: 2fr 1fr 1fr 1fr;
+            gap: 50px;
+            margin-bottom: 60px;
+        }
+
+        .footer-brand {
+            max-width: 360px;
+        }
+
+        .footer-logo {
+            margin-bottom: 20px;
+        }
+
+        .footer-logo img {
+            height: 36px;
+            width: auto;
+            object-fit: contain;
+        }
+
+        .footer-brand p {
+            color: rgba(255, 255, 255, 0.7);
+            font-size: 0.95rem;
+            margin-bottom: 24px;
+        }
+
+        .footer-heading {
+            color: var(--white);
+            font-size: 1.1rem;
+            margin-bottom: 20px;
+            position: relative;
+        }
+
+        .footer-links {
+            list-style: none;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .footer-links a {
+            color: rgba(255, 255, 255, 0.75);
+            font-size: 0.95rem;
+        }
+
+        .footer-links a:hover {
+            color: var(--primary);
+        }
+
+        .footer-bottom {
+            border-top: 1px solid rgba(255, 255, 255, 0.1);
+            padding-top: 30px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 20px;
+            font-size: 0.9rem;
+            color: rgba(255, 255, 255, 0.6);
+        }
+
+        /* ==========================================================================
+           RESPONSIVE
+           ========================================================================== */
         @media (max-width: 1024px) {
-            .k-hero { grid-template-columns: 1fr; text-align: center; padding: 3rem 1.5rem; }
-            .k-hero-left { order: 2; }
-            .k-hero-right { order: 1; margin-bottom: 2rem; }
-            .k-hero p { margin: 0 auto 2rem; }
-            .k-hero-btns { justify-content: center; }
-            .k-hero-stats { justify-content: center; }
-            .k-places-grid { grid-template-columns: repeat(3, 1fr); }
-            .k-features-grid { grid-template-columns: 1fr; }
-            .k-dest-grid { grid-template-columns: 1fr; }
-            .k-footer-inner { grid-template-columns: 1fr; gap: 2rem; }
-            .k-nav-links { display: none; }
-            .k-nav { padding: 1rem 1.5rem; }
-            body { padding-top: 84px; }
-            .k-section { padding: 4rem 1.5rem; }
-            .k-stats-bar { flex-wrap: wrap; gap: 2rem; padding: 2rem; }
-        }
-        @media (max-width: 640px) {
-            .k-places-grid { grid-template-columns: repeat(2, 1fr); }
-            .k-phone { width: 240px; height: 480px; }
+            .section-padding { padding: 70px 0; }
+            .values-section { padding: 70px 0; }
+            .section-title { font-size: 2.1rem; }
+            .feature-title { font-size: 1.85rem; }
+            .safety-title { font-size: 2rem; }
+            .rewards-content h3 { font-size: 1.8rem; }
+            .safety-section { padding: 50px 32px; }
+            .rewards-banner { padding: 44px 28px; }
+            .footer-top { grid-template-columns: 1fr 1fr; gap: 40px; }
+            .values-grid { grid-template-columns: repeat(2, 1fr); }
+            .gallery-grid { grid-template-columns: repeat(3, 1fr); }
         }
 
-        /* Compact navbar on scroll — fixed & out of flow, so content never shifts */
-        .k-nav.is-compact { padding: 0.4rem 3rem; }
-        .k-nav.is-compact .k-logo img { height: 44px !important; }
-        @media (max-width: 1024px) { .k-nav.is-compact { padding: 0.45rem 1.5rem; } }
+        @media (max-width: 992px) {
+            .hero-grid {
+                grid-template-columns: 1fr;
+                text-align: center;
+                gap: 50px;
+            }
+            .hero-content { margin: 0 auto; }
+            .hero-title { font-size: 2.75rem; }
+            .hero-cta-group { justify-content: center; }
+            .floating-card-1 { left: 0; }
+            .floating-card-2 { right: 0; }
+
+            .nav-menu {
+                display: none;
+                position: absolute;
+                top: 100%;
+                left: 0;
+                right: 0;
+                flex-direction: column;
+                align-items: stretch;
+                gap: 0;
+                background: var(--white);
+                border-bottom: 1px solid var(--gray-200);
+                box-shadow: var(--shadow-md);
+                padding: 8px 24px 16px;
+            }
+            .nav-menu.is-open { display: flex; }
+            .nav-menu li { width: 100%; }
+            .nav-menu .nav-link {
+                display: block;
+                padding: 13px 0;
+                border-bottom: 1px solid var(--gray-100);
+            }
+            .nav-menu li:last-child .nav-link { border-bottom: none; }
+            .nav-link::after { display: none; }
+            .nav-mobile-toggle { display: block; }
+
+            .feature-row,
+            .feature-row.reverse {
+                grid-template-columns: 1fr;
+                gap: 40px;
+                direction: ltr;
+            }
+            .feature-text { max-width: 100%; }
+            .feature-row { margin-bottom: 70px; }
+            .app-screen-grid { flex-wrap: wrap; }
+
+            .safety-grid { grid-template-columns: 1fr; }
+            .safety-features-grid { grid-template-columns: 1fr; }
+
+            .rewards-banner { grid-template-columns: 1fr; text-align: center; }
+            .payout-badges { justify-content: center; }
+            .feature-cta { justify-content: center; }
+
+            .overview-bar { padding: 28px 24px; }
+        }
+
+        @media (max-width: 768px) {
+            .section-padding { padding: 60px 0; }
+            .values-section { padding: 60px 0; }
+            .section-title { font-size: 2rem; }
+            .hero-section { padding: 60px 0 100px 0; }
+            .hero-title { font-size: 2.4rem; }
+
+            .overview-grid {
+                grid-template-columns: repeat(2, 1fr);
+                gap: 24px;
+            }
+            .overview-item:nth-child(2) { border-right: none; }
+            .overview-item {
+                border-bottom: 1px solid var(--gray-200);
+                padding-bottom: 16px;
+            }
+            .overview-item:nth-child(3),
+            .overview-item:nth-child(4) {
+                border-bottom: none;
+                padding-bottom: 0;
+            }
+
+            .safety-section { padding: 44px 22px; }
+            .rewards-banner { padding: 36px 22px; }
+            .site-footer { padding: 60px 0 32px 0; }
+            .footer-bottom { justify-content: center; text-align: center; }
+            .btn-cta-placeholder { padding: 10px 18px; font-size: 0.85rem; }
+        }
+
+        @media (max-width: 576px) {
+            .values-grid { grid-template-columns: 1fr; }
+            .gallery-grid { grid-template-columns: repeat(2, 1fr); }
+            .footer-top { grid-template-columns: 1fr; }
+            .hero-phone-card { width: 250px; }
+            .floating-card { padding: 11px; }
+            .floating-card-1 { width: 175px; }
+            .floating-card-2 { width: 190px; }
+            .safety-visual img { width: 155px; }
+            .app-mockup-frame { max-width: 220px; }
+        }
+
+        @media (max-width: 480px) {
+            .brand-logo img { height: 26px; }
+            .btn-cta-placeholder { padding: 9px 15px; font-size: 0.85rem; }
+            .hero-title { font-size: 2.1rem; }
+            .section-title { font-size: 1.75rem; }
+            .overview-number { font-size: 1.75rem; }
+            .hero-tagline-chip, .hero-app-btn { width: 100%; justify-content: center; }
+        }
     </style>
 </head>
 <body>
-    <div class="orb orb-1"></div>
-    <div class="orb orb-2"></div>
-    <div class="orb orb-3"></div>
 
-    <!-- NAVBAR -->
-    <nav class="k-nav">
-        <a href="{{ route('web.home') }}" class="k-logo" style="text-decoration:none">
-            <img src="{{ asset('images/oripori_logo_wordmark.png') }}" alt="Oripori" style="height:52px;width:auto;object-fit:contain">
-        </a>
-        <ul class="k-nav-links">
-            <li><a href="#services">Services</a></li>
-            <li><a href="#places">Places</a></li>
-            <li><a href="#features">Features</a></li>
-            <li><a href="#destinations">Destinations</a></li>
-            <li><a href="{{ route('partner.login') }}">Partner</a></li>
-            <li><a href="#download">Download</a></li>
-        </ul>
-        <a href="{{ env('PLAY_STORE_URL', '#download') }}" class="k-nav-cta">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
-                <polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
-            </svg>
-            Get the App
-        </a>
-    </nav>
+    <!-- HEADER -->
+    <header class="site-header">
+        <div class="container header-container">
+            <a href="{{ route('web.home') }}" class="brand-logo" aria-label="Oripori Home">
+                <img src="{{ asset('images/oripori_logo.svg') }}" alt="Oripori Logo">
+            </a>
 
-    <!-- HERO -->
-    <section class="k-hero">
-        <div class="k-hero-left">
-            <div class="k-badge">
-                <span class="k-badge-dot"></span>
-                {{ number_format($placesCount) }}+ places mapped across Nepal
-            </div>
-            <h2>
-                <span class="line1">Discover Nepal,</span>
-                <span class="line2">Live & Local.</span>
-            </h2>
-            <p>Real-time road conditions, community reports, hidden gems, curated routes, and exclusive local offers — powered by locals, for travelers.</p>
-            <div class="k-hero-btns">
-                <a href="{{ route('web.places') }}" class="k-btn-primary">
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                        <polygon points="1 6 1 22 8 18 16 22 21 18 21 2 16 6 8 2 1 6"/>
-                        <line x1="8" y1="2" x2="8" y2="18"/><line x1="16" y1="6" x2="16" y2="22"/>
-                    </svg>
-                    Explore Places
-                </a>
-                <a href="{{ env('PLAY_STORE_URL', '#download') }}" class="k-btn-secondary">
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                        <rect x="5" y="2" width="14" height="20" rx="2" ry="2"/><line x1="12" y1="18" x2="12.01" y2="18"/>
-                    </svg>
-                    Get the App
-                </a>
-            </div>
-            <div class="k-hero-stats">
-                <div class="k-hstat"><span class="k-hstat-num" data-target="78">0</span><span class="k-hstat-label">K+ Places</span></div>
-                <div class="k-hstat"><span class="k-hstat-num" data-target="12">0</span><span class="k-hstat-label">K+ Guides</span></div>
-                <div class="k-hstat"><span class="k-hstat-num" data-target="4.9">0</span><span class="k-hstat-label">App Rating</span></div>
-                <div class="k-hstat"><span class="k-hstat-num" data-target="77">0</span><span class="k-hstat-label">Districts</span></div>
-            </div>
+            <nav>
+                <ul class="nav-menu" id="nav-menu">
+                    <li><a href="#explore" class="nav-link">Explore</a></li>
+                    <li><a href="#safety" class="nav-link">Safety &amp; SOS</a></li>
+                    <li><a href="#community" class="nav-link">Community Insights</a></li>
+                    <li><a href="#rewards" class="nav-link">Oripori Coins</a></li>
+                    <li><a href="#values" class="nav-link">Core Values</a></li>
+                </ul>
+            </nav>
+
+            <a href="{{ route('partner.login') }}" class="btn-cta-placeholder">Partner Login</a>
+
+            <button class="nav-mobile-toggle" id="nav-toggle" type="button" aria-label="Toggle navigation" aria-expanded="false" aria-controls="nav-menu">
+                <i class="fa-solid fa-bars"></i>
+            </button>
         </div>
+    </header>
 
-        <div class="k-hero-right">
-            <div class="k-float-tag k-float-tag-1"><i class="fas fa-mountain"></i> Everest Base Camp</div>
-            <div class="k-float-tag k-float-tag-2"><i class="fas fa-road"></i> Road: Clear</div>
-            <div class="k-float-tag k-float-tag-3"><i class="fas fa-star"></i> 4.9 Rating</div>
+    <main>
+        <!-- HERO -->
+        <section class="hero-section">
+            <div class="hero-bg-overlay" style="background-image: url('{{ asset('images/landing/hero-bg.jpg') }}');"></div>
 
-            <div class="k-phone">
-                <div class="k-phone-screen">
-                    <div class="k-phone-header">
-                        <div class="k-ph-avatar">NP</div>
-                        <div class="k-ph-info"><h4>Pokhara &rarr; Mustang</h4><span>Curated Route &bull; 156km</span></div>
+            <div class="container hero-grid">
+                <div class="hero-content">
+                    <div class="hero-badge">
+                        <i class="fa-solid fa-compass"></i> Nepal-First Smart Platform
                     </div>
-                    <div class="k-phone-map"><div class="k-ph-grid"></div><div class="k-ph-route"></div></div>
-                    <div class="k-phone-cards">
-                        <div class="k-ph-card">
-                            <div class="k-ph-card-icon"><i class="fas fa-road"></i></div>
-                            <div class="k-ph-card-info"><h5>Road Condition</h5><span>Good &bull; Updated 5m ago</span></div>
+                    <h1 class="hero-title">
+                        What's Around <span>You</span>
+                    </h1>
+                    <p class="hero-description">
+                        Oripori is Nepal&rsquo;s all-in-one local intelligence platform connecting you with live community insights, emergency support, detailed maps, and real-time alerts right where you stand.
+                    </p>
+                    <div class="hero-cta-group">
+                        <div class="hero-tagline-chip">
+                            <i class="fa-solid fa-location-dot"></i>
+                            <span>Hyper-Local Discovery across Nepal</span>
                         </div>
-                        <div class="k-ph-card">
-                            <div class="k-ph-card-icon"><i class="fas fa-clock"></i></div>
-                            <div class="k-ph-card-info"><h5>Est. Time</h5><span>6h 30m via Beni</span></div>
+                        <a href="{{ env('PLAY_STORE_URL', '#') }}" class="hero-app-btn">
+                            <i class="fa-brands fa-google-play"></i> Get the App
+                        </a>
+                    </div>
+                </div>
+
+                <div class="hero-visual">
+                    <div class="floating-card floating-card-1">
+                        <div class="floating-card-icon red">
+                            <i class="fa-solid fa-shield-halved"></i>
                         </div>
-                        <div class="k-ph-card">
-                            <div class="k-ph-card-icon"><i class="fas fa-tag"></i></div>
-                            <div class="k-ph-card-info"><h5>Local Deals</h5><span>3 offers near you</span></div>
+                        <div class="floating-card-text">
+                            <span class="floating-card-title">Live SOS Alert</span>
+                            <span class="floating-card-sub">Instant Emergency Response</span>
+                        </div>
+                    </div>
+
+                    <div class="hero-phone-card">
+                        <div class="hero-phone-screen">
+                            <img src="{{ asset('images/landing/app-explore.jpg') }}" alt="Oripori app home screen with live alerts and nearby highlights" width="720" height="1600">
+                        </div>
+                    </div>
+
+                    <div class="floating-card floating-card-2">
+                        <div class="floating-card-icon teal">
+                            <i class="fa-solid fa-cloud-sun-rain"></i>
+                        </div>
+                        <div class="floating-card-text">
+                            <span class="floating-card-title">Live Weather &amp; Flood</span>
+                            <span class="floating-card-sub">Real-time local warnings</span>
                         </div>
                     </div>
                 </div>
             </div>
-        </div>
-    </section>
-
-    <!-- SERVICES -->
-    <section class="k-section" id="services">
-        <div class="k-section-header">
-            <span class="k-section-tag">Our Services</span>
-            <h3>One App, Endless Possibilities</h3>
-            <p>From hidden trails to luxury stays, Nepal Smart Travel has everything you need to explore Nepal like a local.</p>
-        </div>
-        <div class="k-services-grid">
-            <a href="{{ route('web.places') }}" class="k-service-card" style="text-decoration:none;color:inherit">
-                <div class="k-svc-icon">
-                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2L2 22h20L12 2z"/></svg>
-                </div>
-                <h4>Places & Trails</h4>
-                <p>Discover {{ number_format($placesCount) }}+ mapped locations including hidden trails, viewpoints, and local gems across all 77 districts.</p>
-            </a>
-            <a href="{{ route('web.category', 'hotels') }}" class="k-service-card" style="text-decoration:none;color:inherit">
-                <div class="k-svc-icon">
-                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
-                </div>
-                <h4>Hotels & Stays</h4>
-                <p>From budget homestays in remote villages to luxury resorts in Pokhara — book with local prices and real reviews.</p>
-            </a>
-            <a href="{{ route('web.category', 'restaurants') }}" class="k-service-card" style="text-decoration:none;color:inherit">
-                <div class="k-svc-icon">
-                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8h1a4 4 0 0 1 0 8h-1"/><path d="M2 8h16v9a4 4 0 0 1-4 4H6a4 4 0 0 1-4-4V8z"/><line x1="6" y1="1" x2="6" y2="4"/><line x1="10" y1="1" x2="10" y2="4"/><line x1="14" y1="1" x2="14" y2="4"/></svg>
-                </div>
-                <h4>Restaurants & Food</h4>
-                <p>Find authentic local cuisine, from Newari bhoj in Kathmandu to Thakali thali in Mustang. Community verified.</p>
-            </a>
-            <a href="{{ route('web.routes') }}" class="k-service-card" style="text-decoration:none;color:inherit">
-                <div class="k-svc-icon">
-                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76"/></svg>
-                </div>
-                <h4>Curated Routes</h4>
-                <p>Pre-planned routes for every type of traveler — adventure, spiritual, cultural, or scenic road trips.</p>
-            </a>
-            <a href="{{ route('web.offers') }}" class="k-service-card" style="text-decoration:none;color:inherit">
-                <div class="k-svc-icon">
-                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="1" y="4" width="22" height="16" rx="2" ry="2"/><line x1="1" y1="10" x2="23" y2="10"/></svg>
-                </div>
-                <h4>Local Offers</h4>
-                <p>Exclusive discounts from local businesses — hotels, restaurants, adventure sports, and souvenir shops.</p>
-            </a>
-            <div class="k-service-card">
-                <div class="k-svc-icon">
-                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
-                </div>
-                <h4>Community Reports</h4>
-                <p>Real-time updates from fellow travelers — road conditions, weather, safety alerts, and hidden spots.</p>
-            </div>
-        </div>
-    </section>
-
-    <!-- POPULAR PLACES -->
-    <section class="k-section" id="places">
-        <div class="k-section-header">
-            <span class="k-section-tag">Explore Nepal</span>
-            <h3>Popular Places & Categories</h3>
-            <p>From ancient temples to mountain trails — discover Nepal by category.</p>
-        </div>
-        <div class="k-places-grid">
-            <a href="{{ route('web.category', 'hotels') }}" class="k-place-card" style="text-decoration:none">
-                <div class="k-place-card-img" style="background-image:url('https://images.unsplash.com/photo-1566073771259-6a8506099945?w=600&q=80')"></div>
-                <div class="k-place-card-overlay"></div>
-                <div class="k-place-card-count"><i class="fas fa-bed"></i> Hotels</div>
-                <div class="k-place-card-content">
-                    <div class="k-place-card-icon"><i class="fas fa-hotel"></i></div>
-                    <h4>Hotels & Stays</h4>
-                    <p>Homestays to luxury resorts</p>
-                </div>
-            </a>
-            <a href="{{ route('web.category', 'restaurants') }}" class="k-place-card" style="text-decoration:none">
-                <div class="k-place-card-img" style="background-image:url('https://images.unsplash.com/photo-1555396273-367ea4eb4db5?w=600&q=80')"></div>
-                <div class="k-place-card-overlay"></div>
-                <div class="k-place-card-count"><i class="fas fa-utensils"></i> Restaurants</div>
-                <div class="k-place-card-content">
-                    <div class="k-place-card-icon"><i class="fas fa-utensils"></i></div>
-                    <h4>Restaurants & Food</h4>
-                    <p>Authentic Nepali cuisine</p>
-                </div>
-            </a>
-            <a href="{{ route('web.category', 'attractions') }}" class="k-place-card" style="text-decoration:none">
-                <div class="k-place-card-img" style="background-image:url('https://images.unsplash.com/photo-1544735716-392fe2489ffa?w=600&q=80')"></div>
-                <div class="k-place-card-overlay"></div>
-                <div class="k-place-card-count"><i class="fas fa-landmark"></i> Attractions</div>
-                <div class="k-place-card-content">
-                    <div class="k-place-card-icon"><i class="fas fa-landmark"></i></div>
-                    <h4>Attractions</h4>
-                    <p>Temples, forts & heritage</p>
-                </div>
-            </a>
-            <a href="{{ route('web.category', 'cafes') }}" class="k-place-card" style="text-decoration:none">
-                <div class="k-place-card-img" style="background-image:url('https://images.unsplash.com/photo-1554118811-1e0d58224f24?w=600&q=80')"></div>
-                <div class="k-place-card-overlay"></div>
-                <div class="k-place-card-count"><i class="fas fa-mug-hot"></i> Cafes</div>
-                <div class="k-place-card-content">
-                    <div class="k-place-card-icon"><i class="fas fa-mug-hot"></i></div>
-                    <h4>Cafes & hangouts</h4>
-                    <p>Cozy spots & live music</p>
-                </div>
-            </a>
-            <a href="{{ route('web.category', 'activities') }}" class="k-place-card" style="text-decoration:none">
-                <div class="k-place-card-img" style="background-image:url('https://images.unsplash.com/photo-1551632811-561732d1e306?w=600&q=80')"></div>
-                <div class="k-place-card-overlay"></div>
-                <div class="k-place-card-count"><i class="fas fa-person-hiking"></i> Activities</div>
-                <div class="k-place-card-content">
-                    <div class="k-place-card-icon"><i class="fas fa-person-hiking"></i></div>
-                    <h4>Activities</h4>
-                    <p>Trekking, rafting & more</p>
-                </div>
-            </a>
-        </div>
-        <div style="text-align:center;margin-top:2.5rem">
-            <a href="{{ route('web.places') }}" class="k-btn-primary" style="display:inline-flex">
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="1 6 1 22 8 18 16 22 21 18 21 2 16 6 8 2 1 6"/></svg>
-                View All Places
-            </a>
-        </div>
-    </section>
-
-    <!-- STATS BAR -->
-    <div class="k-stats-bar">
-        <div class="k-sbar-stat"><div class="k-sbar-num" data-target="78">0</div><div class="k-sbar-label">K+ Places Mapped</div></div>
-        <div class="k-sbar-stat"><div class="k-sbar-num" data-target="12">0</div><div class="k-sbar-label">K+ Local Guides</div></div>
-        <div class="k-sbar-stat"><div class="k-sbar-num" data-target="4.9">0</div><div class="k-sbar-label">App Store Rating</div></div>
-        <div class="k-sbar-stat"><div class="k-sbar-num" data-target="77">0</div><div class="k-sbar-label">Districts Covered</div></div>
-    </div>
-
-    <!-- FEATURES -->
-    <section class="k-section" id="features">
-        <div class="k-section-header">
-            <span class="k-section-tag">App Features</span>
-            <h3>Built for the Mountains</h3>
-            <p>Every feature is designed for Nepal's unique terrain, connectivity, and travel culture.</p>
-        </div>
-        <div class="k-features-grid">
-            <div class="k-feature">
-                <div class="k-feature-icon">
-                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="1 6 1 22 8 18 16 22 21 18 21 2 16 6 8 2 1 6"/></svg>
-                </div>
-                <h4>Offline Maps</h4>
-                <p>Download maps for remote areas with no signal. Works even in the Himalayas.</p>
-            </div>
-            <div class="k-feature">
-                <div class="k-feature-icon">
-                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>
-                </div>
-                <h4>Community Reports</h4>
-                <p>Get real-time updates from fellow travelers about road conditions, landslides, and weather.</p>
-            </div>
-            <div class="k-feature">
-                <div class="k-feature-icon">
-                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-                </div>
-                <h4>Live Tracking</h4>
-                <p>Share your live location with family. SOS alerts for emergency situations in remote areas.</p>
-            </div>
-            <div class="k-feature">
-                <div class="k-feature-icon">
-                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
-                </div>
-                <h4>Verified Safety</h4>
-                <p>All guides, hotels, and services are community-verified with real ratings and reviews.</p>
-            </div>
-            <div class="k-feature">
-                <div class="k-feature-icon">
-                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="1" y="4" width="22" height="16" rx="2" ry="2"/><line x1="1" y1="10" x2="23" y2="10"/></svg>
-                </div>
-                <h4>Local Wallet</h4>
-                <p>One digital wallet for all services — no need to carry cash in remote areas.</p>
-            </div>
-            <div class="k-feature">
-                <div class="k-feature-icon">
-                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>
-                </div>
-                <h4>Hidden Gems</h4>
-                <p>Discover places no guidebook mentions — shared exclusively by locals and experienced travelers.</p>
-            </div>
-        </div>
-    </section>
-
-    <!-- TRENDING DESTINATIONS -->
-    <section class="k-section" id="destinations">
-        <div class="k-section-header">
-            <span class="k-section-tag">Trending Destinations</span>
-            <h3>Where Nepal Is Heading</h3>
-            <p>Most visited places this season — handpicked by travelers and locals alike.</p>
-        </div>
-        <div class="k-dest-grid">
-            <a href="{{ route('web.places') }}" class="k-dest-card" style="text-decoration:none">
-                <div class="k-dest-card-img" style="background-image:url('https://images.unsplash.com/photo-1544735716-392fe2489ffa?w=800&q=80')"></div>
-                <div class="k-dest-card-overlay"></div>
-                <div class="k-dest-card-content">
-                    <div class="k-dest-card-tag"><i class="fas fa-fire"></i> Most Popular</div>
-                    <h4>Everest Base Camp</h4>
-                    <p>The iconic trek to the foot of the world's highest peak. 14-day adventure through Sherpa villages.</p>
-                    <div class="k-dest-card-meta">
-                        <span><i class="fas fa-star"></i> 4.9</span>
-                        <span><i class="fas fa-route"></i> 14 Days</span>
-                        <span><i class="fas fa-mountain"></i> 5,364m</span>
-                        <span><i class="fas fa-users"></i> 12.4k visitors</span>
+        </section>
+        <!-- OVERVIEW & METRICS BAR -->
+        <div class="container">
+            <div class="overview-bar">
+                <div class="overview-grid">
+                    <div class="overview-item">
+                        <div class="overview-number">100%</div>
+                        <div class="overview-label">Nepal First Design</div>
+                    </div>
+                    <div class="overview-item">
+                        <div class="overview-number">24/7</div>
+                        <div class="overview-label">Emergency SOS Network</div>
+                    </div>
+                    <div class="overview-item">
+                        <div class="overview-number">Live</div>
+                        <div class="overview-label">Community Weather &amp; Road Alerts</div>
+                    </div>
+                    <div class="overview-item">
+                        <div class="overview-number">Smart</div>
+                        <div class="overview-label">AI Nepal Travel Assistant</div>
                     </div>
                 </div>
-            </a>
-            <a href="{{ route('web.places') }}" class="k-dest-card" style="text-decoration:none">
-                <div class="k-dest-card-img" style="background-image:url('https://images.unsplash.com/photo-1605649487212-47bdab064df7?w=800&q=80')"></div>
-                <div class="k-dest-card-overlay"></div>
-                <div class="k-dest-card-content">
-                    <div class="k-dest-card-tag"><i class="fas fa-water"></i> Scenic</div>
-                    <h4>Pokhara</h4>
-                    <p>Lakeside paradise with Annapurna views. Paragliding, boating, and sunrise at Sarangkot.</p>
-                    <div class="k-dest-card-meta">
-                        <span><i class="fas fa-star"></i> 4.8</span>
-                        <span><i class="fas fa-route"></i> 3-5 Days</span>
-                        <span><i class="fas fa-mountain"></i> 827m</span>
-                        <span><i class="fas fa-users"></i> 9.8k visitors</span>
-                    </div>
-                </div>
-            </a>
-            <a href="{{ route('web.places') }}" class="k-dest-card" style="text-decoration:none">
-                <div class="k-dest-card-img" style="background-image:url('https://images.unsplash.com/photo-1602216056096-3b40cc0c9944?w=800&q=80')"></div>
-                <div class="k-dest-card-overlay"></div>
-                <div class="k-dest-card-content">
-                    <div class="k-dest-card-tag"><i class="fas fa-paw"></i> Wildlife</div>
-                    <h4>Chitwan National Park</h4>
-                    <p>Jungle safari home to Bengal tigers, one-horned rhinos, and exotic bird species.</p>
-                    <div class="k-dest-card-meta">
-                        <span><i class="fas fa-star"></i> 4.7</span>
-                        <span><i class="fas fa-route"></i> 2-3 Days</span>
-                        <span><i class="fas fa-tree"></i> 932 km²</span>
-                        <span><i class="fas fa-users"></i> 6.2k visitors</span>
-                    </div>
-                </div>
-            </a>
-            <a href="{{ route('web.places') }}" class="k-dest-card" style="text-decoration:none">
-                <div class="k-dest-card-img" style="background-image:url('https://images.unsplash.com/photo-1544735716-392fe2489ffa?w=800&q=80')"></div>
-                <div class="k-dest-card-overlay"></div>
-                <div class="k-dest-card-content">
-                    <div class="k-dest-card-tag"><i class="fas fa-om"></i> Spiritual</div>
-                    <h4>Lumbini</h4>
-                    <p>Birthplace of Lord Buddha. Sacred monasteries, Maya Devi Temple, and world peace pagoda.</p>
-                    <div class="k-dest-card-meta">
-                        <span><i class="fas fa-star"></i> 4.6</span>
-                        <span><i class="fas fa-route"></i> 1-2 Days</span>
-                        <span><i class="fas fa-landmark"></i> UNESCO Site</span>
-                        <span><i class="fas fa-users"></i> 4.5k visitors</span>
-                    </div>
-                </div>
-            </a>
-        </div>
-        <div style="text-align:center;margin-top:2.5rem">
-            <a href="{{ route('web.routes') }}" class="k-btn-primary" style="display:inline-flex">
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76"/></svg>
-                Explore All Routes
-            </a>
-        </div>
-    </section>
-
-    <!-- CTA -->
-    <section class="k-cta" id="download">
-        <div class="k-cta-inner">
-            <h3>Ready to Explore Nepal?</h3>
-            <p>Join 50,000+ travelers and locals who are already discovering Nepal smarter. Download the app today — it's free!</p>
-            <div class="k-cta-btns">
-                <a href="{{ env('APP_STORE_URL', '#') }}" class="k-store-btn">
-                    <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor"><path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.81-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M13 3.5c.73-.83 1.21-1.96 1.07-3.11-1.05.05-2.31.72-3.06 1.64-.68.83-1.27 2.15-1.11 3.22 1.18.09 2.38-.74 3.1-1.75z"/></svg>
-                    <div><span>Download on the</span><strong>App Store</strong></div>
-                </a>
-                <a href="{{ env('PLAY_STORE_URL', '#') }}" class="k-store-btn">
-                    <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor"><path d="M3,20.5V3.5C3,2.91 3.34,2.39 3.84,2.15L13.69,12L3.84,21.85C3.34,21.6 3,21.09 3,20.5M16.81,15.12L6.05,21.34L14.54,12.85L16.81,15.12M20.16,10.81C20.5,11.08 20.75,11.5 20.75,12C20.75,12.5 20.53,12.9 20.18,13.18L17.89,14.5L15.39,12L17.89,9.5L20.16,10.81M6.05,2.66L16.81,8.88L14.54,11.15L6.05,2.66Z"/></svg>
-                    <div><span>Get it on</span><strong>Google Play</strong></div>
-                </a>
             </div>
         </div>
-    </section>
+
+        <!-- FEATURE 1: SMART LOCAL NAVIGATION & MAPS -->
+        <section id="explore" class="section-padding">
+            <div class="container">
+                <div class="section-title-wrap">
+                    <div class="badge-pill">
+                        <i class="fa-solid fa-map-location-dot"></i> Navigation &amp; Places
+                    </div>
+                    <h2 class="section-title">Discover Trekking Trails &amp; Hidden Local Gems</h2>
+                    <p class="section-subtitle">
+                        From the Poon Hill Sunrise Trek to Kathmandu Valley Heritage Circles, explore {{ number_format($placesCount) }}+ mapped places across Nepal with interactive maps, offline trail overlays, and precise waypoint guidance.
+                    </p>
+                </div>
+
+                <div class="feature-row">
+                    <div class="feature-text">
+                        <h3 class="feature-title">High-Precision Satellite &amp; Terrain Maps</h3>
+                        <p class="feature-desc">
+                            Whether you are exploring bustling city markets in Pokhara or trekking through alpine mountain passes, Oripori provides visual topographical maps layered with active location pins.
+                        </p>
+                        <ul class="feature-list">
+                            <li class="feature-list-item">
+                                <i class="fa-solid fa-circle-check"></i>
+                                <span>Interactive satellite maps centered on local landmarks like Phewa Lake.</span>
+                            </li>
+                            <li class="feature-list-item">
+                                <i class="fa-solid fa-circle-check"></i>
+                                <span>Detailed trail itineraries with distance, duration, elevation, and waypoints.</span>
+                            </li>
+                            <li class="feature-list-item">
+                                <i class="fa-solid fa-circle-check"></i>
+                                <span>Categorized spot finder for Restaurants, Hotels, Attractions, and Local Shops.</span>
+                            </li>
+                        </ul>
+                        <div class="feature-cta">
+                            <a href="{{ route('web.places') }}" class="btn-pill">
+                                <i class="fa-solid fa-map-location-dot"></i> Explore Places
+                            </a>
+                            <a href="{{ route('web.routes') }}" class="btn-pill ghost">
+                                <i class="fa-solid fa-route"></i> Curated Routes
+                            </a>
+                        </div>
+                    </div>
+
+                    <div class="app-screen-grid">
+                        <div class="app-mockup-frame">
+                            <img src="{{ asset('images/landing/app-map.jpg') }}" alt="Oripori satellite map with nearby place pins" loading="lazy" width="720" height="1600">
+                        </div>
+                        <div class="app-mockup-frame">
+                            <img src="{{ asset('images/landing/app-trail.jpg') }}" alt="Oripori Poon Hill trek route detail with trail waypoints" loading="lazy" width="720" height="1600">
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+        <!-- FEATURE 2: SAFETY & EMERGENCY SUPPORT -->
+        <section id="safety" class="section-padding" style="padding-top: 0;">
+            <div class="container">
+                <div class="safety-section">
+                    <div class="safety-grid">
+                        <div>
+                            <div class="badge-pill-danger">
+                                <i class="fa-solid fa-triangle-exclamation"></i> Critical Safety Network
+                            </div>
+                            <h2 class="safety-title">Instant SOS &amp; Emergency Support</h2>
+                            <p class="safety-desc">
+                                Your safety is our top priority. Oripori equips everyone in Nepal with a direct red SOS trigger, real-time location sharing, and 1-tap connection to emergency response services.
+                            </p>
+
+                            <div class="safety-features-grid">
+                                <div class="safety-card">
+                                    <i class="fa-solid fa-truck-medical safety-card-icon"></i>
+                                    <h4>Ambulance &amp; Hospitals</h4>
+                                    <p>Direct contact with nearest medical centers &amp; blood banks.</p>
+                                </div>
+                                <div class="safety-card">
+                                    <i class="fa-solid fa-building-shield safety-card-icon"></i>
+                                    <h4>Police &amp; Fire Dispatch</h4>
+                                    <p>Instant hotline access during critical incidents.</p>
+                                </div>
+                                <div class="safety-card">
+                                    <i class="fa-solid fa-tower-broadcast safety-card-icon"></i>
+                                    <h4>Live Location Broadcast</h4>
+                                    <p>Share live coordinates with chosen emergency contacts.</p>
+                                </div>
+                                <div class="safety-card">
+                                    <i class="fa-solid fa-circle-exclamation safety-card-icon"></i>
+                                    <h4>Active SOS Status</h4>
+                                    <p>Clear status tiles to resolve or manage live alerts.</p>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="safety-visual">
+                            <img src="{{ asset('images/landing/app-emergency.jpg') }}" alt="Oripori active SOS emergency screen" loading="lazy" width="720" height="1600">
+                            <img src="{{ asset('images/landing/app-sos.jpg') }}" alt="Oripori emergency support menu with quick contacts" loading="lazy" width="720" height="1600">
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- FEATURE 3: COMMUNITY INSIGHTS & LIVE ALERTS -->
+        <section id="community" class="section-padding">
+            <div class="container">
+                <div class="feature-row reverse">
+                    <div class="feature-text">
+                        <div class="badge-pill">
+                            <i class="fa-solid fa-people-group"></i> Community Intelligence
+                        </div>
+                        <h3 class="feature-title">Real-Time Road, Weather &amp; Flood Alerts</h3>
+                        <p class="feature-desc">
+                            Stay ahead of unpredictable weather and landslides. Community members broadcast verified local reports on foggy trail conditions, flood levels, and road blockages across Nepal.
+                        </p>
+                        <ul class="feature-list">
+                            <li class="feature-list-item">
+                                <i class="fa-solid fa-circle-check"></i>
+                                <span>Categorized alerts sorted by Critical, High, and Moderate priority levels.</span>
+                            </li>
+                            <li class="feature-list-item">
+                                <i class="fa-solid fa-circle-check"></i>
+                                <span>User-submitted reports complete with real photos and exact terrain coordinates.</span>
+                            </li>
+                            <li class="feature-list-item">
+                                <i class="fa-solid fa-circle-check"></i>
+                                <span>Community upvotes and verification to ensure maximum trust and reliability.</span>
+                            </li>
+                        </ul>
+                    </div>
+
+                    <div class="app-screen-grid">
+                        <div class="app-mockup-frame">
+                            <img src="{{ asset('images/landing/app-alerts.jpg') }}" alt="Oripori live alerts list sorted by severity" loading="lazy" width="720" height="1600">
+                        </div>
+                        <div class="app-mockup-frame">
+                            <img src="{{ asset('images/landing/app-reports.jpg') }}" alt="Oripori community road report with photo" loading="lazy" width="720" height="1600">
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+        <!-- FEATURE 4: ORIPORI COINS -->
+        <section id="rewards" class="container">
+            <div class="rewards-banner">
+                <div class="rewards-content">
+                    <div class="badge-pill">
+                        <i class="fa-solid fa-coins"></i> Contribution &amp; Rewards
+                    </div>
+                    <h3>Earn Oripori Coins by Helping Your Community</h3>
+                    <p>
+                        When you report updates, verify safety alerts, or review local businesses, you earn Oripori Coins. Instantly withdraw your coin balances directly to popular Nepalese digital wallets.
+                    </p>
+                    <div class="payout-badges">
+                        <span class="payout-chip"><i class="fa-solid fa-wallet"></i> eSewa Supported</span>
+                        <span class="payout-chip"><i class="fa-solid fa-mobile-screen"></i> Khalti Supported</span>
+                        <span class="payout-chip"><i class="fa-solid fa-building-columns"></i> Bank Transfer</span>
+                    </div>
+                    <a href="{{ route('web.offers') }}" class="rewards-link">
+                        Explore local offers &amp; rewards <i class="fa-solid fa-arrow-right"></i>
+                    </a>
+                </div>
+
+                <div class="rewards-visual">
+                    <img src="{{ asset('images/landing/app-coins.jpg') }}" alt="Oripori Coins wallet and balance screen" loading="lazy" width="720" height="1600">
+                </div>
+            </div>
+        </section>
+
+        <!-- CORE VALUES -->
+        <section id="values" class="values-section">
+            <div class="container">
+                <div class="section-title-wrap">
+                    <div class="badge-pill">
+                        <i class="fa-solid fa-heart"></i> Our Foundation
+                    </div>
+                    <h2 class="section-title">Built on Uncompromised Principles</h2>
+                    <p class="section-subtitle">
+                        Oripori is designed specifically for the unique terrain, culture, and community spirit of Nepal.
+                    </p>
+                </div>
+
+                <div class="values-grid">
+                    <div class="value-card">
+                        <div class="value-icon"><i class="fa-solid fa-flag"></i></div>
+                        <h3 class="value-title">Nepal First</h3>
+                        <p class="value-desc">Custom-built for local languages, Himalayan geography, and Nepalese digital infrastructure.</p>
+                    </div>
+                    <div class="value-card">
+                        <div class="value-icon"><i class="fa-solid fa-shield-halved"></i></div>
+                        <h3 class="value-title">Trust</h3>
+                        <p class="value-desc">Verified community reports and official hotline sources ensure dependable information.</p>
+                    </div>
+                    <div class="value-card">
+                        <div class="value-icon"><i class="fa-solid fa-brain"></i></div>
+                        <h3 class="value-title">Smartness</h3>
+                        <p class="value-desc">AI travel assistance and intelligent routing make exploring effortless.</p>
+                    </div>
+                    <div class="value-card">
+                        <div class="value-icon"><i class="fa-solid fa-users"></i></div>
+                        <h3 class="value-title">Community</h3>
+                        <p class="value-desc">Empowering citizens to share live road conditions, safety updates, and reviews.</p>
+                    </div>
+                    <div class="value-card">
+                        <div class="value-icon"><i class="fa-solid fa-life-ring"></i></div>
+                        <h3 class="value-title">Safety</h3>
+                        <p class="value-desc">Dedicated emergency SOS triggers, flood alerts, and direct emergency dispatches.</p>
+                    </div>
+                    <div class="value-card">
+                        <div class="value-icon"><i class="fa-solid fa-lock"></i></div>
+                        <h3 class="value-title">Privacy</h3>
+                        <p class="value-desc">Strict data storage controls and transparent settings protect user identities.</p>
+                    </div>
+                    <div class="value-card">
+                        <div class="value-icon"><i class="fa-solid fa-store"></i></div>
+                        <h3 class="value-title">Local Empowerment</h3>
+                        <p class="value-desc">Promoting local eateries, trekking guides, hotels, and neighborhood shops.</p>
+                    </div>
+                    <div class="value-card">
+                        <div class="value-icon"><i class="fa-solid fa-lightbulb"></i></div>
+                        <h3 class="value-title">Innovation</h3>
+                        <p class="value-desc">Next-gen mapping UI, instant wallet coin withdrawals, and real-time feeds.</p>
+                    </div>
+                    <div class="value-card">
+                        <div class="value-icon"><i class="fa-solid fa-user-gear"></i></div>
+                        <h3 class="value-title">User First</h3>
+                        <p class="value-desc">Clean, accessible, light-themed layouts optimized for all smartphone devices.</p>
+                    </div>
+                    <div class="value-card">
+                        <div class="value-icon"><i class="fa-solid fa-leaf"></i></div>
+                        <h3 class="value-title">Sustainability</h3>
+                        <p class="value-desc">Supporting eco-friendly trekking routes and responsible local tourism across trails.</p>
+                    </div>
+                    <div class="value-card">
+                        <div class="value-icon"><i class="fa-solid fa-wand-magic-sparkles"></i></div>
+                        <h3 class="value-title">Simplicity</h3>
+                        <p class="value-desc">Zero-clutter design allows 1-tap navigation to nearby places and emergency services.</p>
+                    </div>
+                    <div class="value-card">
+                        <div class="value-icon"><i class="fa-solid fa-network-wired"></i></div>
+                        <h3 class="value-title">Connectivity</h3>
+                        <p class="value-desc">Bridging rural mountain communities with urban networks through shared insights.</p>
+                    </div>
+                </div>
+            </div>
+        </section>
+        <!-- INTERFACE GALLERY SHOWCASE -->
+        <section class="section-padding">
+            <div class="container">
+                <div class="section-title-wrap">
+                    <div class="badge-pill">
+                        <i class="fa-solid fa-mobile"></i> Experience Oripori
+                    </div>
+                    <h2 class="section-title">Designed for Clarity &amp; Ease</h2>
+                    <p class="section-subtitle">
+                        Take a look inside the intuitive interfaces of the Oripori mobile application.
+                    </p>
+                </div>
+
+                <div class="gallery-grid">
+                    <div class="gallery-item">
+                        <img src="{{ asset('images/landing/app-home.jpg') }}" alt="Oripori home screen with live alerts" loading="lazy" width="720" height="1600">
+                    </div>
+                    <div class="gallery-item">
+                        <img src="{{ asset('images/landing/app-routes.jpg') }}" alt="Oripori routes and treks screen" loading="lazy" width="720" height="1600">
+                    </div>
+                    <div class="gallery-item">
+                        <img src="{{ asset('images/landing/app-ai.jpg') }}" alt="Oripori AI travel assistant chat" loading="lazy" width="720" height="1600">
+                    </div>
+                    <div class="gallery-item">
+                        <img src="{{ asset('images/landing/app-profile.jpg') }}" alt="Oripori profile with XP and badges" loading="lazy" width="720" height="1600">
+                    </div>
+                    <div class="gallery-item">
+                        <img src="{{ asset('images/landing/app-reports.jpg') }}" alt="Oripori community reports feed" loading="lazy" width="720" height="1600">
+                    </div>
+                </div>
+            </div>
+        </section>
+    </main>
 
     <!-- FOOTER -->
-    <footer class="k-footer">
-        <div class="k-footer-inner">
-            <div class="k-footer-brand">
-                <h4>Nepal Smart Travel</h4>
-                <p>Your local intelligence platform for exploring Nepal. Real-time data, community-driven, and built for the mountains.</p>
+    <footer class="site-footer">
+        <div class="container">
+            <div class="footer-top">
+                <div class="footer-brand">
+                    <div class="footer-logo">
+                        <img src="{{ asset('images/oripori_logo_wordmark.png') }}" alt="Oripori White Logo">
+                    </div>
+                    <p>
+                        A Nepal-first platform connecting people with what&rsquo;s around them&mdash;local information, community insights, safety, places, and businesses.
+                    </p>
+                </div>
+
+                <div>
+                    <h4 class="footer-heading">Services</h4>
+                    <ul class="footer-links">
+                        <li><a href="{{ route('web.places') }}">Places &amp; Trails</a></li>
+                        <li><a href="{{ route('web.category', 'hotels') }}">Hotels &amp; Stays</a></li>
+                        <li><a href="{{ route('web.category', 'restaurants') }}">Restaurants</a></li>
+                        <li><a href="{{ route('web.routes') }}">Curated Routes</a></li>
+                    </ul>
+                </div>
+
+                <div>
+                    <h4 class="footer-heading">Company</h4>
+                    <ul class="footer-links">
+                        <li><a href="#">About Us</a></li>
+                        <li><a href="{{ route('partner.register') }}">Partner With Us</a></li>
+                        <li><a href="#">Careers</a></li>
+                        <li><a href="#">Blog</a></li>
+                    </ul>
+                </div>
+
+                <div>
+                    <h4 class="footer-heading">Support</h4>
+                    <ul class="footer-links">
+                        <li><a href="#">Help Center</a></li>
+                        <li><a href="#">Safety</a></li>
+                        <li><a href="{{ route('web.legal.show', 'terms') }}">Terms of Service</a></li>
+                        <li><a href="{{ route('web.legal.show', 'privacy') }}">Privacy Policy</a></li>
+                    </ul>
+                </div>
             </div>
-            <div class="k-footer-col">
-                <h5>Services</h5>
-                <ul>
-                    <li><a href="{{ route('web.places') }}">Places & Trails</a></li>
-                    <li><a href="{{ route('web.category', 'hotels') }}">Hotels & Stays</a></li>
-                    <li><a href="{{ route('web.category', 'restaurants') }}">Restaurants</a></li>
-                    <li><a href="{{ route('web.routes') }}">Curated Routes</a></li>
-                </ul>
+
+            <div class="footer-bottom">
+                <div>&copy; Oripori. All rights reserved.</div>
             </div>
-            <div class="k-footer-col">
-                <h5>Company</h5>
-                <ul>
-                    <li><a href="#">About Us</a></li>
-                    <li><a href="{{ route('partner.register') }}">Partner With Us</a></li>
-                    <li><a href="#">Careers</a></li>
-                    <li><a href="#">Blog</a></li>
-                </ul>
-            </div>
-            <div class="k-footer-col">
-                <h5>Support</h5>
-                <ul>
-                    <li><a href="#">Help Center</a></li>
-                    <li><a href="#">Safety</a></li>
-                    <li><a href="{{ route('web.legal.show', 'terms') }}">Terms of Service</a></li>
-                    <li><a href="{{ route('web.legal.show', 'privacy') }}">Privacy Policy</a></li>
-                </ul>
-            </div>
-        </div>
-        <div class="k-footer-bottom">
-            &copy; {{ date('Y') }} Nepal Smart Travel. All rights reserved. Made with <span style="color:#ea580c">&hearts;</span> in Nepal.
         </div>
     </footer>
 
     <script>
-        // Animated counters
-        const counters = document.querySelectorAll('[data-target]');
-        counters.forEach(counter => {
-            const target = parseFloat(counter.getAttribute('data-target'));
-            const isDecimal = target % 1 !== 0;
-            const duration = 2500;
-            const start = performance.now();
-
-            function update(currentTime) {
-                const elapsed = currentTime - start;
-                const progress = Math.min(elapsed / duration, 1);
-                const easeOut = 1 - Math.pow(1 - progress, 3);
-                const current = target * easeOut;
-
-                if (isDecimal) counter.textContent = current.toFixed(1);
-                else counter.textContent = Math.floor(current);
-
-                if (progress < 1) requestAnimationFrame(update);
-            }
-            setTimeout(() => requestAnimationFrame(update), 300);
-        });
-
-        // App detection cookie
         (function () {
+            // App detection: visiting via the app's webview sets this cookie
             if (new URLSearchParams(window.location.search).has('app')) {
                 document.cookie = 'nst_app=1; path=/; max-age=31536000';
             }
-        })();
 
-        // Fixed navbar: reserve its full height, compact on scroll (hysteresis)
-        (function () {
-            var nav = document.querySelector('.k-nav');
-            if (!nav) return;
-            document.body.style.paddingTop = nav.offsetHeight + 'px';
-            window.addEventListener('resize', function () {
-                var was = nav.classList.contains('is-compact');
-                nav.classList.remove('is-compact');
-                document.body.style.paddingTop = nav.offsetHeight + 'px';
-                if (was) nav.classList.add('is-compact');
-            });
-            var onScroll = function () {
-                var y = window.scrollY;
-                if (y > 60) nav.classList.add('is-compact');
-                else if (y < 8) nav.classList.remove('is-compact');
-            };
-            onScroll();
-            window.addEventListener('scroll', onScroll, { passive: true });
+            // Mobile navigation toggle
+            var toggle = document.getElementById('nav-toggle');
+            var menu = document.getElementById('nav-menu');
+            if (toggle && menu) {
+                toggle.addEventListener('click', function () {
+                    var open = menu.classList.toggle('is-open');
+                    toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+                    var icon = toggle.querySelector('i');
+                    if (icon) icon.className = open ? 'fa-solid fa-xmark' : 'fa-solid fa-bars';
+                });
+                menu.querySelectorAll('a').forEach(function (link) {
+                    link.addEventListener('click', function () {
+                        menu.classList.remove('is-open');
+                        toggle.setAttribute('aria-expanded', 'false');
+                        var icon = toggle.querySelector('i');
+                        if (icon) icon.className = 'fa-solid fa-bars';
+                    });
+                });
+            }
         })();
     </script>
 </body>

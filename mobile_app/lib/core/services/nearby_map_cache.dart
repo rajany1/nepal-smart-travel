@@ -28,11 +28,20 @@ class NearbyMapCache {
   static final NearbyMapCache instance = NearbyMapCache._();
 
   static const String _stateKey = 'nearby_map:state:v1';
+  static const String _placesKey = 'nearby_map:places:v1';
 
   /// Snapshots older than this are still used for the camera (the user's
   /// last viewed area is useful no matter how old), but a location older
   /// than this is no longer offered as the blue-dot position.
   static const Duration _maxCameraAge = Duration(days: 7);
+
+  /// The places payload is a *rendering* shortcut, not an archive: past this
+  /// age a fresh request is more useful than a stale map.
+  static const Duration _maxPlacesAge = Duration(days: 3);
+
+  /// Hard cap on how many places are kept. The bbox endpoint returns at most
+  /// 500; anything larger would bloat SharedPreferences for no benefit.
+  static const int _maxCachedPlaces = 500;
 
   SharedPreferences? _prefs;
 
@@ -99,13 +108,110 @@ class NearbyMapCache {
     }
   }
 
+  /// Persists the last successful nearby payload together with the bbox it
+  /// was fetched for, so the next open can render the same pins instantly and
+  /// the map knows they describe that area.
+  ///
+  /// Written only after a successful response — a failed refresh never
+  /// overwrites a good snapshot with nothing.
+  Future<void> savePlaces(
+    List<Map<String, dynamic>> places, {
+    required double minLat,
+    required double maxLat,
+    required double minLng,
+    required double maxLng,
+  }) async {
+    if (places.isEmpty) return;
+    try {
+      final prefs = await _p();
+      final trimmed = places.length > _maxCachedPlaces
+          ? places.sublist(0, _maxCachedPlaces)
+          : places;
+      await prefs.setString(
+        _placesKey,
+        jsonEncode({
+          'at': DateTime.now().toIso8601String(),
+          'nLat': minLat,
+          'sLat': maxLat,
+          'wLng': minLng,
+          'eLng': maxLng,
+          'p': trimmed,
+        }),
+      );
+    } catch (e) {
+      debugPrint('NearbyMapCache savePlaces failed: $e');
+    }
+  }
+
+  /// Reads back the payload written by [savePlaces]. Returns null when there
+  /// is nothing usable (never written, corrupt, or older than
+  /// [_maxPlacesAge]) so the caller falls through to the normal fetch path.
+  Future<NearbyPlacesSnapshot?> readPlaces() async {
+    try {
+      final prefs = await _p();
+      final raw = prefs.getString(_placesKey);
+      if (raw == null || raw.isEmpty) return null;
+      final map = jsonDecode(raw);
+      if (map is! Map<String, dynamic>) return null;
+      final snapshot = NearbyPlacesSnapshot.fromJson(map);
+      if (snapshot.places.isEmpty) return null;
+      final savedAt = snapshot.savedAt;
+      if (savedAt != null &&
+          DateTime.now().difference(savedAt) > _maxPlacesAge) {
+        return null;
+      }
+      return snapshot;
+    } catch (e) {
+      debugPrint('NearbyMapCache readPlaces failed: $e');
+      return null;
+    }
+  }
+
   Future<void> clear() async {
     try {
       final prefs = await _p();
       await prefs.remove(_stateKey);
+      await prefs.remove(_placesKey);
     } catch (e) {
       debugPrint('NearbyMapCache clear failed: $e');
     }
+  }
+}
+
+@immutable
+class NearbyPlacesSnapshot {
+  const NearbyPlacesSnapshot({
+    required this.places,
+    required this.minLat,
+    required this.maxLat,
+    required this.minLng,
+    required this.maxLng,
+    this.savedAt,
+  });
+
+  final List<Map<String, dynamic>> places;
+  final double minLat;
+  final double maxLat;
+  final double minLng;
+  final double maxLng;
+  final DateTime? savedAt;
+
+  factory NearbyPlacesSnapshot.fromJson(Map<String, dynamic> json) {
+    double asDouble(dynamic v) => double.tryParse(v.toString()) ?? 0;
+    final rawPlaces = json['p'] is List ? (json['p'] as List) : const [];
+    return NearbyPlacesSnapshot(
+      places: rawPlaces
+          .whereType<Map>()
+          .map((e) => Map<String, dynamic>.from(e))
+          .toList(),
+      minLat: asDouble(json['nLat']),
+      maxLat: asDouble(json['sLat']),
+      minLng: asDouble(json['wLng']),
+      maxLng: asDouble(json['eLng']),
+      savedAt: json['at'] == null
+          ? null
+          : DateTime.tryParse(json['at'].toString()),
+    );
   }
 }
 

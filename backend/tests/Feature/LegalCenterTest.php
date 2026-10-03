@@ -691,11 +691,12 @@ it('renders legal pages inside the shared landing-page shell', function () {
     foreach (['/legal', '/legal/lc-shell'] as $uri) {
         $this->get($uri)
             ->assertOk()
-            ->assertSee('class="k-nav"', false)
-            ->assertSee('class="k-footer"', false)
+            ->assertSee('class="site-header"', false)
+            ->assertSee('class="site-footer"', false)
+            ->assertSee('images/oripori_logo.svg', false)
             ->assertSee('images/oripori_logo_wordmark.png', false)
             ->assertDontSee('images/oripori_logo.png', false)
-            ->assertDontSee('site-header', false);
+            ->assertDontSee('k-nav', false);
     }
 });
 

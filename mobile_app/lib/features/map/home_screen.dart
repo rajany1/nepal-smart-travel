@@ -123,7 +123,17 @@ class _HomeScreenState extends State<HomeScreen> {
     return Scaffold(
       body: IndexedStack(
         index: _currentIndex,
-        children: availableTabs.map<Widget>((tab) => tab['screen'] as Widget).toList(),
+        children: [
+          for (var i = 0; i < availableTabs.length; i++)
+            TickerMode(
+              // FL-30: hidden IndexedStack tabs stay mounted, so their
+              // animation tickers (blue-dot pulse, SOS pulse, spinners) keep
+              // scheduling frames for pixels nobody can see. Muting them
+              // stops the build/layout/GPU work without unmounting anything.
+              enabled: _currentIndex == i,
+              child: availableTabs[i]['screen'] as Widget,
+            ),
+        ],
       ),
       bottomNavigationBar: BottomNavigationBar(
         currentIndex: _currentIndex,

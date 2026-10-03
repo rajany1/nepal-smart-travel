@@ -447,6 +447,7 @@ class OfflineDbService {
   }
 
   /// Number of cached tiles inside [bounds] for [minZoom..maxZoom].
+  /// Pass [tileType] to count a single layer only; omit to count every layer.
   Future<int> countTilesInRegion({
     required double minLat,
     required double maxLat,
@@ -454,6 +455,7 @@ class OfflineDbService {
     required double maxLng,
     required int minZoom,
     required int maxZoom,
+    String? tileType,
   }) async {
     final db = await database;
     var total = 0;
@@ -464,8 +466,12 @@ class OfflineDbService {
       final yMin = _latToTileY(maxLat, n);
       final yMax = _latToTileY(minLat, n);
       final rows = await db.rawQuery(
-        'SELECT COUNT(*) AS c FROM tile_cache WHERE z = ? AND x BETWEEN ? AND ? AND y BETWEEN ? AND ?',
-        [z, xMin, xMax, yMin, yMax],
+        tileType == null
+            ? 'SELECT COUNT(*) AS c FROM tile_cache WHERE z = ? AND x BETWEEN ? AND ? AND y BETWEEN ? AND ?'
+            : 'SELECT COUNT(*) AS c FROM tile_cache WHERE z = ? AND x BETWEEN ? AND ? AND y BETWEEN ? AND ? AND tile_type = ?',
+        tileType == null
+            ? [z, xMin, xMax, yMin, yMax]
+            : [z, xMin, xMax, yMin, yMax, tileType],
       );
       total += (Sqflite.firstIntValue(rows) ?? 0);
     }

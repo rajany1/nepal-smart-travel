@@ -22,10 +22,8 @@
     a { color: inherit; }
     .hero, .docs { line-height: 1.6; }
 
-    /* Navbar/footer sit on the light legal body — opaque landing dark only;
-       fixed positioning + compact-on-scroll come from the shared layout. */
-    .k-nav { background: #020e0e; backdrop-filter: none; }
-    .k-footer { background: #020e0e; }
+    /* Navbar/footer come from the shared landing chrome (web/partials/site_header,
+       site_footer) — identical to web/home.blade.php. */
 
     /* Hero */
     .hero {

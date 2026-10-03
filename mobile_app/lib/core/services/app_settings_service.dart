@@ -20,6 +20,12 @@ class AppSettingsService {
     return _autoDownload!;
   }
 
+  /// Last known auto-download preference, read without awaiting disk I/O.
+  /// Falls back to the persisted default (`true`) until the first async read
+  /// completes, so hot paths can bail out synchronously instead of scheduling
+  /// work that is immediately thrown away.
+  static bool get autoDownloadMapsCached => _autoDownload ?? true;
+
   static Future<void> setDataSaverMode(bool value) async {
     _dataSaver = value;
     await _writeBool(_dataSaverKey, value);

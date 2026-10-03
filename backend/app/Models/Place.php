@@ -32,12 +32,27 @@ class Place extends Model
         'osm_id',
         'osm_type',
         'imported_at',
+        'wikidata_id',
+        'wikipedia_title',
+        'commons_category',
+        'image_discovery_status',
+        'image_discovered_at',
+        'image_attempt_count',
+        'image_next_retry_at',
         'is_open',
         'opening_hours',
         'today_offer',
         'live_event',
         'last_status_update',
     ];
+
+    /** Image-discovery states stored in places.image_discovery_status. */
+    public const IMAGE_STATUS_PENDING = 'pending';
+    public const IMAGE_STATUS_RUNNING = 'running';
+    public const IMAGE_STATUS_DONE = 'done';
+    public const IMAGE_STATUS_PARTIAL = 'partial';
+    public const IMAGE_STATUS_NONE = 'none';
+    public const IMAGE_STATUS_FAILED = 'failed';
 
     protected function casts(): array
     {
@@ -54,6 +69,9 @@ class Place extends Model
             'is_open' => 'boolean',
             'opening_hours' => 'array',
             'last_status_update' => 'datetime',
+            'image_discovered_at' => 'datetime',
+            'image_attempt_count' => 'integer',
+            'image_next_retry_at' => 'datetime',
         ];
     }
 
@@ -113,6 +131,43 @@ class Place extends Model
 
     public function images()
     {
-        return $this->hasMany(PlaceImage::class, 'place_id');
+        return $this->hasMany(PlaceImage::class, 'place_id')
+            ->orderByDesc('is_primary')
+            ->orderBy('sort_order')
+            ->orderByDesc('id');
+    }
+
+    /** Public gallery: approved images only, primary first. */
+    public function galleryImages()
+    {
+        return $this->hasMany(PlaceImage::class, 'place_id')
+            ->where('status', PlaceImage::STATUS_APPROVED)
+            ->orderByDesc('is_primary')
+            ->orderBy('sort_order')
+            ->orderByDesc('id');
+    }
+
+    /**
+     * Exactly one row — for list/map endpoints that only need a cover image.
+     * Eager-loading the full gallery there used to be free when every place
+     * had ≤1 image; at 3–10 images per place it would multiply the payload.
+     */
+    public function primaryImage()
+    {
+        return $this->hasOne(PlaceImage::class, 'place_id')
+            ->where('status', PlaceImage::STATUS_APPROVED)
+            ->orderByDesc('is_primary')
+            ->orderBy('sort_order')
+            ->orderByDesc('id');
+    }
+
+    /** Additive API field: full gallery with attribution (URLs unchanged). */
+    public function imageGallery(): array
+    {
+        return $this->galleryImages
+            ->map(fn (PlaceImage $image) => $image->credit())
+            ->filter()
+            ->values()
+            ->all();
     }
 }

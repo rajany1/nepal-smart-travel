@@ -40,33 +40,261 @@
         .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
     </style>
     @if($landingNav)
-    {{-- Shared landing navbar (same as web/dark-layout) for guest-facing login/register --}}
+    {{-- Shared landing header/footer design system — identical to web/home.blade.php --}}
+    <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     <style>
-        body { padding-top: 76px; }
-        @media (max-width: 1024px) { body { padding-top: 84px; } }
-        .k-nav {
-            display: flex; align-items: center; justify-content: space-between;
-            padding: 0.75rem 3rem;
-            position: fixed; top: 0; left: 0; right: 0; z-index: 100;
-            background: #020e0e; /* opaque — sits on the light slate body */
-            border-bottom: 1px solid rgba(255,255,255,0.04);
-            transition: padding 0.25s ease;
+        :root {
+            --primary: #49C5B6;
+            --primary-dark: #015048;
+            --primary-deep: #002824;
+            --primary-light: #EBF7F5;
+            --primary-border: rgba(73, 197, 182, 0.25);
+            --white: #ffffff;
+            --gray-50: #F7FAF9;
+            --gray-100: #EDF3F1;
+            --gray-200: #D8E4E1;
+            --gray-600: #516360;
+            --gray-800: #1C2B29;
+            --font-main: 'Manrope', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            --header-height: 80px;
+            --shadow-md: 0 10px 30px rgba(1, 80, 72, 0.08);
+            --radius-sm: 10px;
+            --radius-full: 9999px;
         }
-        .k-logo { display: flex; align-items: center; gap: 0.75rem; }
-        .k-nav-links { display: flex; gap: 2rem; list-style: none; margin: 0; padding: 0; }
-        .k-nav-links a { color: rgba(255,255,255,0.55); text-decoration: none; font-size: 0.85rem; font-weight: 500; transition: all 0.3s ease; position: relative; padding: 0.25rem 0; }
-        .k-nav-links a:hover { color: #fff; }
-        .k-nav-links a.active { color: #f59e0b; }
-        .k-nav-links a::after { content: ''; position: absolute; bottom: -2px; left: 50%; width: 0; height: 2px; background: linear-gradient(90deg, #f59e0b, #ea580c); transition: all 0.3s ease; transform: translateX(-50%); border-radius: 2px; }
-        .k-nav-links a:hover::after, .k-nav-links a.active::after { width: 100%; }
-        .k-nav-cta { background: linear-gradient(135deg, #f59e0b, #ea580c); color: #fff; border: none; padding: 0.6rem 1.4rem; border-radius: 10px; font-weight: 600; font-size: 0.85rem; cursor: pointer; display: inline-flex; align-items: center; gap: 0.5rem; box-shadow: 0 4px 20px rgba(245,158,11,0.25); transition: all 0.3s ease; text-decoration: none; }
-        .k-nav-cta:hover { transform: translateY(-2px); box-shadow: 0 8px 30px rgba(245,158,11,0.4); }
-        .k-nav.is-compact { padding: 0.4rem 3rem; }
-        .k-nav.is-compact .k-logo img { height: 44px !important; }
+
+        body {
+            font-family: var(--font-main);
+            padding-top: var(--header-height);
+        }
+
+        /* ===== HEADER & NAVIGATION ===== */
+        .site-header {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: var(--header-height);
+            background-color: rgba(255, 255, 255, 0.92);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border-bottom: 1px solid var(--gray-200);
+            z-index: 300;
+            display: flex;
+            align-items: center;
+        }
+
+        .site-header .container {
+            width: 100%;
+            max-width: 1240px;
+            margin: 0 auto;
+            padding: 0 24px;
+        }
+
+        .header-container {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            width: 100%;
+        }
+
+        .brand-logo img {
+            height: 38px;
+            width: auto;
+            object-fit: contain;
+        }
+
+        .nav-menu {
+            display: flex;
+            align-items: center;
+            gap: 32px;
+            list-style: none;
+            margin: 0;
+            padding: 0;
+        }
+
+        .nav-link {
+            font-size: 0.95rem;
+            font-weight: 600;
+            color: var(--primary-dark);
+            position: relative;
+            padding: 6px 0;
+        }
+
+        .nav-link::after {
+            content: '';
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            width: 0%;
+            height: 2px;
+            background-color: var(--primary);
+            transition: width 0.3s ease;
+        }
+
+        .nav-link:hover::after {
+            width: 100%;
+        }
+
+        .btn-cta-placeholder {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            padding: 12px 24px;
+            background-color: var(--primary-dark);
+            color: var(--white);
+            font-weight: 700;
+            font-size: 0.95rem;
+            border-radius: var(--radius-full);
+            box-shadow: 0 4px 14px rgba(1, 80, 72, 0.2);
+            border: 2px solid var(--primary-dark);
+            transition: all 0.3s ease;
+            white-space: nowrap;
+            text-decoration: none;
+        }
+
+        .btn-cta-placeholder:hover {
+            background-color: var(--primary);
+            border-color: var(--primary);
+            color: var(--primary-dark);
+            transform: translateY(-2px);
+            box-shadow: var(--shadow-glow);
+        }
+
+        .nav-mobile-toggle {
+            display: none;
+            font-size: 1.4rem;
+            color: var(--primary-dark);
+            cursor: pointer;
+            background: none;
+            border: none;
+            line-height: 1;
+            padding: 6px;
+        }
+
+        /* ===== FOOTER ===== */
+        .site-footer {
+            background-color: var(--primary-deep);
+            color: var(--white);
+            padding: 80px 0 40px 0;
+            border-top: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .site-footer .container {
+            width: 100%;
+            max-width: 1240px;
+            margin: 0 auto;
+            padding: 0 24px;
+        }
+
+        .footer-top {
+            display: grid;
+            grid-template-columns: 2fr 1fr 1fr 1fr;
+            gap: 50px;
+            margin-bottom: 60px;
+        }
+
+        .footer-brand {
+            max-width: 360px;
+        }
+
+        .footer-logo {
+            margin-bottom: 20px;
+        }
+
+        .footer-logo img {
+            height: 36px;
+            width: auto;
+            object-fit: contain;
+        }
+
+        .footer-brand p {
+            color: rgba(255, 255, 255, 0.7);
+            font-size: 0.95rem;
+            line-height: 1.7;
+            margin-bottom: 24px;
+        }
+
+        .footer-heading {
+            color: var(--white);
+            font-size: 1.1rem;
+            font-weight: 800;
+            margin-bottom: 20px;
+            position: relative;
+        }
+
+        .footer-links {
+            list-style: none;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            margin: 0;
+            padding: 0;
+        }
+
+        .footer-links a {
+            color: rgba(255, 255, 255, 0.75);
+            font-size: 0.95rem;
+            text-decoration: none;
+            transition: all 0.25s ease;
+        }
+
+        .footer-links a:hover {
+            color: var(--primary);
+        }
+
+        .footer-bottom {
+            border-top: 1px solid rgba(255, 255, 255, 0.1);
+            padding-top: 30px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 20px;
+            font-size: 0.9rem;
+            color: rgba(255, 255, 255, 0.6);
+        }
+
+        /* ===== RESPONSIVE ===== */
         @media (max-width: 1024px) {
-            .k-nav-links { display: none; }
-            .k-nav { padding: 1rem 1.5rem; }
-            .k-nav.is-compact { padding: 0.45rem 1.5rem; }
+            .site-footer { padding: 60px 0 32px 0; }
+            .footer-top { grid-template-columns: 1fr 1fr; gap: 40px; }
+            .footer-bottom { justify-content: center; text-align: center; }
+        }
+
+        @media (max-width: 992px) {
+            .nav-menu {
+                display: none;
+                position: absolute;
+                top: 100%;
+                left: 0;
+                right: 0;
+                flex-direction: column;
+                align-items: stretch;
+                gap: 0;
+                background: var(--white);
+                border-bottom: 1px solid var(--gray-200);
+                box-shadow: var(--shadow-md);
+                padding: 8px 24px 16px;
+            }
+            .nav-menu.is-open { display: flex; }
+            .nav-menu li { width: 100%; }
+            .nav-menu .nav-link {
+                display: block;
+                padding: 13px 0;
+                border-bottom: 1px solid var(--gray-100);
+            }
+            .nav-menu li:last-child .nav-link { border-bottom: none; }
+            .nav-link::after { display: none; }
+            .nav-mobile-toggle { display: block; }
+        }
+
+        @media (max-width: 576px) {
+            .footer-top { grid-template-columns: 1fr; }
+        }
+
+        @media (max-width: 480px) {
+            .brand-logo img { height: 26px; }
+            .btn-cta-placeholder { padding: 9px 15px; font-size: 0.85rem; }
         }
     </style>
     @endif
@@ -76,23 +304,30 @@
 
         {{-- ========== TOP HEADER ========== --}}
         @if($landingNav)
-            {{-- Shared landing navbar (identical to web/dark-layout) --}}
-            <nav class="k-nav">
-                <a href="{{ route('web.home') }}" class="k-logo" style="text-decoration:none">
-                    <img src="{{ asset('images/oripori_logo_wordmark.png') }}" alt="Oripori" style="height:52px;width:auto;object-fit:contain">
-                </a>
-                <ul class="k-nav-links">
-                    <li><a href="{{ route('web.home') }}">Home</a></li>
-                    <li><a href="{{ route('web.places') }}">Places</a></li>
-                    <li><a href="{{ route('web.routes') }}">Routes</a></li>
-                    <li><a href="{{ route('web.offers') }}">Offers</a></li>
-                    <li><a href="{{ route('partner.login') }}" class="active">Partner</a></li>
-                </ul>
-                <a href="{{ env('PLAY_STORE_URL', '#') }}" class="k-nav-cta">
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-                    Get the App
-                </a>
-            </nav>
+            {{-- Shared landing header — identical to web/home.blade.php --}}
+            <header class="site-header">
+                <div class="container header-container">
+                    <a href="{{ route('web.home') }}" class="brand-logo" aria-label="Oripori Home">
+                        <img src="{{ asset('images/oripori_logo.svg') }}" alt="Oripori Logo">
+                    </a>
+
+                    <nav>
+                        <ul class="nav-menu" id="nav-menu">
+                            <li><a href="{{ route('web.home') }}#explore" class="nav-link">Explore</a></li>
+                            <li><a href="{{ route('web.home') }}#safety" class="nav-link">Safety &amp; SOS</a></li>
+                            <li><a href="{{ route('web.home') }}#community" class="nav-link">Community Insights</a></li>
+                            <li><a href="{{ route('web.home') }}#rewards" class="nav-link">Oripori Coins</a></li>
+                            <li><a href="{{ route('web.home') }}#values" class="nav-link">Core Values</a></li>
+                        </ul>
+                    </nav>
+
+                    <a href="{{ route('partner.login') }}" class="btn-cta-placeholder">Partner Login</a>
+
+                    <button class="nav-mobile-toggle" id="nav-toggle" type="button" aria-label="Toggle navigation" aria-expanded="false" aria-controls="nav-menu">
+                        <i class="fa-solid fa-bars"></i>
+                    </button>
+                </div>
+            </header>
         @else
         <header class="bg-primary-900 text-white shadow-lg sticky top-0 z-40">
             <div class="max-w-7xl mx-auto px-4 sm:px-6 h-14 flex items-center justify-between">
@@ -305,10 +540,62 @@
             @endif
         @endauth
 
-        {{-- ========== FOOTER (Desktop) ========== --}}
+        {{-- ========== FOOTER ========== --}}
+        @if($landingNav)
+            {{-- Shared landing footer — identical to web/home.blade.php --}}
+            <footer class="site-footer">
+                <div class="container">
+                    <div class="footer-top">
+                        <div class="footer-brand">
+                            <div class="footer-logo">
+                                <img src="{{ asset('images/oripori_logo_wordmark.png') }}" alt="Oripori White Logo">
+                            </div>
+                            <p>
+                                A Nepal-first platform connecting people with what&rsquo;s around them&mdash;local information, community insights, safety, places, and businesses.
+                            </p>
+                        </div>
+
+                        <div>
+                            <h4 class="footer-heading">Services</h4>
+                            <ul class="footer-links">
+                                <li><a href="{{ route('web.places') }}">Places &amp; Trails</a></li>
+                                <li><a href="{{ route('web.category', 'hotels') }}">Hotels &amp; Stays</a></li>
+                                <li><a href="{{ route('web.category', 'restaurants') }}">Restaurants</a></li>
+                                <li><a href="{{ route('web.routes') }}">Curated Routes</a></li>
+                            </ul>
+                        </div>
+
+                        <div>
+                            <h4 class="footer-heading">Company</h4>
+                            <ul class="footer-links">
+                                <li><a href="#">About Us</a></li>
+                                <li><a href="{{ route('partner.register') }}">Partner With Us</a></li>
+                                <li><a href="#">Careers</a></li>
+                                <li><a href="#">Blog</a></li>
+                            </ul>
+                        </div>
+
+                        <div>
+                            <h4 class="footer-heading">Support</h4>
+                            <ul class="footer-links">
+                                <li><a href="#">Help Center</a></li>
+                                <li><a href="#">Safety</a></li>
+                                <li><a href="{{ route('web.legal.show', 'terms') }}">Terms of Service</a></li>
+                                <li><a href="{{ route('web.legal.show', 'privacy') }}">Privacy Policy</a></li>
+                            </ul>
+                        </div>
+                    </div>
+
+                    <div class="footer-bottom">
+                        <div>&copy; Oripori. All rights reserved.</div>
+                    </div>
+                </div>
+            </footer>
+        @else
         <footer class="hidden lg:block bg-primary-900 text-teal-300 text-center text-xs py-4">
             &copy; {{ date('Y') }} Nepal Smart Travel & Local Intelligence Platform — Business Partner Portal
         </footer>
+        @endif
     </div>
 
     {{-- ========== DRAWER JS ========== --}}
@@ -342,24 +629,26 @@
     </script>
     @if($landingNav)
     <script>
-        // Fixed landing navbar: reserve full height, compact on scroll (hysteresis).
+        // Mobile navigation toggle — identical to web/home.blade.php
         (function () {
-            var nav = document.querySelector('.k-nav');
-            if (!nav) return;
-            document.body.style.paddingTop = nav.offsetHeight + 'px';
-            window.addEventListener('resize', function () {
-                var was = nav.classList.contains('is-compact');
-                nav.classList.remove('is-compact');
-                document.body.style.paddingTop = nav.offsetHeight + 'px';
-                if (was) nav.classList.add('is-compact');
-            });
-            var onScroll = function () {
-                var y = window.scrollY;
-                if (y > 60) nav.classList.add('is-compact');
-                else if (y < 8) nav.classList.remove('is-compact');
-            };
-            onScroll();
-            window.addEventListener('scroll', onScroll, { passive: true });
+            var toggle = document.getElementById('nav-toggle');
+            var menu = document.getElementById('nav-menu');
+            if (toggle && menu) {
+                toggle.addEventListener('click', function () {
+                    var open = menu.classList.toggle('is-open');
+                    toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+                    var icon = toggle.querySelector('i');
+                    if (icon) icon.className = open ? 'fa-solid fa-xmark' : 'fa-solid fa-bars';
+                });
+                menu.querySelectorAll('a').forEach(function (link) {
+                    link.addEventListener('click', function () {
+                        menu.classList.remove('is-open');
+                        toggle.setAttribute('aria-expanded', 'false');
+                        var icon = toggle.querySelector('i');
+                        if (icon) icon.className = 'fa-solid fa-bars';
+                    });
+                });
+            }
         })();
     </script>
     @endif

@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import "../../core/services/localization_service.dart";
 import '../core/api/api_client.dart';
@@ -109,6 +111,158 @@ class PlaceModel {
   }
 }
 
+// ── Displayable place pipeline ──────────────────────────────────────────────
+//
+// Three independent payloads describe "places":
+//   _places         ← /places/nearby-combined (DB rows as `admin_<int id>` +
+//                     live OSM nodes as `osm_<type>/<id>`)
+//   _viewportPlaces ← /places/bbox            (DB rows as a plain int id)
+//   _nepalPlaces    ← /places/all             (DB rows as a plain int id)
+//
+// buildDisplayablePlaces() folds them into the ONE collection the UI reads:
+//
+//   merge → dedupe by placeIdentityKey() → drop category == "All"
+//                        ↓
+//                 displayablePlaces
+//                   ↙         ↘
+//               Nearby        Map → viewport cull → markers
+//
+// Both consumers start from that collection, so a record can never be
+// visible on one and missing from the other.
+
+/// `place_categories` ships a placeholder row named "All" (id 1) and the
+/// client prepends its own synthetic one (id 0); every gazetteer seed row is
+/// attached to it. It means "no real category", so such records are not
+/// displayable anywhere — Nearby list, map, or marker.
+bool isDisplayablePlace(PlaceModel place) =>
+    (place.category ?? '').trim().toLowerCase() != 'all';
+
+/// Stable identity of a place across the payloads that describe it.
+///
+/// Formats traced to their producers in PlaceController:
+///   `35`          bboxQuery() / all() / nearby()  → int $place->id
+///   `admin_35`    nearbyCombined() admin branch   → 'admin_' . int id
+///   `osm_node/123` nearbyCombined() OSM branch    → 'osm_' . type/id
+///
+/// So `35` and `admin_35` are the same DB row and must collapse to one key,
+/// while `osm_node/123` is a live OSM node that may or may not have a DB row.
+String placeIdentityKey(PlaceModel place) {
+  final raw = place.id?.toString() ?? '';
+  if (raw.startsWith('admin_')) {
+    final dbId = raw.substring('admin_'.length);
+    if (int.tryParse(dbId) != null) return 'db:$dbId';
+  } else if (raw.startsWith('osm_')) {
+    return 'osm:${raw.substring('osm_'.length)}';
+  }
+  if (int.tryParse(raw) != null) return 'db:$raw';
+  return 'raw:$raw';
+}
+
+/// Whether [place] sits inside the camera viewport (plus [margin] of
+/// cushion so edge pins are already drawn before they scroll into view).
+bool isWithinViewport(
+  PlaceModel place, {
+  required double minLat,
+  required double maxLat,
+  required double minLng,
+  required double maxLng,
+  double margin = 0.15,
+}) =>
+    place.latitude >= minLat - margin &&
+    place.latitude <= maxLat + margin &&
+    place.longitude >= minLng - margin &&
+    place.longitude <= maxLng + margin;
+
+/// Viewport cull shared by the marker pipeline.
+List<PlaceModel> placesWithinViewport(
+  List<PlaceModel> places, {
+  required double minLat,
+  required double maxLat,
+  required double minLng,
+  required double maxLng,
+  double margin = 0.15,
+}) =>
+    [
+      for (final place in places)
+        if (isWithinViewport(place,
+            minLat: minLat,
+            maxLat: maxLat,
+            minLng: minLng,
+            maxLng: maxLng,
+            margin: margin))
+          place,
+    ];
+
+/// True when two records are within 100 m of each other — the distance the
+/// server uses to decide a DB row and a live OSM node are the same place
+/// (PlaceController::nearbyCombined cross-source dedupe).
+bool _isSamePlaceWithin100m(PlaceModel a, PlaceModel b) {
+  const earthRadiusKm = 6371.0;
+  final dLat = (b.latitude - a.latitude) * math.pi / 180;
+  final dLng = (b.longitude - a.longitude) * math.pi / 180;
+  final h = math.sin(dLat / 2) * math.sin(dLat / 2) +
+      math.cos(a.latitude * math.pi / 180) *
+          math.cos(b.latitude * math.pi / 180) *
+          math.sin(dLng / 2) * math.sin(dLng / 2);
+  final distanceKm = 2 * earthRadiusKm * math.asin(math.min(1, math.sqrt(h)));
+  return distanceKm <= 0.1;
+}
+
+/// Builds the canonical displayable collection (see pipeline note above).
+///
+/// Pure and only re-run when a raw source changes — the provider memoizes it,
+/// so camera movement and widget rebuilds just read the result.
+List<PlaceModel> buildDisplayablePlaces({
+  required List<PlaceModel> nearbyPlaces,
+  required List<PlaceModel> viewportPlaces,
+  required List<PlaceModel> nepalPlaces,
+}) {
+  final byKey = <String, PlaceModel>{};
+
+  // Trust order: the radius payload carries distance/images for the places it
+  // actually selected, so it wins a tie; the bbox and Nepal-wide payloads
+  // fill in everything it missed (server density caps, places outside the
+  // radius).
+  void addAll(List<PlaceModel> source) {
+    for (final place in source) {
+      if (!isDisplayablePlace(place)) continue;
+      byKey.putIfAbsent(placeIdentityKey(place), () => place);
+    }
+  }
+
+  addAll(nearbyPlaces);
+  addAll(viewportPlaces);
+  addAll(nepalPlaces);
+
+  // Ids can never collide across the DB/OSM boundary (`db:35` vs
+  // `osm:node/35`), so a live OSM node describing a place the DB already
+  // stores would survive as a duplicate marker. Mirror the server rule: same
+  // name within 100 m ⇒ one place, and the DB row wins (it has the images,
+  // ratings and verification the live node lacks).
+  final dbByName = <String, List<PlaceModel>>{};
+  final osmKeys = <String>[];
+  for (final entry in byKey.entries) {
+    if (entry.key.startsWith('osm:')) {
+      osmKeys.add(entry.key);
+    } else if (entry.key.startsWith('db:')) {
+      final name = entry.value.name.trim().toLowerCase();
+      if (name.isNotEmpty) (dbByName[name] ??= []).add(entry.value);
+    }
+  }
+
+  for (final key in osmKeys) {
+    final osm = byKey[key];
+    if (osm == null) continue;
+    final candidates = dbByName[osm.name.trim().toLowerCase()];
+    if (candidates == null) continue;
+    if (candidates.any((db) => _isSamePlaceWithin100m(db, osm))) {
+      byKey.remove(key);
+    }
+  }
+
+  return byKey.values.toList(growable: false);
+}
+
 class CategoryModel {
   final int id;
   final String name;
@@ -194,6 +348,36 @@ class PlaceProvider extends ChangeNotifier {
     return minLat >= s - slack && maxLat <= n + slack &&
         minLng >= w - slack && maxLng <= e + slack;
   }
+
+  // ── Canonical displayable collection (memoized) ────────────────────────
+  // Rebuilt only by _invalidateDisplayable(), which every mutator of
+  // _places / _viewportPlaces / _nepalPlaces calls before notifyListeners().
+  // Camera movement and rebuilds read the memo — they never re-merge.
+  List<PlaceModel>? _displayablePlaces;
+  Set<String>? _viewportPlaceKeys;
+
+  /// The one collection the UI reads: every raw source merged, deduped and
+  /// stripped of `category == "All"`. The Nearby sheet and the map's marker
+  /// builder both start here, so they cannot disagree about what is
+  /// displayable.
+  List<PlaceModel> get displayablePlaces =>
+      _displayablePlaces ??= buildDisplayablePlaces(
+        nearbyPlaces: _places,
+        viewportPlaces: _viewportPlaces,
+        nepalPlaces: _nepalPlaces,
+      );
+
+  /// Normalized identities of the current bbox payload. The marker builder
+  /// uses them to keep the rows the server already scoped to the viewport
+  /// (viewport + prefetch buffer) without re-testing each coordinate.
+  Set<String> get viewportPlaceKeys =>
+      _viewportPlaceKeys ??= _viewportPlaces.map(placeIdentityKey).toSet();
+
+  void _invalidateDisplayable() {
+    _displayablePlaces = null;
+    _viewportPlaceKeys = null;
+  }
+
   bool get isLoading => _isLoading;
   bool get isLoadingNepal => _isLoadingNepal;
   bool get isLoadingViewport => _isLoadingViewport;
@@ -238,6 +422,7 @@ class PlaceProvider extends ChangeNotifier {
       );
       final data = response.data['data'] as List? ?? [];
       _places = data.map((j) => PlaceModel.fromJson(j)).toList();
+      _invalidateDisplayable();
     } catch (e) {
       print('❌ Failed to fetch nearby places: $e');
       _errorMessage = 'Failed to load nearby places';
@@ -273,6 +458,7 @@ class PlaceProvider extends ChangeNotifier {
   void setCachedPlaces(List<PlaceModel> places) {
     if (places.isNotEmpty) {
       _places = places;
+      _invalidateDisplayable();
       notifyListeners();
     }
   }
@@ -281,6 +467,7 @@ class PlaceProvider extends ChangeNotifier {
   /// instant, no network round-trip, no spinner.
   void setViewportPlaces(List<PlaceModel> places) {
     _places = places;
+    _invalidateDisplayable();
     notifyListeners();
   }
 
@@ -310,6 +497,7 @@ class PlaceProvider extends ChangeNotifier {
       if (places.isNotEmpty) {
         _nepalPlaces = places;
         _nepalFetchedAt = DateTime.now();
+        _invalidateDisplayable();
         try {
           await _offlineDb.cachePlacesBulk(
             data.map((j) => Map<String, dynamic>.from(j)).toList(),
@@ -324,6 +512,7 @@ class PlaceProvider extends ChangeNotifier {
         final cached = await _offlineDb.getAllCachedPlaces(limit: 15000);
         if (cached.isNotEmpty) {
           _nepalPlaces = cached.map((j) => PlaceModel.fromJson(j)).toList();
+          _invalidateDisplayable();
         }
       } catch (e2) {
         print('Failed to load cached Nepal places: $e2');
@@ -342,6 +531,7 @@ class PlaceProvider extends ChangeNotifier {
       final cached = await _offlineDb.getAllCachedPlaces(limit: 15000);
       if (cached.isNotEmpty) {
         _nepalPlaces = cached.map((j) => PlaceModel.fromJson(j)).toList();
+        _invalidateDisplayable();
         notifyListeners();
       }
     } catch (e) {
@@ -356,7 +546,10 @@ class PlaceProvider extends ChangeNotifier {
   /// Repeated requests for the same (grid-normalised) area — e.g. reopening
   /// the Nearby screen without moving the map — are served from memory for
   /// [viewportStaleness] instead of hitting the API again.
-  Future<void> fetchViewportPlaces({
+  ///
+  /// Returns the raw payload (so the caller can persist it for the next open)
+  /// or an empty list when nothing new was fetched.
+  Future<List<Map<String, dynamic>>> fetchViewportPlaces({
     required double minLat,
     required double maxLat,
     required double minLng,
@@ -364,7 +557,7 @@ class PlaceProvider extends ChangeNotifier {
     int? zoom,
     String? category,
   }) async {
-    if (_isLoadingViewport) return;
+    if (_isLoadingViewport) return const [];
 
     // Same 0.05° grid the server rounds its cache key to, so a request that
     // the backend would answer from Redis is also skipped on the client.
@@ -381,12 +574,13 @@ class PlaceProvider extends ChangeNotifier {
     if (fetchedAt != null &&
         _viewportSignature == signature &&
         DateTime.now().difference(fetchedAt) < viewportStaleness) {
-      return;
+      return const [];
     }
 
     _isLoadingViewport = true;
     notifyListeners();
 
+    var raw = const <Map<String, dynamic>>[];
     try {
       final response = await _api.getPlacesInBBox(
         minLat: minLat,
@@ -398,7 +592,8 @@ class PlaceProvider extends ChangeNotifier {
         limit: 500,
       );
       final data = (response.data['data'] as List?) ?? [];
-      final places = data.map((j) => PlaceModel.fromJson(j)).toList();
+      raw = data.map((j) => Map<String, dynamic>.from(j)).toList();
+      final places = raw.map((j) => PlaceModel.fromJson(j)).toList();
       if (places.isNotEmpty) {
         _viewportPlaces = places;
         _viewportMinLat = minLat;
@@ -407,20 +602,48 @@ class PlaceProvider extends ChangeNotifier {
         _viewportMaxLng = maxLng;
         _viewportSignature = signature;
         _viewportFetchedAt = DateTime.now();
+        _invalidateDisplayable();
         notifyListeners();
       }
     } catch (e) {
       // Viewport fetch failed — nepalPlaces remains as fallback
       debugPrint('fetchViewportPlaces failed: $e');
+      raw = const [];
     }
 
     _isLoadingViewport = false;
+    notifyListeners();
+    return raw;
+  }
+
+  /// Rehydrate the last successful bbox payload from the local snapshot so
+  /// reopening Nearby paints markers before any request goes out.
+  ///
+  /// The coverage bounds are recorded (otherwise [_markerPlacesForViewport]
+  /// would ignore the payload), but the staleness stamps are deliberately
+  /// left untouched — this data came from disk, not from the API, so the
+  /// background refresh must still run.
+  void restoreViewportPlaces(
+    List<PlaceModel> places, {
+    required double minLat,
+    required double maxLat,
+    required double minLng,
+    required double maxLng,
+  }) {
+    if (places.isEmpty) return;
+    _viewportPlaces = places;
+    _viewportMinLat = minLat;
+    _viewportMaxLat = maxLat;
+    _viewportMinLng = minLng;
+    _viewportMaxLng = maxLng;
+    _invalidateDisplayable();
     notifyListeners();
   }
 
   /// Set viewport places directly (used for client-side fallback from nepalPlaces).
   void setViewportPlacesDirect(List<PlaceModel> places) {
     _viewportPlaces = places;
+    _invalidateDisplayable();
     // Deliberately do NOT record coverage bounds: these came from the
     // Nepal-wide dataset, not from a bbox response, so the caller should
     // keep treating them as an unbounded fallback.

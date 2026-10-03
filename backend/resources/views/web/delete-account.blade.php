@@ -4,9 +4,12 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Delete Your Account - Oripori</title>
+    <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
-        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; line-height: 1.6; color: #333; background: #f5f5f5; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; line-height: 1.6; color: #333; background: #f5f5f5; padding-top: var(--header-height); }
+        @include('web.partials.site_chrome_css')
         .container { max-width: 800px; margin: 0 auto; padding: 40px 20px; }
         .card { background: white; border-radius: 12px; padding: 40px; margin-bottom: 24px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
         h1 { font-size: 28px; margin-bottom: 8px; color: #1a1a1a; }
@@ -29,6 +32,7 @@
     </style>
 </head>
 <body>
+    @include('web.partials.site_header')
     <div class="container">
         <div class="card">
             <h1>Delete Your Oripori Account</h1>
@@ -108,11 +112,8 @@
                 Contact us at <a href="mailto:support@nepalsmarttravel.com">support@nepalsmarttravel.com</a>
             </div>
         </div>
-
-        <div class="footer">
-            <p>&copy; {{ date('Y') }} Oripori. All rights reserved.</p>
-            <p><a href="/">Home</a> | <a href="/legal/privacy_policy">Privacy Policy</a> | <a href="/legal/terms_conditions">Terms of Use</a></p>
-        </div>
     </div>
+    @include('web.partials.site_footer')
+    @include('web.partials.site_nav_js')
 </body>
 </html>

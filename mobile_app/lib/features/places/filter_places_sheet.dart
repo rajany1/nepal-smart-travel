@@ -124,14 +124,21 @@ class _FilterPlacesSheetState extends State<FilterPlacesSheet> {
             spacing: 8,
             runSpacing: 8,
             children: [
+              // One "All" chip only, meaning "no filter" (categoryId == null).
+              // The server also ships a real place_categories row named 'All'
+              // — rendering it too produced a second chip that silently sent
+              // category_id=<All row id> and filtered the map down to it.
               _buildCategoryChip('All', _selectedCategoryId == null,
                   () => setState(() => _selectedCategoryId = null)),
-              ...categories.where((c) => c.id != 0).map((cat) => _buildCategoryChip(
-                    cat.name,
-                    _selectedCategoryId == cat.id,
-                    () => setState(() => _selectedCategoryId =
-                        _selectedCategoryId == cat.id ? null : cat.id),
-                  )),
+              ...categories
+                  .where((c) =>
+                      c.id != 0 && c.name.trim().toLowerCase() != 'all')
+                  .map((cat) => _buildCategoryChip(
+                        cat.name,
+                        _selectedCategoryId == cat.id,
+                        () => setState(() => _selectedCategoryId =
+                            _selectedCategoryId == cat.id ? null : cat.id),
+                      )),
             ],
           ),
           const SizedBox(height: 16),

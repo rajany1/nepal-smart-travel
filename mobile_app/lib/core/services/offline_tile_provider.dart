@@ -235,6 +235,7 @@ class OfflineTileDownloader {
   }) async {
     if (_running) return;
     if (!ignoreDataSaver && await AppSettingsService.dataSaverMode) return;
+    if (isCancelled != null && isCancelled()) return;
 
     _running = true;
     final db = OfflineDbService.instance;
@@ -250,6 +251,25 @@ class OfflineTileDownloader {
     var done = 0;
 
     try {
+      // Nothing to fetch when every tile of the region is already on disk.
+      // Bail before the per-tile walk: that loop costs one SQLite lookup per
+      // cell, so a fully cached region used to spin for ~100s (6165 skips at
+      // ~62/s) every time the camera settled without downloading a byte.
+      final cached = await db.countTilesInRegion(
+        minLat: minLat,
+        maxLat: maxLat,
+        minLng: minLng,
+        maxLng: maxLng,
+        minZoom: minZoom,
+        maxZoom: maxZoom,
+        tileType: 'default', // same layer hasTile()/saveTile() use below
+      );
+      if (isCancelled != null && isCancelled()) return;
+      if (cached >= total) {
+        onProgress?.call(total, total);
+        return;
+      }
+
       for (var z = minZoom; z <= maxZoom; z++) {
         final n = 1 << z;
         final xMin = _lonToTileX(minLng, n);
