@@ -29,3 +29,8 @@ Schedule::command('data:purge')->dailyAt('03:00')->withoutOverlapping();
 // Reverse invalid self-reward coin credits (report owner rewarded on own report).
 // Safety net behind the prevention layer; bounded scan, append-only reversals.
 Schedule::command('coins:reconcile-self-rewards')->dailyAt('03:30')->withoutOverlapping();
+
+// Weather grid refresh from Open-Meteo's free tier (3 batches/run now that the
+// grid is 0.1°). Hourly keeps the chip's "current" weather honest while staying
+// far under the free 10k/day cap; failed runs keep the previous snapshot.
+Schedule::command('weather:fetch')->hourly()->withoutOverlapping();

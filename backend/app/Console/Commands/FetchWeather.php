@@ -2,17 +2,18 @@
 
 namespace App\Console\Commands;
 
-use Illuminate\Console\Command;
 use App\Models\WeatherGrid;
-use Illuminate\Support\Facades\Http;
+use Illuminate\Console\Command;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Http;
 
 class FetchWeather extends Command
 {
-    protected $signature = 'weather:fetch';
+    protected $signature = 'weather:fetch
+                            {--allow-partial : Insert whatever was fetched even if some batches failed (leaves coverage holes)}';
     protected $description = 'Fetch weather forecast from Open-Meteo for Nepal grid points';
 
-    private const GRID_STEP = 0.05;
+    private const GRID_STEP = 0.1;
     private const BATCH_SIZE = 500;
     private const RATE_LIMIT_DELAY = 10;
     private const MIN_LAT = 26.35;
@@ -72,77 +73,155 @@ class FetchWeather extends Command
         foreach ($batches as $batchIndex => $batch) {
             $this->info('Batch ' . ($batchIndex + 1) . '/' . count($batches) . ' (' . count($batch) . ' points)...');
 
-            $lats = array_map(fn($p) => $p[0], $batch);
-            $lngs = array_map(fn($p) => $p[1], $batch);
+            $outcome = $this->fetchBatch($batch);
 
-            $retries = 3;
-            $success = false;
-
-            while ($retries > 0 && !$success) {
-                try {
-                    $response = Http::timeout(30)->get(
-                        'https://api.open-meteo.com/v1/forecast',
-                        [
-                            'latitude' => implode(',', $lats),
-                            'longitude' => implode(',', $lngs),
-                            'current' => 'weather_code,temperature_2m,precipitation,wind_speed_10m,relative_humidity_2m',
-                            'timezone' => 'auto',
-                        ]
-                    );
-
-                    if ($response->status() === 429) {
-                        $retries--;
-                        if ($retries > 0) {
-                            $this->warn('Rate limited, waiting 65s...');
-                            sleep(65);
-                        }
-                        continue;
-                    }
-
-                    if (!$response->successful()) {
-                        $this->warn('Batch ' . ($batchIndex + 1) . ' failed: HTTP ' . $response->status());
-                        break;
-                    }
-
-                    $data = $response->json();
-                    $items = is_array($data) && array_is_list($data) ? $data : [$data];
-
-                    foreach ($items as $item) {
-                        if (!isset($item['current'])) continue;
-                        $allRows[] = [
-                            'grid_lat' => $item['latitude'],
-                            'grid_lng' => $item['longitude'],
-                            'weather_code' => (int) ($item['current']['weather_code'] ?? 0),
-                            'temperature' => $item['current']['temperature_2m'] ?? null,
-                            'precipitation' => $item['current']['precipitation'] ?? null,
-                            'wind_speed' => $item['current']['wind_speed_10m'] ?? null,
-                            'humidity' => $item['current']['relative_humidity_2m'] ?? null,
-                            'fetched_at' => $fetchedAt,
-                            'created_at' => $fetchedAt,
-                            'updated_at' => $fetchedAt,
-                        ];
-                    }
-
-                    $success = true;
-                } catch (\Exception $e) {
-                    $this->warn('Batch ' . ($batchIndex + 1) . ' error: ' . $e->getMessage());
-                    break;
-                }
+            if (isset($outcome['dailyLimit'])) {
+                // Open-Meteo's free tier is quota'd per IP per day (shared IPs
+                // exhaust it fast). Waiting inside this run cannot help — stop
+                // now and keep the previous snapshot; the next scheduled run
+                // picks up where coverage allows.
+                $this->error('Open-Meteo daily quota exhausted: ' . $outcome['dailyLimit']);
+                $this->error('Keeping previous weather data. The hourly schedule will retry automatically.');
+                return $this->insertRows($allRows, $fetchedAt, partial: true);
             }
 
-            if (!$success) {
-                $this->warn('Batch ' . ($batchIndex + 1) . ' failed after retries');
+            if (isset($outcome['failed'])) {
+                $this->error('Batch ' . ($batchIndex + 1) . ' failed: ' . $outcome['failed']);
+                return $this->insertRows($allRows, $fetchedAt, partial: true);
             }
 
-            if ($batchIndex + 1 < count($batches)) sleep(self::RATE_LIMIT_DELAY);
+            $allRows = array_merge($allRows, $outcome['rows']);
+
+            if ($batchIndex + 1 < count($batches)) {
+                sleep(self::RATE_LIMIT_DELAY);
+            }
         }
 
+        return $this->insertRows($allRows, $fetchedAt, partial: false);
+    }
+
+    /**
+     * Fetch one batch with bounded retries.
+     *
+     * @return array{rows?: array, dailyLimit?: string, failed?: string}
+     */
+    private function fetchBatch(array $batch): array
+    {
+        $lats = array_map(fn ($p) => $p[0], $batch);
+        $lngs = array_map(fn ($p) => $p[1], $batch);
+
+        $retries = 3;
+
+        while ($retries > 0) {
+            try {
+                $response = Http::timeout(30)->get(
+                    'https://api.open-meteo.com/v1/forecast',
+                    [
+                        'latitude' => implode(',', $lats),
+                        'longitude' => implode(',', $lngs),
+                        'current' => 'weather_code,temperature_2m,precipitation,wind_speed_10m,relative_humidity_2m',
+                        'timezone' => 'auto',
+                    ]
+                );
+
+                if ($response->status() === 429) {
+                    $reason = (string) ($response->json('reason') ?? 'rate limited');
+                    if (stripos($reason, 'daily') !== false) {
+                        return ['dailyLimit' => $reason];
+                    }
+                    $retries--;
+                    if ($retries > 0) {
+                        $this->warn('Rate limited, waiting 65s... (' . $retries . ' retries left)');
+                        sleep(65);
+                        continue;
+                    }
+                    return ['failed' => 'rate limited: ' . $reason];
+                }
+
+                if (!$response->successful()) {
+                    $retries--;
+                    if ($retries > 0) {
+                        $this->warn('HTTP ' . $response->status() . ', retrying in 15s...');
+                        sleep(15);
+                        continue;
+                    }
+                    return ['failed' => 'HTTP ' . $response->status()];
+                }
+
+                $data = $response->json();
+                $items = is_array($data) && array_is_list($data) ? $data : [$data];
+                $items = array_values(array_filter($items, fn ($item) => isset($item['current'])));
+
+                // The whole run only replaces the snapshot when every point came
+                // back — a short response would silently punch coverage holes.
+                if (count($items) !== count($batch)) {
+                    $retries--;
+                    if ($retries > 0) {
+                        $this->warn('Incomplete batch (' . count($items) . '/' . count($batch) . '), retrying in 15s...');
+                        sleep(15);
+                        continue;
+                    }
+                    return ['failed' => 'incomplete response: ' . count($items) . '/' . count($batch) . ' points'];
+                }
+
+                $rows = [];
+                foreach ($items as $item) {
+                    $rows[] = [
+                        'grid_lat' => $item['latitude'],
+                        'grid_lng' => $item['longitude'],
+                        'weather_code' => (int) ($item['current']['weather_code'] ?? 0),
+                        'temperature' => $item['current']['temperature_2m'] ?? null,
+                        'precipitation' => $item['current']['precipitation'] ?? null,
+                        'wind_speed' => $item['current']['wind_speed_10m'] ?? null,
+                        'humidity' => $item['current']['relative_humidity_2m'] ?? null,
+                        'fetched_at' => null,
+                        'created_at' => null,
+                        'updated_at' => null,
+                    ];
+                }
+
+                return ['rows' => $rows];
+            } catch (\Exception $e) {
+                $retries--;
+                if ($retries > 0) {
+                    $this->warn('Error: ' . $e->getMessage() . ' — retrying in 15s...');
+                    sleep(15);
+                    continue;
+                }
+                return ['failed' => $e->getMessage()];
+            }
+        }
+
+        return ['failed' => 'retries exhausted'];
+    }
+
+    /**
+     * Replace the snapshot only on a complete fetch (or, with --allow-partial,
+     * when the operator explicitly accepted holes). Otherwise the previous
+     * data stays untouched so the app keeps serving full coverage.
+     */
+    private function insertRows(array $allRows, $fetchedAt, bool $partial): int
+    {
         if (empty($allRows)) {
-            $this->warn('No weather data fetched.');
+            $this->warn('No weather data fetched. Previous weather data kept.');
             return 1;
         }
 
-        $this->info('Inserting ' . count($allRows) . ' weather records...');
+        $isComplete = !$partial;
+        if (!$isComplete && !$this->option('allow-partial')) {
+            $this->warn(count($allRows) . ' points fetched but the run was incomplete — previous weather data kept.');
+            $this->warn('Re-run when the quota recovers, or pass --allow-partial to insert anyway.');
+            return 1;
+        }
+
+        foreach ($allRows as &$row) {
+            $row['fetched_at'] = $fetchedAt;
+            $row['created_at'] = $fetchedAt;
+            $row['updated_at'] = $fetchedAt;
+        }
+        unset($row);
+
+        $this->info('Inserting ' . count($allRows) . ' weather records' . ($isComplete ? '' : ' (PARTIAL)') . '...');
 
         WeatherGrid::query()->truncate();
 
@@ -162,11 +241,11 @@ class FetchWeather extends Command
 
         for ($lat = self::MIN_LAT; $lat <= self::MAX_LAT; $lat += self::GRID_STEP) {
             for ($lng = self::MIN_LNG; $lng <= self::MAX_LNG; $lng += self::GRID_STEP) {
-                $lat = round($lat, 4);
-                $lng = round($lng, 4);
+                $latR = round($lat, 4);
+                $lngR = round($lng, 4);
 
-                if ($this->isInsideNepal($lat, $lng)) {
-                    $points[] = [$lat, $lng];
+                if ($this->isInsideNepal($latR, $lngR)) {
+                    $points[] = [$latR, $lngR];
                 }
             }
         }
