@@ -34,7 +34,9 @@ class BipadApiService
         $limit = $limit ?? $this->pageSize;
         $url = "{$this->baseUrl}" . config('bipad.endpoints.incidents');
 
-        $extraParams = $orderByCreated ? ['ordering' => '-createdOn'] : [];
+        // BIPAD's createdOn/incidentOn ordering params return incorrectly ordered
+        // records; ordering=-id is the only verified descending-recent order.
+        $extraParams = $orderByCreated ? ['ordering' => '-id'] : [];
 
         return $this->fetchPaginated($url, $offset, $limit, $extraParams);
     }
