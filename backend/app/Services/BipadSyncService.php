@@ -57,41 +57,41 @@ class BipadSyncService
         ];
 
         Log::info('BIPAD sync: starting fetcher', ['endpoint' => $endpoint]);
-            try {
-                $fetcher(function ($item) use ($endpoint, &$stats, $log) {
-                    $stats['fetched']++;
-                    Log::info('BIPAD sync: fetcher called', ['id' => $item['id'] ?? 'no-id']);
-                    try {
-                        $result = $this->processItem($item, $endpoint);
-                        
-                        match ($result) {
-                            'created' => $stats['created']++,
-                            'updated' => $stats['updated']++,
-                            'skipped' => $stats['skipped']++,
-                        };
-                    } catch (\Throwable $e) {
-                        Log::error('BIPAD processItem failed', [
-                            'endpoint' => $endpoint,
-                            'item_id' => $item['id'] ?? 'unknown',
-                            'item_keys' => array_keys($item),
-                            'error' => $e->getMessage(),
-                            'file' => $e->getFile(),
-                            'line' => $e->getLine(),
-                            'trace' => $e->getTraceAsString(),
-                        ]);
-                        $stats['skipped']++;
-                    }
 
-                    if ($stats['fetched'] % 50 === 0) {
-                        $log->update([
-                            'records_fetched' => $stats['fetched'],
-                            'records_created' => $stats['created'],
-                            'records_updated' => $stats['updated'],
-                            'records_skipped' => $stats['skipped'],
-                        ]);
-                    }
-                });
-            } catch (\Throwable $e) {
+        try {
+            $fetcher(function ($item) use ($endpoint, &$stats, $log) {
+                $stats['fetched']++;
+                Log::info('BIPAD sync: fetcher called', ['id' => $item['id'] ?? 'no-id']);
+                try {
+                    $result = $this->processItem($item, $endpoint);
+
+                    match ($result) {
+                        'created' => $stats['created']++,
+                        'updated' => $stats['updated']++,
+                        'skipped' => $stats['skipped']++,
+                    };
+                } catch (\Throwable $e) {
+                    Log::error('BIPAD processItem failed', [
+                        'endpoint' => $endpoint,
+                        'item_id' => $item['id'] ?? 'unknown',
+                        'item_keys' => array_keys($item),
+                        'error' => $e->getMessage(),
+                        'file' => $e->getFile(),
+                        'line' => $e->getLine(),
+                        'trace' => $e->getTraceAsString(),
+                    ]);
+                    $stats['skipped']++;
+                }
+
+                if ($stats['fetched'] % 50 === 0) {
+                    $log->update([
+                        'records_fetched' => $stats['fetched'],
+                        'records_created' => $stats['created'],
+                        'records_updated' => $stats['updated'],
+                        'records_skipped' => $stats['skipped'],
+                    ]);
+                }
+            });
 
             $log->update([
                 'status' => 'success',
@@ -101,7 +101,6 @@ class BipadSyncService
                 'records_updated' => $stats['updated'],
                 'records_skipped' => $stats['skipped'],
             ]);
-
         } catch (\Throwable $e) {
             Log::error('BIPAD sync failed', [
                 'endpoint' => $endpoint,
@@ -195,10 +194,14 @@ class BipadSyncService
             throw new \Exception("Skipping hazard type: {$hazardType}");
         }
 
-        // Check if item is too old (real-time only)
+        // Real-time only: require a parseable timestamp, then enforce max_hours_old.
+        // Missing/invalid timestamps must never create reports.
         $maxHoursOld = config('bipad.max_hours_old', 6);
         $createdOn = $this->api->parseDate($item['createdOn'] ?? $item['incidentOn'] ?? $item['startedOn'] ?? null);
-        if ($createdOn && $createdOn->lt(now()->subHours($maxHoursOld))) {
+        if (!$createdOn) {
+            throw new \Exception('Skipping incident without a valid timestamp');
+        }
+        if ($createdOn->lt(now()->subHours($maxHoursOld))) {
             throw new \Exception("Skipping old data: {$createdOn->diffForHumans()}");
         }
 

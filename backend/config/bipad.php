@@ -209,10 +209,11 @@ return [
         'deforestation', 'famine', 'food_poisoning', 'animal_flu',
         'pandemics', 'microorganism_attack', 'other_natural', 
         'other_non_natural', 'response_accident',
-        'flood', 'inundation',  // Weather/hydrological condition warnings
+        // flood + inundation intentionally NOT skipped: real incidents that
+        // must become reports/alerts (aligned with production policy).
     ],
 
-    // Only process reports within this many hours (real-time only)
-    // Set to 720 (30 days) for testing with historical data; use 6 for production real-time
-    'max_hours_old' => 720,
+    // Only process reports within this many hours (real-time only).
+    // Production policy: 6 hours. (Use 720 only for local historical-data testing.)
+    'max_hours_old' => 6,
 ];
