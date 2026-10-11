@@ -228,6 +228,13 @@ class _NearbyMapScreenState extends State<NearbyMapScreen>
   Timer? _weatherDebounceTimer;
   Timer? _sosRefreshTimer;
 
+  // Weather chip tap → cell-scale effect inside that cell's boundary.
+  // Time-limited (see _toggleBoundaryFx): on = the toggled cell, cleared
+  // by the second tap, the 15s limit, or dispose.
+  bool _boundaryFxOn = false;
+  _WeatherGridPoint? _boundaryFxCell;
+  Timer? _boundaryFxTimer;
+
   // Label positioning state
   final Map<String, double> _labelWidthCache = {};
   String _lastLabelStateKey = '';
@@ -374,6 +381,7 @@ class _NearbyMapScreenState extends State<NearbyMapScreen>
     _syncStreamController?.close();
     _weatherDebounceTimer?.cancel();
     _sosRefreshTimer?.cancel();
+    _boundaryFxTimer?.cancel();
     _rotationNotifier.dispose();
     _camVersion.dispose();
     _headingNotifier.dispose();
@@ -1783,7 +1791,6 @@ class _NearbyMapScreenState extends State<NearbyMapScreen>
                       return _buildFlutterMap(
                         isSatellite: mapView.isSatellite,
                         placesVisible: mapView.showPlaces,
-                        showWeather: mapView.showWeather,
                         showRoutes: mapView.showRoutes,
                       );
                     },
@@ -2007,9 +2014,11 @@ class _NearbyMapScreenState extends State<NearbyMapScreen>
   Widget _buildFlutterMap({
     required bool isSatellite,
     required bool placesVisible,
-    required bool showWeather,
     required bool showRoutes,
   }) {
+    // Tap-revealed boundary effect cell: frozen for this build, visible
+    // only while toggled on (≤15s).
+    final fxCell = _boundaryFxOn ? _boundaryFxCell : null;
     return FlutterMap(
       mapController: _mapController,
       options: _buildMapOptions(),
@@ -2049,8 +2058,22 @@ class _NearbyMapScreenState extends State<NearbyMapScreen>
             MarkerLayer(
                 markers: NepalBoundaryService.instance.buildDistrictLabels()),
         ],
-        if (showWeather && _weatherGrid.isNotEmpty)
-          PolygonLayer(polygons: _buildWeatherPolygons()),
+        // Chip tap → the chip's effect scaled to and clipped to its
+        // nearest cell's geometry: same visual, larger spatial form.
+        // Built only while toggled on (≤15s) and only while that cell is
+        // still in the grid. TickerMode mirrors the chip's lifecycle gate;
+        // the widget handles RepaintBoundary + IgnorePointer + camera
+        // reprojection.
+        if (fxCell != null &&
+            _weatherGrid
+                .any((p) => p.lat == fxCell.lat && p.lng == fxCell.lng))
+          TickerMode(
+            enabled: _mapTickersEnabled,
+            child: WeatherBoundaryFx(
+              code: fxCell.code,
+              corners: weatherCellCorners(fxCell.lat, fxCell.lng),
+            ),
+          ),
         if (_routes.isNotEmpty)
           PolylineLayer(
             polylines: [
@@ -2407,8 +2430,8 @@ class _NearbyMapScreenState extends State<NearbyMapScreen>
                         horizontal: 8, vertical: 4),
                     child: Text(
                       isSatellite
-                          ? '© Esri, Maxar, Earthstar Geographics'
-                          : '© OpenStreetMap contributors',
+                          ? '© Esri, Maxar, Earthstar Geographics · Weather: Open-Meteo'
+                          : '© OpenStreetMap contributors · Weather: Open-Meteo',
                       style: const TextStyle(
                         fontSize: 10,
                         height: 1.2,
@@ -2429,8 +2452,9 @@ class _NearbyMapScreenState extends State<NearbyMapScreen>
   /// Weather chip — a small white card pinned bottom-left above the map
   /// attribution (left: 16, bottom: sheet height + 44) showing the current
   /// area's temperature/condition with a subtle condition-tied animation
-  /// (WeatherChip). Non-interactive: [IgnorePointer] passes taps and drags
-  /// straight through to the map beneath.
+  /// (WeatherChip). Tapping the card toggles that cell's boundary effect
+  /// ([WeatherBoundaryFx]); taps outside the card fall through to the map
+  /// ([GestureDetector] with deferToChild hits only the card itself).
   ///
   /// Hidden while the location-status card is up (that card owns the
   /// screen in exactly the states the chip would contradict) and until the
@@ -2467,7 +2491,9 @@ class _NearbyMapScreenState extends State<NearbyMapScreen>
                 // H1: outside the map's own TickerMode — mirror its
                 // lifecycle gate so the effect freezes with the screen.
                 enabled: _mapTickersEnabled,
-                child: IgnorePointer(
+                child: GestureDetector(
+                  behavior: HitTestBehavior.deferToChild,
+                  onTap: () => _toggleBoundaryFx(point),
                   child: WeatherChip(
                     code: point.code,
                     temperatureC: point.temp,
@@ -2480,6 +2506,34 @@ class _NearbyMapScreenState extends State<NearbyMapScreen>
         );
       },
     );
+  }
+
+  /// Card tap → toggle the chip's effect at cell scale inside that cell's
+  /// boundary ([WeatherBoundaryFx], nearest cell only — the same point the
+  /// card shows). Time-limited: auto-hides after 15s, which is ≥ one full
+  /// loop of every effect (longest = cloudy at 14s), so an orphaned
+  /// animation can never run unattended; tapping the card again hides it
+  /// immediately.
+  void _toggleBoundaryFx(_WeatherGridPoint cell) {
+    _boundaryFxTimer?.cancel();
+    if (_boundaryFxOn) {
+      setState(() {
+        _boundaryFxOn = false;
+        _boundaryFxCell = null;
+      });
+      return;
+    }
+    setState(() {
+      _boundaryFxOn = true;
+      _boundaryFxCell = cell;
+    });
+    _boundaryFxTimer = Timer(const Duration(seconds: 15), () {
+      if (!mounted || !_boundaryFxOn) return;
+      setState(() {
+        _boundaryFxOn = false;
+        _boundaryFxCell = null;
+      });
+    });
   }
 
   /// Grid point closest to the camera centre. O(n) over the viewport grid,
@@ -4768,34 +4822,18 @@ class _NearbyMapScreenState extends State<NearbyMapScreen>
     }
   }
 
-  List<Polygon> _buildWeatherPolygons() {
+  /// The four corners (SW, SE, NE, NW) of the 0.05° weather cell centred
+  /// on [lat]/[lng] — the clip geometry of the chip's boundary effect
+  /// (`WeatherBoundaryFx`).
+  List<LatLng> weatherCellCorners(double lat, double lng) {
     const step = 0.05;
     const halfStep = step / 2;
-    return _weatherGrid.map((pt) {
-      return Polygon(
-        points: [
-          LatLng(pt.lat - halfStep, pt.lng - halfStep),
-          LatLng(pt.lat - halfStep, pt.lng + halfStep),
-          LatLng(pt.lat + halfStep, pt.lng + halfStep),
-          LatLng(pt.lat + halfStep, pt.lng - halfStep),
-        ],
-        color: _weatherCodeToColor(pt.code).withOpacity(0.4),
-        borderStrokeWidth: 0,
-        isFilled: true,
-      );
-    }).toList();
-  }
-
-  Color _weatherCodeToColor(int code) {
-    if (code == 0) return Colors.amber;
-    if (code >= 1 && code <= 3) return Colors.grey;
-    if (code >= 45 && code <= 48) return const Color(0xFFD3D3D3);
-    if (code >= 51 && code <= 55) return const Color(0xFF87CEEB);
-    if (code >= 61 && code <= 65) return const Color(0xFF4169E1);
-    if (code >= 71 && code <= 77) return Colors.white;
-    if (code >= 80 && code <= 82) return Colors.blue;
-    if (code >= 95 && code <= 99) return Colors.purple;
-    return Colors.transparent;
+    return [
+      LatLng(lat - halfStep, lng - halfStep),
+      LatLng(lat - halfStep, lng + halfStep),
+      LatLng(lat + halfStep, lng + halfStep),
+      LatLng(lat + halfStep, lng - halfStep),
+    ];
   }
 
   void _showSosInfoSheet(BuildContext context, dynamic sos) {

@@ -1,16 +1,18 @@
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:flutter_map/flutter_map.dart';
+// latlong2 also defines a generic Path<T>, which would shadow dart:ui's.
+import 'package:latlong2/latlong.dart' hide Path;
 
 import '../../../config/themes/app_theme.dart';
 import '../../../core/services/localization_service.dart';
 
 /// Weather-code effect groups for the weather chip's ambient animation.
 ///
-/// The WMO groupings mirror `_weatherCodeToColor` in `nearby_map_screen.dart`
-/// (clear 0, cloudy 1-3, fog 45-48, drizzle 51-57, rain 61-67 + 80-82,
-/// snow 71-77 + 85-86, storm 95-99) so the chip always agrees with the
-/// map's weather overlay colours.
+/// The WMO groupings mirror the map's weather grid codes (clear 0, cloudy
+/// 1-3, fog 45-48, drizzle 51-57, rain 61-67 + 80-82, snow 71-77 + 85-86,
+/// storm 95-99) so the chip always agrees with the fetched weather data.
 enum WeatherFx { clear, cloudy, fog, drizzle, rain, snow, storm }
 
 /// Maps a WMO weather code to its chip effect. Unknown codes fall back to
@@ -146,8 +148,9 @@ Color fxIconColor(WeatherFx fx) {
 /// * Under `MediaQuery.disableAnimations` the controller stops on a
 ///   representative static frame (t = 0.5).
 ///
-/// Non-interactive by construction (wrap in [IgnorePointer] where it is
-/// placed): map gestures fall straight through.
+/// Non-interactive by construction: the placement site decides the pointer
+/// behaviour ([GestureDetector] for the tap-to-reveal boundary effect,
+/// [IgnorePointer] to pass taps straight through to the map beneath).
 class WeatherChip extends StatefulWidget {
   const WeatherChip({
     super.key,
@@ -317,6 +320,23 @@ class _WeatherChipState extends State<WeatherChip>
   }
 }
 
+/// Canvas geometry for boundary mode ([_WeatherFxPainter.boundary]).
+///
+/// [clip] is the cell quad in coordinates relative to the CustomPaint's
+/// origin (the projected bbox's top-left), so clipping happens against the
+/// boundary's own geometry — the effect can never paint outside it.
+/// [primScale] thickens the fixed-size primitives to the cell's size, so
+/// the effect reads the same at map scale as it does on the chip.
+class _BoundaryFxLayout {
+  const _BoundaryFxLayout({required this.clip, required this.primScale});
+
+  /// The cell polygon, local to the CustomPaint box.
+  final Path clip;
+
+  /// Primitive scale (cell bbox / chip height), clamped by the caller.
+  final double primScale;
+}
+
 /// The ambient effect painter.
 ///
 /// Driven by `super(repaint: animation)` — every tick repaints this
@@ -328,18 +348,54 @@ class _WeatherChipState extends State<WeatherChip>
 /// Every colour bakes its alpha at construction time; the maximum canvas
 /// alpha anywhere is 0x2E / 255 ≈ 0.176 — inside the ≤0.18 budget, so the
 /// text on top always stays fully legible.
+///
+/// Two canvas modes share this one [paint] routine:
+/// * **Card mode** ([boundary] null): full canvas, primitives at scale 1.0,
+///   clear-glow anchored to the icon tile — the chip exactly as always.
+/// * **Boundary mode** ([boundary] set): clip to the cell polygon, then
+///   draw the same effect over the cell bbox with primitives scaled by
+///   `primScale` and the clear-glow re-anchored to the cell centre. Same
+///   visual, spatial form — no effect is ever redefined here.
 class _WeatherFxPainter extends CustomPainter {
-  _WeatherFxPainter({required this.fx, required this.animation})
-      : super(repaint: animation);
+  _WeatherFxPainter({
+    required this.fx,
+    required this.animation,
+    this.boundary,
+  }) : super(repaint: animation);
 
   final WeatherFx fx;
   final Animation<double> animation;
+
+  /// Null = chip-card mode (full canvas, unit primitives, tile anchor).
+  final _BoundaryFxLayout? boundary;
 
   // ── Shared, pre-allocated resources (one-time init, never mutated) ──
 
   /// Icon-tile centre in chip coordinates (10dp padding + half a 30dp tile).
   static const double _tileCx = 25;
   static const double _tileCy = 24;
+
+  /// Boundary-mode copies of the stroked paints (strokeWidth × primScale),
+  /// built lazily once per painter instance. The card path keeps using the
+  /// untouched static paints; colours/caps are copied from them so the two
+  /// modes can never diverge.
+  Paint? _fogX;
+  Paint? _drizzleX;
+  Paint? _rainX;
+
+  static Paint _scaledStroke(Paint base, double s) => Paint()
+    ..color = base.color
+    ..strokeWidth = base.strokeWidth * s
+    ..strokeCap = base.strokeCap;
+
+  Paint _fogFor(double s) =>
+      s == 1.0 ? _fogPaint : (_fogX ??= _scaledStroke(_fogPaint, s));
+
+  Paint _drizzleFor(double s) =>
+      s == 1.0 ? _drizzlePaint : (_drizzleX ??= _scaledStroke(_drizzlePaint, s));
+
+  Paint _rainFor(double s) =>
+      s == 1.0 ? _rainPaint : (_rainX ??= _scaledStroke(_rainPaint, s));
 
   /// Clear: amber glow behind the icon, breathing through 5 alpha steps.
   static final List<Paint> _clearPulse = <Paint>[
@@ -401,103 +457,122 @@ class _WeatherFxPainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
+    final b = boundary;
+    if (b == null) {
+      // Card mode: identical op sequence to the original painter —
+      // scale 1.0 (`x * 1.0 == x` exactly) and the icon-tile anchor.
+      _drawFx(canvas, size, 1.0, const Offset(_tileCx, _tileCy));
+      return;
+    }
+    // Boundary mode: the caller's box IS the cell bbox, so clipping to the
+    // local quad is clipping to the boundary, and size is the cell size.
+    canvas.save();
+    canvas.clipPath(b.clip);
+    _drawFx(canvas, size, b.primScale,
+        Offset(size.width / 2, size.height / 2));
+    canvas.restore();
+  }
+
+  void _drawFx(Canvas canvas, Size size, double s, Offset clearAnchor) {
     final t = animation.value;
     switch (fx) {
       case WeatherFx.clear:
-        _paintClear(canvas, t);
+        _paintClear(canvas, t, s, clearAnchor);
         return;
       case WeatherFx.cloudy:
-        _paintClouds(canvas, size, t, _cloudPaint);
+        _paintClouds(canvas, size, t, _cloudPaint, s);
         return;
       case WeatherFx.fog:
-        _paintFog(canvas, size, t);
+        _paintFog(canvas, size, t, _fogFor(s), s);
         return;
       case WeatherFx.drizzle:
-        _paintDrops(canvas, size, t, 3, _drizzlePaint, 4, 1.5);
+        _paintDrops(canvas, size, t, 3, _drizzleFor(s), 4, 1.5, s);
         return;
       case WeatherFx.rain:
-        _paintDrops(canvas, size, t, 5, _rainPaint, 7, 3);
+        _paintDrops(canvas, size, t, 5, _rainFor(s), 7, 3, s);
         return;
       case WeatherFx.snow:
-        _paintSnow(canvas, size, t);
+        _paintSnow(canvas, size, t, s);
         return;
       case WeatherFx.storm:
-        _paintStorm(canvas, size, t);
+        _paintStorm(canvas, size, t, s);
         return;
     }
   }
 
-  /// Clear: one amber glow behind the icon tile, radius and alpha breathing
-  /// together. Single layer — nothing stacks over the text.
-  void _paintClear(Canvas canvas, double t) {
+  /// Clear: one amber glow behind the icon tile (card) or at the cell
+  /// centre (boundary), radius and alpha breathing together. Single layer —
+  /// nothing stacks over the text.
+  void _paintClear(Canvas canvas, double t, double s, Offset anchor) {
     final pulse = 0.5 + 0.5 * math.sin(t * math.pi * 2);
     final step = (pulse * (_clearPulse.length - 1)).round();
-    final radius = 9 + 7 * pulse;
-    canvas.drawCircle(
-      const Offset(_tileCx, _tileCy),
-      radius,
-      _clearPulse[step],
-    );
+    final radius = (9 + 7 * pulse) * s;
+    canvas.drawCircle(anchor, radius, _clearPulse[step]);
   }
 
-  /// Cloudy / storm base: two cloud silhouettes drifting across the chip on
-  /// offset phases (14s loop = barely-perceptible crawl).
-  void _paintClouds(Canvas canvas, Size size, double t, Paint paint) {
+  /// Cloudy / storm base: two cloud silhouettes drifting across the canvas
+  /// on offset phases (14s loop = barely-perceptible crawl). The silhouette
+  /// is a fixed-size path, so it scales as a whole in boundary mode.
+  void _paintClouds(
+      Canvas canvas, Size size, double t, Paint paint, double s) {
     for (var i = 0; i < 2; i++) {
       final phase = (t + i * 0.5) % 1.0;
-      final x = -45.0 + phase * (size.width + 90);
+      final x = -45.0 * s + phase * (size.width + 90 * s);
       final y = size.height * (i == 0 ? 0.02 : 0.48);
       canvas.save();
       canvas.translate(x, y);
+      if (s != 1.0) canvas.scale(s);
       canvas.drawPath(_cloudPath, paint);
       canvas.restore();
     }
   }
 
   /// Fog: three soft mist bands sliding gently out of phase.
-  void _paintFog(Canvas canvas, Size size, double t) {
+  void _paintFog(Canvas canvas, Size size, double t, Paint paint, double s) {
     for (var i = 0; i < 3; i++) {
       final y = size.height * (0.2 + 0.3 * i);
-      final dx = math.sin((t + i * 0.33) * math.pi * 2) * 14;
+      final dx = math.sin((t + i * 0.33) * math.pi * 2) * 14 * s;
       canvas.drawLine(
-        Offset(-8 + dx, y),
+        Offset(-8 * s + dx, y),
         Offset(size.width * 0.65 + dx, y),
-        _fogPaint,
+        paint,
       );
     }
   }
 
   /// Drizzle / rain: [count] drops falling on staggered phases, slightly
-  /// slanted, wrapping from above the chip.
+  /// slanted, wrapping from above the canvas.
   void _paintDrops(Canvas canvas, Size size, double t, int count, Paint paint,
-      double length, double slant) {
+      double length, double slant, double s) {
     for (var i = 0; i < count; i++) {
       final x = ((i + 0.5) / count) * size.width;
       final phase = (t + i * (0.6 / count)) % 1.0;
-      final y = -10 + phase * (size.height + 20);
+      final y = -10 * s + phase * (size.height + 20 * s);
       canvas.drawLine(
         Offset(x, y),
-        Offset(x - slant, y + length),
+        Offset(x - slant * s, y + length * s),
         paint,
       );
     }
   }
 
   /// Snow: four flakes sinking while swaying side to side.
-  void _paintSnow(Canvas canvas, Size size, double t) {
+  void _paintSnow(Canvas canvas, Size size, double t, double s) {
     for (var i = 0; i < 4; i++) {
       final x = ((i + 0.5) / 4) * size.width +
-          math.sin((t + i * 0.25) * math.pi * 2) * 6;
+          math.sin((t + i * 0.25) * math.pi * 2) * 6 * s;
       final phase = (t + i * 0.25) % 1.0;
-      final y = -8 + phase * (size.height + 16);
-      canvas.drawCircle(Offset(x, y), i.isEven ? 2.2 : 1.6, _snowPaint);
+      final y = -8 * s + phase * (size.height + 16 * s);
+      canvas.drawCircle(
+          Offset(x, y), (i.isEven ? 2.2 : 1.6) * s, _snowPaint);
     }
   }
 
   /// Storm: purple cloud drift plus one rare, dim flash at the loop head —
-  /// a hint of lightning, never a strobe.
-  void _paintStorm(Canvas canvas, Size size, double t) {
-    _paintClouds(canvas, size, t, _stormCloudPaint);
+  /// a hint of lightning, never a strobe. The flash covers the whole
+  /// canvas (chip tile or full cell).
+  void _paintStorm(Canvas canvas, Size size, double t, double s) {
+    _paintClouds(canvas, size, t, _stormCloudPaint, s);
     if (t < 0.07) {
       final idx = ((t / 0.07) * (_flashRamp.length - 1))
           .floor()
@@ -511,5 +586,148 @@ class _WeatherFxPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant _WeatherFxPainter old) =>
-      old.fx != fx || old.animation != animation;
+      old.fx != fx ||
+      old.animation != animation ||
+      old.boundary != boundary;
+}
+
+/// The weather chip's effect rendered at the scale of its map weather cell:
+/// the same [_WeatherFxPainter] (same colours, same loop, same reduced-
+/// motion freeze), clipped to the exact boundary polygon of [corners] and
+/// stretched over its projected bbox — a larger spatial form of the card
+/// visual that lives strictly inside the boundary.
+///
+/// Placement contract (`nearby_map_screen.dart`):
+/// * Inserted as a `FlutterMap` child (a Stack child), so it returns a
+///   [Positioned] box over the cell bbox and reprojects on camera change
+///   through [MapCamera.maybeOf]'s inherited camera dependency.
+/// * Caller wraps it in [TickerMode] (map ticker gate) and [IgnorePointer]
+///   here steals no map gestures; [RepaintBoundary] keeps its 60fps
+///   repaints to this box alone.
+/// * Mounted only while toggled on (≤15s) and only while the cell still
+///   exists in the weather grid — same lifetime rules as the chip's tap.
+class WeatherBoundaryFx extends StatefulWidget {
+  const WeatherBoundaryFx({
+    super.key,
+    required this.code,
+    required this.corners,
+  });
+
+  /// WMO weather code of the cell — the same visual the chip shows.
+  final int code;
+
+  /// The cell's four corners (see `weatherCellCorners`), map order.
+  final List<LatLng> corners;
+
+  @override
+  State<WeatherBoundaryFx> createState() => _WeatherBoundaryFxState();
+}
+
+class _WeatherBoundaryFxState extends State<WeatherBoundaryFx>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      vsync: this,
+      duration: fxDuration(weatherFxForCode(widget.code)),
+    );
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _syncMotion();
+  }
+
+  /// Honour the OS "remove animations" setting — same contract as the
+  /// chip: freeze on a representative static frame instead of looping.
+  void _syncMotion() {
+    if (MediaQuery.disableAnimationsOf(context)) {
+      _controller.stop();
+      _controller.value = 0.5;
+    } else if (!_controller.isAnimating) {
+      _controller.repeat();
+    }
+  }
+
+  @override
+  void didUpdateWidget(covariant WeatherBoundaryFx old) {
+    super.didUpdateWidget(old);
+    if (old.code != widget.code) {
+      _controller.duration = fxDuration(weatherFxForCode(widget.code));
+      if (MediaQuery.disableAnimationsOf(context)) {
+        _controller.stop();
+        _controller.value = 0.5;
+      } else {
+        _controller.repeat();
+      }
+    }
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final camera = MapCamera.maybeOf(context);
+    if (camera == null || widget.corners.length != 4) {
+      return const SizedBox.shrink();
+    }
+
+    // Project the cell corners through the live camera: handles zoom, pan
+    // and map rotation, so the clip quad always matches the drawn boundary.
+    var minX = double.infinity;
+    var maxX = double.negativeInfinity;
+    var minY = double.infinity;
+    var maxY = double.negativeInfinity;
+    final pts = <Offset>[];
+    for (final c in widget.corners) {
+      final p = camera.latLngToScreenPoint(c);
+      pts.add(Offset(p.x, p.y));
+      if (p.x < minX) minX = p.x;
+      if (p.x > maxX) maxX = p.x;
+      if (p.y < minY) minY = p.y;
+      if (p.y > maxY) maxY = p.y;
+    }
+    final w = maxX - minX;
+    final h = maxY - minY;
+    if (!w.isFinite || !h.isFinite || w <= 0 || h <= 0) {
+      return const SizedBox.shrink();
+    }
+
+    // Clip path = the cell quad in box-local coordinates (bbox origin).
+    final clip = Path()..moveTo(pts[0].dx - minX, pts[0].dy - minY);
+    for (var i = 1; i < pts.length; i++) {
+      clip.lineTo(pts[i].dx - minX, pts[i].dy - minY);
+    }
+    clip.close();
+
+    // Primitive scale: the chip is 48 tall; clamp keeps a far-zoomed cell
+    // from turning drops into bars or flakes into blobs.
+    final s = (math.min(w, h) / 48).clamp(1.0, 5.0);
+
+    return Positioned(
+      left: minX,
+      top: minY,
+      width: w,
+      height: h,
+      child: RepaintBoundary(
+        child: IgnorePointer(
+          child: CustomPaint(
+            painter: _WeatherFxPainter(
+              fx: weatherFxForCode(widget.code),
+              animation: _controller,
+              boundary: _BoundaryFxLayout(clip: clip, primScale: s),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
 }

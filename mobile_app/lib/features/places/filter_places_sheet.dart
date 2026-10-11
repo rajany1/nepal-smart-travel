@@ -193,13 +193,6 @@ class _FilterPlacesSheetState extends State<FilterPlacesSheet> {
               children: [
                 SwitchListTile(
                   contentPadding: EdgeInsets.zero,
-                  title: const Text('Show weather overlay', style: TextStyle(fontSize: 14)),
-                  value: mapView.showWeather,
-                  onChanged: (_) => mapView.toggleWeather(),
-                  activeColor: AppTheme.primaryColor,
-                ),
-                SwitchListTile(
-                  contentPadding: EdgeInsets.zero,
                   title: const Text('Show trekking routes', style: TextStyle(fontSize: 14)),
                   value: mapView.showRoutes,
                   onChanged: (_) => mapView.toggleRoutes(),
