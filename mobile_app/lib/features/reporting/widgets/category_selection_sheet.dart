@@ -62,10 +62,11 @@ class _CategorySelectionSheetState extends State<CategorySelectionSheet> {
             color: AppTheme.backgroundColor,
             borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
           ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
               // Handle bar
               Center(
                 child: Container(
@@ -133,6 +134,7 @@ class _CategorySelectionSheetState extends State<CategorySelectionSheet> {
               const SizedBox(height: 16),
             ],
           ),
+        ),
         );
       },
     );

@@ -28,6 +28,16 @@ class User extends Authenticatable
         return $this->hasMany(\App\Models\PlaceReview::class);
     }
 
+    public function places(): \Illuminate\Database\Eloquent\Relations\HasMany
+    {
+        return $this->hasMany(Place::class, 'created_by');
+    }
+
+    public function placeCorrections(): \Illuminate\Database\Eloquent\Relations\HasMany
+    {
+        return $this->hasMany(PlaceCorrection::class, 'user_id');
+    }
+
     public function moderationStrikes(): \Illuminate\Database\Eloquent\Relations\HasMany
     {
         return $this->hasMany(ModerationStrike::class, 'user_id');
@@ -348,7 +358,7 @@ class User extends Authenticatable
     public function promoteToAdmin(): bool
     {
         $adminRole = Role::where('name', 'admin')->first();
-        if ($adminRole && $this->isRegularUser()) {
+        if ($adminRole && !$this->isAdmin()) {
             $this->role_id = $adminRole->id;
             return $this->save();
         }
@@ -358,7 +368,7 @@ class User extends Authenticatable
     public function promoteToModerator(): bool
     {
         $modRole = Role::where('name', 'moderator')->first();
-        if ($modRole && $this->isRegularUser()) {
+        if ($modRole && !$this->isAdmin() && !$this->isModerator()) {
             $this->role_id = $modRole->id;
             return $this->save();
         }

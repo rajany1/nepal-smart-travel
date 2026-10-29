@@ -21,7 +21,7 @@ class ServeAll extends Command
 
         if (DIRECTORY_SEPARATOR === '\\') {
             $jobs = [
-                'AI-Queue' => "start \"AI-Queue\" /min cmd /c \"cd /d {$base} && {$php} artisan queue:work database --tries=3 --timeout=300 --sleep=1\"",
+                'AI-Queue' => "start \"AI-Queue\" /min cmd /c \"cd /d {$base} && {$php} artisan queue:work database --queue=default,bipad-sync --tries=3 --timeout=300 --sleep=1\"",
                 'AI-Scheduler' => "start \"AI-Scheduler\" /min cmd /c \"cd /d {$base} && {$php} artisan schedule:work\"",
             ];
             foreach ($jobs as $name => $cmd) {
@@ -30,7 +30,7 @@ class ServeAll extends Command
             }
         } else {
             $jobs = [
-                'queue' => ['nohup', $php, 'artisan', 'queue:work', 'database', '--tries=3', '--timeout=300', '--sleep=1'],
+                'queue' => ['nohup', $php, 'artisan', 'queue:work', 'database', '--queue=default,bipad-sync', '--tries=3', '--timeout=300', '--sleep=1'],
                 'scheduler' => ['nohup', $php, 'artisan', 'schedule:work'],
             ];
             foreach ($jobs as $name => $job) {

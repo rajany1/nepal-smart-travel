@@ -11,6 +11,9 @@
             <a href="{{ route('admin.places.osm') }}" class="px-3 py-1.5 text-sm font-medium rounded-lg bg-emerald-600 text-white">
                 <i class="fas fa-globe-asia mr-1"></i> OSM Live (Nepal)
             </a>
+            <a href="{{ route('admin.places.corrections') }}" class="px-3 py-1.5 text-sm font-medium rounded-lg bg-gray-100 text-gray-700 hover:bg-gray-200">
+                <i class="fas fa-clipboard-check mr-1"></i> Corrections
+            </a>
         </div>
         <div class="px-6 py-4 border-b border-gray-100 flex flex-wrap items-center justify-between gap-4">
             <div class="flex items-center gap-3">

@@ -51,7 +51,7 @@ class RouteController extends Controller
                 'longitude' => (float) $p->longitude,
                 'average_rating' => (float) $p->average_rating,
                 'category' => $p->category?->name,
-                'image' => $p->images()->first()?->image_url,
+                'image' => $p->galleryImages()->first()?->displayUrl(),
             ],
             $route->waypointPlaces()
         );

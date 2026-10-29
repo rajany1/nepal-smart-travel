@@ -21,9 +21,16 @@ class IdempotencyMiddleware
             ?? $request->header('X-Idempotency-Key')
             ?? $request->input('_idempotency_key');
 
-        // Generate one if not provided (for API clients that don't send it)
-        if (!$idempotencyKey && $request->user()) {
-            $idempotencyKey = 'auto-' . $request->user()->id . '-' . $request->route()->getName() . '-' . md5($request->getContent());
+        // Generate one if not provided (for API clients that don't send it).
+        //
+        // Web admin forms must NOT be auto-keyed: many actions are intentionally
+        // repeatable (feature/unfeature, approve another row, delete another
+        // review) and two submissions with the same body would otherwise replay
+        // the first response instead of running the controller again.
+        if (! $idempotencyKey && $request->user() && $request->is('api/*')) {
+            $route = $request->route();
+            $fingerprint = $request->getContent().'|'.json_encode($route?->parameters() ?? []);
+            $idempotencyKey = 'auto-' . $request->user()->id . '-' . ($route?->getName() ?? $request->path()) . '-' . md5($fingerprint);
         }
 
         if (!$idempotencyKey) {

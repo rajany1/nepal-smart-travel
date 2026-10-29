@@ -4,15 +4,21 @@ namespace App\Providers;
 
 use Illuminate\Support\ServiceProvider;
 use Illuminate\Support\Facades\Blade;
+use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Pagination\Paginator;
 use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Http\Request;
+use Illuminate\Queue\Events\JobFailed;
+use Illuminate\Queue\Events\JobProcessed;
 use Illuminate\Support\Facades\RateLimiter;
 use App\Services\Ai\AiFallbackRouter;
 use App\Services\Ai\AiProviderInterface;
 use App\Services\RomanNepaliTranslationService;
+use App\Support\AutomationState;
+use Throwable;
 
 class AppServiceProvider extends ServiceProvider
 {
@@ -52,6 +58,39 @@ class AppServiceProvider extends ServiceProvider
         });
 
         $this->registerRateLimiters();
+        $this->registerAutomationWorkerHeartbeat();
+    }
+
+    /**
+     * Any job a worker processes proves the worker is alive. We throttle the
+     * write so a busy queue does not hit the database on every single job.
+     */
+    private function registerAutomationWorkerHeartbeat(): void
+    {
+        $touch = function (string $jobName, string $queue, bool $failed) {
+            try {
+                if (!Cache::add('automation:worker-heartbeat-throttle', 1, 15)) {
+                    return;
+                }
+
+                AutomationState::heartbeat('worker', [
+                    'source' => $failed ? 'job-failed' : 'job-processed',
+                    'job' => $jobName,
+                    'queue' => $queue,
+                    'at' => now()->toIso8601String(),
+                ]);
+            } catch (Throwable $e) {
+                // Heartbeats must never affect job processing.
+            }
+        };
+
+        Event::listen(JobProcessed::class, function (JobProcessed $event) use ($touch) {
+            $touch($event->job->resolveName(), $event->job->getQueue() ?: 'default', false);
+        });
+
+        Event::listen(JobFailed::class, function (JobFailed $event) use ($touch) {
+            $touch($event->job->resolveName(), $event->job->getQueue() ?: 'default', true);
+        });
     }
 
     /**

@@ -2,9 +2,8 @@
 
 namespace App\Services;
 
+use App\Services\Ai\AiFallbackRouter;
 use App\Services\Ai\AiProviderInterface;
-use App\Services\Ai\GroqService;
-use App\Services\Ai\GeminiService;
 use App\Exceptions\AiRateLimitException;
 use Illuminate\Support\Facades\Log;
 
@@ -19,13 +18,16 @@ class RomanNepaliTranslationService
 
     protected function getDefaultProvider(): AiProviderInterface
     {
-        if (config('services.groq.api_key')) {
-            return new GroqService();
+        // Use the configured text chain (Groq → Gemini → Cloudflare) instead
+        // of a single hard-coded provider. This keeps translation working when
+        // one provider's model is unavailable or its rate limit is exhausted.
+        $router = AiFallbackRouter::textChain();
+
+        if ($router->isEmpty()) {
+            throw new \RuntimeException('No AI provider configured for Roman Nepali translation. Set GROQ_API_KEY or GEMINI_API_KEY.');
         }
-        if (config('services.gemini.api_key')) {
-            return new GeminiService();
-        }
-        throw new \RuntimeException('No AI provider configured for Roman Nepali translation. Set GROQ_API_KEY or GEMINI_API_KEY.');
+
+        return $router;
     }
 
     /**

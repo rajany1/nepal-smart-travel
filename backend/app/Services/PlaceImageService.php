@@ -42,7 +42,12 @@ class PlaceImageService
             return false;
         }
 
-        $sha1 = sha1($displayUrl);
+        // Commons returns the file's own SHA1; use it so re-runs and thumbnail
+        // size changes still resolve to the same logical image.
+        $sha1 = (string) ($candidate['sha1'] ?? '');
+        if ($sha1 === '' || strlen($sha1) !== 40) {
+            $sha1 = sha1($displayUrl);
+        }
 
         if (PlaceImage::query()
             ->where('place_id', $place->id)
@@ -65,7 +70,7 @@ class PlaceImageService
             PlaceImage::create([
                 'place_id' => $place->id,
                 'image_url' => $displayUrl,
-                'thumbnail_url' => $candidate['url'] ?? null,
+                'thumbnail_url' => $candidate['thumbnail_url'] ?? $displayUrl,
                 'original_url' => $candidate['original_url'] ?? null,
                 'source' => PlaceImage::SOURCE_WIKIMEDIA,
                 'source_id' => $sourceId,
@@ -195,7 +200,13 @@ class PlaceImageService
     public function bumpPlacesCacheThrottled(): void
     {
         try {
-            $acquired = Redis::set(self::BUMP_THROTTLE_KEY, '1', ['NX', 'EX' => self::BUMP_THROTTLE_SECONDS]);
+            $acquired = Redis::command('SET', [
+                self::BUMP_THROTTLE_KEY,
+                '1',
+                'EX',
+                self::BUMP_THROTTLE_SECONDS,
+                'NX',
+            ]);
             if ($acquired) {
                 PlacesCache::bump();
             }

@@ -45,6 +45,16 @@ function uniqueEmail(): string
     return 'u_' . Str::random(8) . '@example.com';
 }
 
+afterEach(function () {
+    LegalDocument::query()
+        ->whereIn('type', ['terms_conditions', 'privacy_policy'])
+        ->whereIn('version', ['test_1.0', 'test_3.0', 'test_privacy_2.0', 'test_longer_2.0-r1-r1'])
+        ->update([
+            'status' => LegalDocument::STATUS_DRAFT,
+            'is_published' => false,
+        ]);
+});
+
 /*
 |--------------------------------------------------------------------------
 | Account Deletion Tests
@@ -527,6 +537,32 @@ it('records acceptance version matching published document', function () {
         ->first();
 
     expect($acceptance->document_version)->toBe('test_3.0');
+    expect($acceptance->legal_document_id)->toBe($doc->id);
+});
+
+it('records acceptance for a published version longer than legacy 20 chars', function () {
+    $doc = LegalDocument::updateOrCreate(
+        ['type' => 'privacy_policy', 'version' => 'test_longer_2.0-r1-r1'],
+        ['title' => 'Privacy Long', 'content' => '<h2>Privacy Long</h2>', 'is_published' => true, 'published_at' => now()->addSeconds(2)]
+    );
+
+    $user = createTestUser();
+    $token = createUserToken($user);
+
+    $response = $this->postJson('/api/v1/auth/legal-acceptance', [
+        'documents' => ['privacy_policy'],
+    ], [
+        'Authorization' => 'Bearer ' . $token,
+    ]);
+
+    $response->assertOk();
+
+    $acceptance = LegalDocumentAcceptance::where('user_id', $user->id)
+        ->where('document_type', 'privacy_policy')
+        ->first();
+
+    expect($acceptance)->not->toBeNull();
+    expect($acceptance->document_version)->toBe('test_longer_2.0-r1-r1');
     expect($acceptance->legal_document_id)->toBe($doc->id);
 });
 

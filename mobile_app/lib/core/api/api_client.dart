@@ -264,7 +264,12 @@ class ApiClient {
     return _dio.get('/places/nearby', queryParameters: queryParams);
   }
 
-  /// Bounding box query - optimized for map viewport pan/zoom
+  /// Bounding box query - optimized for map viewport pan/zoom.
+  ///
+  /// [limit] is optional: omitting it lets the server pick a zoom-aware
+  /// density budget (50 at low zoom up to 500 at street level). Passing a
+  /// fixed limit from every call was the reason low zoom loaded far more
+  /// places than the screen could show.
   Future<Response> getPlacesInBBox({
     required double minLat,
     required double maxLat,
@@ -272,7 +277,8 @@ class ApiClient {
     required double maxLng,
     int? zoom,
     String? category,
-    int limit = 500,
+    String? search,
+    int? limit,
   }) async {
     return _dio.get('/places/bbox', queryParameters: {
       'min_lat': minLat,
@@ -280,8 +286,9 @@ class ApiClient {
       'min_lng': minLng,
       'max_lng': maxLng,
       if (zoom != null) 'zoom': zoom,
-      if (category != null) 'category': category,
-      'limit': limit,
+      if (category != null && category.isNotEmpty) 'category': category,
+      if (search != null && search.isNotEmpty) 'search': search,
+      if (limit != null) 'limit': limit,
     });
   }
 

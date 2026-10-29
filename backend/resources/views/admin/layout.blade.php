@@ -1,9 +1,13 @@
-﻿@php
+@php
     // TRUE when this request must return ONLY the main content + page scripts
     // (used by the SPA-style sidebar navigation), skipping the full HTML shell.
-    $fragment = (request()->query('fragment') === '1');
+    // The query flag alone is not enough: a copied/bookmarked ?fragment=1 URL
+    // must still render the full shell (CSS/JS), so require the AJAX header too.
+    $fragment = request()->query('fragment') === '1'
+        && (request()->ajax() || request()->header('X-Requested-With') === 'XMLHttpRequest');
 @endphp
 @if($fragment)
+    <title>@yield('title', 'Dashboard') - {{ config('app.name') }}</title>
     <div id="appPane" class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden min-h-[60vh]">
         @yield('content')
     </div>
@@ -16,6 +20,19 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="csrf-token" content="{{ csrf_token() }}">
     <title>@yield('title', 'Dashboard') - {{ config('app.name') }}</title>
+    <script>
+        // A leaked ?fragment=1 (copy/bookmark/back button) must not stay in the
+        // address bar; the full shell has already rendered at this point.
+        (function () {
+            try {
+                var u = new URL(window.location.href);
+                if (u.searchParams.get('fragment') === '1') {
+                    u.searchParams.delete('fragment');
+                    window.history.replaceState(null, '', u.toString());
+                }
+            } catch (e) {}
+        })();
+    </script>
     <script src="https://cdn.tailwindcss.com"></script>
     <script>
         tailwind.config = {
@@ -91,6 +108,13 @@
             if ($supportBadge > 0) $sidebarBadges['manage_support'] = $supportBadge;
         }
 
+        try {
+            $automationFailedJobs = \Illuminate\Support\Facades\DB::table('failed_jobs')->count();
+            if ($automationFailedJobs > 0) $sidebarBadges['manage_automation'] = $automationFailedJobs;
+        } catch (\Throwable $e) {
+            // Automation tables may not exist yet during a deploy.
+        }
+
         $menuPerms = \App\Models\Permission::whereNotNull('menu_label')
             ->whereNotNull('route_name')
             ->whereNotNull('menu_icon')
@@ -138,14 +162,18 @@
                     ]],
                     'system' => ['label' => 'SYSTEM', 'admin_only' => true, 'routes' => [
                         'admin.settings', 'admin.roles', 'admin.permissions', 'admin.audit-logs',
+                        'admin.automation',
                     ]],
                 ];
 
-                // Build grouped items from permissions
+                // Build grouped items from permissions. Some legacy permissions
+                // point at the same route (Content Safety); keep the first one.
                 $groupedItems = [];
                 foreach ($restructuredGroups as $key => $cfg) {
                     $groupedItems[$key] = ['label' => $cfg['label'], 'admin_only' => $cfg['admin_only'], 'items' => collect()];
                 }
+
+                $menuPerms = $menuPerms->unique('route_name')->values();
 
                 // Map permissions to groups by route name
                 foreach ($menuPerms as $mp) {
@@ -442,8 +470,14 @@
         var fs = doc.body ? doc.body.getAttribute('data-since') : null;
         if (fs) { try { document.body.setAttribute('data-since', fs); } catch (e) {} }
         dirty = false;
-        if (url) url = url.replace(/[?&]fragment=1$/, '');
-        if (url && url !== location.href) { try { history.replaceState(null, '', url); } catch (e) {} }
+        if (url) {
+            try {
+                var clean = new URL(url, location.origin);
+                clean.searchParams.delete('fragment');
+                var next = clean.toString();
+                if (next !== location.href) history.replaceState(null, '', next);
+            } catch (e) {}
+        }
         return ok;
     }
 
@@ -494,6 +528,9 @@
         if (!f || f.tagName !== 'FORM') return;
         if (!document.getElementById('liveTable')) return;
         if (f.closest('[id$="Modal"]')) return;
+        // Opt-out for destructive actions that must refresh the surrounding
+        // KPIs/analytics (a table-only swap would leave those counts stale).
+        if (f.hasAttribute('data-native')) return;
         e.preventDefault();
         e.stopPropagation();
         var m = (f.getAttribute('method') || 'POST').toUpperCase();
@@ -560,6 +597,8 @@
 
     function poll() {
         if (document.visibilityState === 'hidden') return;
+        // The dashboard owns its own range-aware refresh loop.
+        if (document.getElementById('adminDashboard')) return;
         var since = baseSince();
         var dels = storedDels();
         var q = 'since=' + encodeURIComponent(JSON.stringify(since)) + '&dels_seen=' + encodeURIComponent(JSON.stringify(dels));
@@ -634,6 +673,11 @@
         root.querySelectorAll('script').forEach(function (old) {
             var n = document.createElement('script');
             if (old.src) { n.src = old.src; } else { n.textContent = old.textContent; }
+            // Preserve non-executable data blocks (e.g. application/json); running
+            // their contents as JavaScript would throw a syntax error on every SPA
+            // navigation that leaves the dashboard.
+            if (old.type) { n.type = old.type; }
+            if (old.id) { n.id = old.id; }
             old.parentNode.replaceChild(n, old);
         });
     }
@@ -643,9 +687,19 @@
         Array.prototype.forEach.call(doc.querySelectorAll('head link[rel="stylesheet"], head style'), function (s) {
             out.push(s.outerHTML);
         });
+        // Library <script src> tags already present in the shell must not be
+        // fetched and evaluated again: a second Chart.js copy replaces the
+        // global while the page still holds charts built by the first one.
+        var loaded = {};
+        Array.prototype.forEach.call(document.querySelectorAll('script[src]'), function (s) {
+            loaded[s.src] = true;
+        });
         Array.prototype.forEach.call(doc.querySelectorAll('body > script'), function (s) {
-            if (s.src) { out.push('<script src="' + s.src + '"></' + 'script>'); }
-            else { out.push(s.outerHTML); }
+            if (s.src) {
+                if (loaded[s.src]) return;
+                loaded[s.src] = true;
+                out.push('<script src="' + s.src + '"></' + 'script>');
+            } else { out.push(s.outerHTML); }
         });
         return out.join('\n');
     }

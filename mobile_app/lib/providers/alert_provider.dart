@@ -13,7 +13,7 @@ class NearbyItem {
   final double? longitude;
   final String? affectedDistrict;
   final String? senderType; // user | admin | system
-  final String? linkType;   // report | external | screen
+  final String? linkType; // report | external | screen
   final String? linkValue;
   final DateTime createdAt;
 
@@ -49,9 +49,10 @@ class NearbyItem {
       senderType: json['sender_type'],
       linkType: json['link_type'],
       linkValue: json['link_value']?.toString(),
-      createdAt: json['created_at'] != null
-          ? DateTime.parse(json['created_at'])
-          : DateTime.now(),
+      createdAt:
+          json['created_at'] != null
+              ? DateTime.parse(json['created_at'])
+              : DateTime.now(),
     );
   }
 
@@ -65,11 +66,16 @@ class NearbyItem {
 
   String get severityEmoji {
     switch (severity) {
-      case 'critical': return '🚧';
-      case 'high': return '⚠️';
-      case 'medium': return '⏳';
-      case 'info': return 'ℹ️';
-      default: return '📢';
+      case 'critical':
+        return '🚧';
+      case 'high':
+        return '⚠️';
+      case 'medium':
+        return '⏳';
+      case 'info':
+        return 'ℹ️';
+      default:
+        return '📢';
     }
   }
 
@@ -86,11 +92,24 @@ class AlertProvider extends ChangeNotifier {
   double? _userLat;
   double? _userLng;
   int _lastSeenId = 0;
+  DateTime? _lastFetchedAt;
 
   List<NearbyItem> get items => _items;
   bool get isLoading => _isLoading;
   String? get errorMessage => _errorMessage;
   String? get activeFilter => _activeFilter;
+  bool get hasLocation => _userLat != null && _userLng != null;
+  double? get latitude => _userLat;
+  double? get longitude => _userLng;
+  bool get hasSnapshot => _lastFetchedAt != null;
+
+  /// True when there is no successful snapshot yet, or the current snapshot
+  /// is older than [maxAge]. Screens use this to avoid re-fetching data that
+  /// Home just loaded while still refreshing genuinely stale safety data.
+  bool dataIsOlderThan(Duration maxAge) {
+    final fetchedAt = _lastFetchedAt;
+    return fetchedAt == null || DateTime.now().difference(fetchedAt) > maxAge;
+  }
 
   int get criticalCount => _items.where((a) => a.severity == 'critical').length;
   int get highCount => _items.where((a) => a.severity == 'high').length;
@@ -103,25 +122,52 @@ class AlertProvider extends ChangeNotifier {
   }
 
   void setLocation(double lat, double lng) {
+    // A different point invalidates the previous alert snapshot; identical
+    // coordinates keep its timestamp so Home and Alerts can share the cache.
+    if (_userLat != lat || _userLng != lng) {
+      _lastFetchedAt = null;
+    }
     _userLat = lat;
     _userLng = lng;
   }
 
-  Future<void> fetchNearby({String? severity, String? type}) async {
+  Future<void>? _pendingFetch;
+
+  Future<void> fetchNearby({String? severity, String? type}) {
+    // Home and Alerts can ask for the same nearby snapshot at almost the same
+    // time. Share the in-flight request instead of sending duplicates.
+    final pending = _pendingFetch;
+    if (pending != null) return pending;
+
+    final future = _fetchNearby(severity: severity, type: type);
+    _pendingFetch = future;
+    future.whenComplete(() {
+      if (identical(_pendingFetch, future)) _pendingFetch = null;
+    });
+    return future;
+  }
+
+  Future<void> _fetchNearby({String? severity, String? type}) async {
     if (_userLat == null || _userLng == null) return;
     _isLoading = true;
     _errorMessage = null;
     notifyListeners();
 
     try {
-      final response = await _api.getAlerts(severity: severity, type: type, lat: _userLat!, lng: _userLng!);
+      final response = await _api.getAlerts(
+        severity: severity,
+        type: type,
+        lat: _userLat!,
+        lng: _userLng!,
+      );
       final data = response.data['data'] as List? ?? [];
       _items = data.map((j) => NearbyItem.fromJson(j)).toList();
+      _lastFetchedAt = DateTime.now();
       if (_items.isNotEmpty) {
         _lastSeenId = _items.first.id;
       }
     } catch (e) {
-      print('❌ Failed to fetch nearby alerts: $e');
+      debugPrint('❌ Failed to fetch nearby alerts: $e');
       _errorMessage = 'Failed to load alerts';
     }
 

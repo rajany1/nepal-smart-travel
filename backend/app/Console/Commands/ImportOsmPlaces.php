@@ -451,8 +451,14 @@ class ImportOsmPlaces extends Command
 
                 $osmId = $element['type'] . '/' . $element['id'];
 
-                // Skip if already imported
-                if (Place::where('osm_id', $osmId)->exists()) {
+                // Skip if already imported, but refresh Wikimedia identifiers
+                // when the OSM element carries them (never clear existing).
+                $existingPlace = Place::where('osm_id', $osmId)->first();
+                if ($existingPlace) {
+                    $metadata = $this->imageMetadata($tags);
+                    if ($metadata !== []) {
+                        $existingPlace->update($metadata);
+                    }
                     $skipped++;
                     continue;
                 }
@@ -485,7 +491,7 @@ class ImportOsmPlaces extends Command
                 $rating = isset($tags['rating']) ? (float)$tags['rating'] : null;
 
                 try {
-                    Place::create([
+                    Place::create(array_merge([
                         'uuid' => (string) Str::uuid(),
                         'name' => $name,
                         'description' => $description,
@@ -502,7 +508,7 @@ class ImportOsmPlaces extends Command
                         'is_active' => true,
                         'source' => 'osm',
                         'osm_id' => $osmId,
-                    ]);
+                    ], $this->imageMetadata($tags)));
                     $imported++;
                 } catch (\Exception $e) {
                     $this->warn("  ⚠ Failed to import '{$name}': {$e->getMessage()}");
@@ -566,6 +572,32 @@ class ImportOsmPlaces extends Command
         $queries[] = "node[\"natural\"~\"peak|volcano|bay|cape|beach\"](around:{$radiusMeters},{$lat},{$lng});";
 
         return "[out:json];(" . implode('', $queries) . ");out body {$limit};";
+    }
+
+    /**
+     * Wikimedia matching signals from OSM tags. Empty values are omitted so a
+     * re-import never replaces a valid identifier with null.
+     */
+    private function imageMetadata(array $tags): array
+    {
+        $metadata = [];
+
+        $wikidata = trim((string) ($tags['wikidata'] ?? ''));
+        if (preg_match('/^Q\d+$/i', $wikidata) === 1) {
+            $metadata['wikidata_id'] = strtoupper($wikidata);
+        }
+
+        $wikipedia = trim((string) ($tags['wikipedia'] ?? ''));
+        if ($wikipedia !== '') {
+            $metadata['wikipedia_title'] = mb_substr($wikipedia, 0, 255);
+        }
+
+        $commons = trim((string) ($tags['wikimedia_commons'] ?? ''));
+        if ($commons !== '') {
+            $metadata['commons_category'] = mb_substr($commons, 0, 255);
+        }
+
+        return $metadata;
     }
 
     private function osmToCategory(array $tags): string

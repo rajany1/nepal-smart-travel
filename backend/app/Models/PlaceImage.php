@@ -5,6 +5,7 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Support\Facades\Storage;
 
 /**
  * A single place photo plus its full provenance.
@@ -12,12 +13,13 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  * Two kinds of row share this table:
  *  - source='upload'    : locally stored files (admin/user uploads). image_url
  *                         is a relative path on the public disk.
- *  - source='wikimedia' : externally hosted Wikimedia Commons files. image_url
- *                         is a full https URL (a 1200px thumbnail — never the
- *                         original, which can be tens of MB).
+ *  - source='wikimedia' : a public-disk mirror of a Commons thumbnail.
+ *                         image_url is that relative local path, while
+ *                         original_url/source_page_url keep the remote
+ *                         provenance for attribution and re-checking.
  *
  * displayUrl()/resolveUrl() is the ONE place that decides which of those two
- * shapes a caller gets, so no read path ever builds "asset('storage/https://…')".
+ * shapes a caller gets, so no read path ever builds "asset('storage/https://...')".
  */
 class PlaceImage extends Model
 {
@@ -85,7 +87,21 @@ class PlaceImage extends Model
             return $imageUrl;
         }
 
-        return asset('storage/' . ltrim($imageUrl, '/'));
+        $path = ltrim(str_replace('\\', '/', $imageUrl), '/');
+        if (str_starts_with($path, 'storage/')) {
+            $path = substr($path, strlen('storage/'));
+        }
+
+        try {
+            if (!Storage::disk('public')->exists($path)) {
+                return null;
+            }
+        } catch (\Throwable) {
+            // A broken/misconfigured disk must not take down place endpoints.
+            return null;
+        }
+
+        return asset('storage/' . $path);
     }
 
     public function displayUrl(): ?string

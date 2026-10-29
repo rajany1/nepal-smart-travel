@@ -255,8 +255,8 @@
         <h1>ORIPORI FINANCIAL AUDIT STATEMENT</h1>
         <div class="subtitle">Comprehensive Financial Overview & Reconciliation Report</div>
         <div class="audit-meta">
-            <span>Generated: {{ $now->format('F d, Y — h:i A NPT') }}</span>
-            <span>BS Date: {{ $now->format('Y-m-d') }} | Report ID: AUDIT-{{ $now->format('Ymd-His') }}</span>
+            <span>Generated: {{ $now->format('F d, Y — h:i A \N\P\T') }}</span>
+            <span>BS Date: {{ \App\Support\NepaliDate::format($now, 'Y-m-d') }} | Report ID: AUDIT-{{ $now->format('Ymd-His') }}</span>
             <span>Coin-to-NPR Rate: {{ number_format($coinToNpr, 2) }}</span>
         </div>
     </div>

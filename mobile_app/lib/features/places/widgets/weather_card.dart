@@ -132,9 +132,9 @@ Color fxIconColor(WeatherFx fx) {
   }
 }
 
-/// Weather chip: a small white card (~160x48) showing temperature +
-/// condition + area label, with a subtle condition-tied animation painted
-/// behind the text.
+/// Weather chip: a small white card (~160x62) showing temperature +
+/// condition + area label + last-updated time, with a subtle condition-tied
+/// animation painted behind the text.
 ///
 /// Performance contract (the whole point of this widget living in its own
 /// file):
@@ -151,12 +151,18 @@ Color fxIconColor(WeatherFx fx) {
 /// Non-interactive by construction: the placement site decides the pointer
 /// behaviour ([GestureDetector] for the tap-to-reveal boundary effect,
 /// [IgnorePointer] to pass taps straight through to the map beneath).
+/// Chip height: three text lines (13/11/10px) stacked with breathing room,
+/// and the geometry reference for both the icon-tile anchor and the
+/// boundary-mode primitive scale.
+const double _chipHeight = 62;
+
 class WeatherChip extends StatefulWidget {
   const WeatherChip({
     super.key,
     required this.code,
     this.temperatureC,
     this.areaLabel,
+    this.updatedAt,
   });
 
   /// WMO weather code (0-99).
@@ -167,6 +173,10 @@ class WeatherChip extends StatefulWidget {
 
   /// Line 2 (e.g. "Kathmandu"); null/empty omits the line entirely.
   final String? areaLabel;
+
+  /// When the shown weather snapshot was fetched, converted for display as
+  /// "Updated 2:30 PM" on line 3; null omits the line entirely.
+  final DateTime? updatedAt;
 
   @override
   State<WeatherChip> createState() => _WeatherChipState();
@@ -243,7 +253,7 @@ class _WeatherChipState extends State<WeatherChip>
           child: ConstrainedBox(
             constraints: const BoxConstraints(maxWidth: 160),
             child: SizedBox(
-              height: 48,
+              height: _chipHeight,
               child: Stack(
                 alignment: Alignment.center,
                 children: [
@@ -300,6 +310,18 @@ class _WeatherChipState extends State<WeatherChip>
                                   overflow: TextOverflow.ellipsis,
                                   style: const TextStyle(
                                     fontSize: 11,
+                                    color: AppTheme.textSecondary,
+                                    height: 1.15,
+                                  ),
+                                ),
+                              if (widget.updatedAt != null)
+                                Text(
+                                  '${context.t('Updated')} '
+                                  '${TimeOfDay.fromDateTime(widget.updatedAt!.toLocal()).format(context)}',
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(
+                                    fontSize: 10,
                                     color: AppTheme.textSecondary,
                                     height: 1.15,
                                   ),
@@ -371,9 +393,10 @@ class _WeatherFxPainter extends CustomPainter {
 
   // ── Shared, pre-allocated resources (one-time init, never mutated) ──
 
-  /// Icon-tile centre in chip coordinates (10dp padding + half a 30dp tile).
+  /// Icon-tile centre in chip coordinates: 10dp padding + half a 30dp tile
+  /// horizontally; vertically the row is centred in the chip.
   static const double _tileCx = 25;
-  static const double _tileCy = 24;
+  static const double _tileCy = _chipHeight / 2;
 
   /// Boundary-mode copies of the stroked paints (strokeWidth × primScale),
   /// built lazily once per painter instance. The card path keeps using the
@@ -468,6 +491,12 @@ class _WeatherFxPainter extends CustomPainter {
     // local quad is clipping to the boundary, and size is the cell size.
     canvas.save();
     canvas.clipPath(b.clip);
+    _drawFx(canvas, size, b.primScale,
+        Offset(size.width / 2, size.height / 2));
+    // The ≤0.18 alpha budget is about text legibility on the chip; on the
+    // map the same colours read too faint, so the effect is painted a
+    // second time — identical geometry at the same `t`, so the alphas
+    // compound (~1.8×) into a slightly darker boundary presence.
     _drawFx(canvas, size, b.primScale,
         Offset(size.width / 2, size.height / 2));
     canvas.restore();
@@ -708,9 +737,9 @@ class _WeatherBoundaryFxState extends State<WeatherBoundaryFx>
     }
     clip.close();
 
-    // Primitive scale: the chip is 48 tall; clamp keeps a far-zoomed cell
-    // from turning drops into bars or flakes into blobs.
-    final s = (math.min(w, h) / 48).clamp(1.0, 5.0);
+    // Primitive scale: relative to the chip's own height; clamp keeps a
+    // far-zoomed cell from turning drops into bars or flakes into blobs.
+    final s = (math.min(w, h) / _chipHeight).clamp(1.0, 5.0);
 
     return Positioned(
       left: minX,

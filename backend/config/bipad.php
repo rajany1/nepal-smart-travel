@@ -203,8 +203,8 @@ return [
 
     // Hazard types to SKIP (don't create reports/alerts for these)
     'skip_hazard_types' => [
-        'heavy_rainfall', 'storm', 'thunderbolt', 'wind_storm', 
-        'hailstorm', 'snow_storm', 'cold_wave', 'heat_wave', 
+        'storm', 'thunderbolt', 'wind_storm',
+        'hailstorm', 'snow_storm', 'cold_wave', 'heat_wave',
         'drought', 'rainfall', 'high_altitude', 'environmental_pollution',
         'deforestation', 'famine', 'food_poisoning', 'animal_flu',
         'pandemics', 'microorganism_attack', 'other_natural', 

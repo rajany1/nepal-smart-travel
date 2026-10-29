@@ -44,7 +44,7 @@ if exist "%PIDFILE%" (
 )
 if "%MODE%"=="qw" (
     echo [%date% %time%] Starting queue worker... >> storage\logs\watchdog.log
-    powershell -NoProfile -Command "$p = Start-Process -WindowStyle Minimized -FilePath '%PHP%' -ArgumentList 'artisan','queue:work','database','--tries=3','--timeout=300','--sleep=1' -WorkingDirectory '%APPROOT%' -PassThru; $p.Id | Out-File -FilePath '%APPROOT%\.queue_worker.pid' -Encoding ascii"
+    powershell -NoProfile -Command "$p = Start-Process -WindowStyle Minimized -FilePath '%PHP%' -ArgumentList 'artisan','queue:work','database','--queue=default,bipad-sync','--tries=3','--timeout=300','--sleep=1' -WorkingDirectory '%APPROOT%' -PassThru; $p.Id | Out-File -FilePath '%APPROOT%\.queue_worker.pid' -Encoding ascii"
 ) else (
     echo [%date% %time%] Starting scheduler... >> storage\logs\watchdog.log
     powershell -NoProfile -Command "$p = Start-Process -WindowStyle Minimized -FilePath '%PHP%' -ArgumentList 'artisan','schedule:work' -WorkingDirectory '%APPROOT%' -PassThru; $p.Id | Out-File -FilePath '%APPROOT%\.schedule_worker.pid' -Encoding ascii"

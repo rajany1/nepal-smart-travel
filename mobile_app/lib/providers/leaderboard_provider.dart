@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import "../../core/services/localization_service.dart";
 import '../core/api/api_client.dart';
 
 class LeaderboardUser {
@@ -14,6 +13,10 @@ class LeaderboardUser {
   final int totalReports;
   final int totalAlerts;
   final int totalReviews;
+  final int placesContributed;
+  final int correctionsApplied;
+  final int contributionScore;
+  final double totalEarned;
   final int badgeCount;
   final String verificationTick;
 
@@ -29,6 +32,10 @@ class LeaderboardUser {
     this.totalReports = 0,
     this.totalAlerts = 0,
     this.totalReviews = 0,
+    this.placesContributed = 0,
+    this.correctionsApplied = 0,
+    this.contributionScore = 0,
+    this.totalEarned = 0,
     this.badgeCount = 0,
     this.verificationTick = 'gray',
   });
@@ -46,6 +53,10 @@ class LeaderboardUser {
       totalReports: json['total_reports'] ?? 0,
       totalAlerts: json['total_alerts'] ?? 0,
       totalReviews: json['total_reviews'] ?? 0,
+      placesContributed: json['places_contributed'] ?? 0,
+      correctionsApplied: json['corrections_applied'] ?? 0,
+      contributionScore: json['contribution_score'] ?? 0,
+      totalEarned: (json['total_earned'] ?? 0).toDouble(),
       badgeCount: json['badge_count'] ?? 0,
       verificationTick: json['verification_tick'] ?? 'gray',
     );
@@ -55,35 +66,24 @@ class LeaderboardUser {
 class LeaderboardProvider extends ChangeNotifier {
   final ApiClient _api = ApiClient.instance;
 
+  /// Only the top 10 contributors are listed; everyone else just sees their
+  /// own position (rank card).
+  static const int topCount = 10;
+
   List<LeaderboardUser> _users = [];
-  List<LeaderboardUser> _topThree = [];
   bool _isLoading = false;
   String? _errorMessage;
-  bool _hasMore = true;
-  int _currentOffset = 0;
   String _activeCategory = 'xp';
   int? _userRank;
-
-  static const int _pageSize = 50;
+  int _totalUsers = 0;
 
   List<LeaderboardUser> get users => _users;
-  List<LeaderboardUser> get topThree => _topThree;
+  List<LeaderboardUser> get topThree => _users.take(3).toList();
   bool get isLoading => _isLoading;
   String? get errorMessage => _errorMessage;
-  bool get hasMore => _hasMore;
   String get activeCategory => _activeCategory;
   int? get userRank => _userRank;
-
-  Future<void> fetchTopThree() async {
-    try {
-      final response = await _api.dio.get('/leaderboard/top');
-      final data = response.data['data'] as List? ?? [];
-      _topThree = data.map((j) => LeaderboardUser.fromJson(j)).toList();
-      notifyListeners();
-    } catch (e) {
-      print('⚠️ Failed to fetch top three: $e');
-    }
-  }
+  int get totalUsers => _totalUsers;
 
   Future<void> fetchLeaderboard({
     String category = 'xp',
@@ -91,36 +91,26 @@ class LeaderboardProvider extends ChangeNotifier {
   }) async {
     if (refresh) {
       _isLoading = true;
-      _currentOffset = 0;
-      _hasMore = true;
       _activeCategory = category;
     }
     _errorMessage = null;
     notifyListeners();
 
     try {
-      final response = await _api.dio.get('/leaderboard', queryParameters: {
-        'category': category,
-        'limit': _pageSize,
-        'offset': _currentOffset,
-      });
+      final response = await _api.dio.get(
+        '/leaderboard',
+        queryParameters: {'category': category, 'limit': topCount, 'offset': 0},
+      );
 
       final data = response.data['data'] as List? ?? [];
       final meta = response.data['meta'] as Map<String, dynamic>? ?? {};
 
-      final newUsers = data.map((j) => LeaderboardUser.fromJson(j)).toList();
-
-      if (refresh) {
-        _users = newUsers;
-      } else {
-        _users.addAll(newUsers);
-      }
-
+      _users = data.map((j) => LeaderboardUser.fromJson(j)).toList();
       _userRank = meta['user_rank'];
-      _hasMore = meta['has_more'] ?? false;
-      _currentOffset = _users.length;
+      _totalUsers =
+          (meta['system_total_users'] as num?)?.toInt() ?? _users.length;
     } catch (e) {
-      print('❌ Failed to fetch leaderboard: $e');
+      debugPrint('❌ Failed to fetch leaderboard: $e');
       _errorMessage = 'Failed to load leaderboard';
     }
 
@@ -128,22 +118,12 @@ class LeaderboardProvider extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> loadMore() async {
-    if (_isLoading || !_hasMore) return;
-    await fetchLeaderboard(category: _activeCategory, refresh: false);
-  }
-
   void switchCategory(String category) {
     if (_activeCategory != category) {
       fetchLeaderboard(category: category, refresh: true);
-      fetchTopThree();
     }
   }
 
-  Future<void> refreshAll() async {
-    await Future.wait([
-      fetchTopThree(),
-      fetchLeaderboard(category: _activeCategory, refresh: true),
-    ]);
-  }
+  Future<void> refreshAll() =>
+      fetchLeaderboard(category: _activeCategory, refresh: true);
 }

@@ -18,7 +18,14 @@ use App\Models\AuditLog;
 use App\Models\XpTransaction;
 use App\Models\PlaceImage;
 use App\Models\PlaceReview;
+use App\Models\Role;
+use App\Models\UserFraudProfile;
 use App\Services\AchievementService;
+use App\Services\AdminAlertsService;
+use App\Services\AdminDashboardService;
+use App\Services\AdminPlacesService;
+use App\Services\AdminReportsService;
+use App\Services\AdminUsersService;
 use App\Services\PushNotificationService;
 use App\Services\ModeratorService;
 use Illuminate\Support\Facades\Auth;
@@ -36,13 +43,56 @@ use App\Support\ImageIntegrityPresenter;
 
 class AdminController extends Controller
 {
+    private const USER_PER_PAGE_OPTIONS = [15, 20, 25, 50, 100];
+
+    private const USER_SORT_LABELS = [
+        'newest' => 'Newest first',
+        'oldest' => 'Oldest first',
+        'name' => 'Name A–Z',
+        'xp' => 'Highest XP',
+        'reports' => 'Most reports',
+        'risk' => 'Highest fraud score',
+    ];
+
+    private const USER_ROLE_LABELS = [
+        'all' => 'All users',
+        'user' => 'Users',
+        'moderator' => 'Moderators',
+        'admin' => 'Admins',
+        'business' => 'Business partners',
+    ];
+
+    private const USER_STATUS_LABELS = [
+        'all' => 'All statuses',
+        'active' => 'Active',
+        'suspended' => 'Suspended',
+        'banned' => 'Banned',
+        'suspicious' => 'Suspicious',
+    ];
+
+    private const USER_VERIFICATION_LABELS = [
+        'email_verified' => 'Email verified',
+        'email_unverified' => 'Email unverified',
+        'phone' => 'Phone on file',
+        'profile' => 'Profile complete',
+    ];
+
+    private const USER_RISK_LABELS = [
+        'watch' => 'Under watch',
+        'high' => 'High fraud score',
+        'scored' => 'Has a fraud score',
+        'clean' => 'No fraud score',
+    ];
+
     private ModeratorService $moderatorService;
     private ImageIntegrityPresenter $imageIntegrityPresenter;
+    private AdminDashboardService $dashboardService;
 
-    public function __construct(ModeratorService $moderatorService, ?ImageIntegrityPresenter $imageIntegrityPresenter = null)
+    public function __construct(ModeratorService $moderatorService, ?ImageIntegrityPresenter $imageIntegrityPresenter = null, ?AdminDashboardService $dashboardService = null)
     {
         $this->moderatorService = $moderatorService;
         $this->imageIntegrityPresenter = $imageIntegrityPresenter ?? new ImageIntegrityPresenter();
+        $this->dashboardService = $dashboardService ?? app(AdminDashboardService::class);
     }
 
     private function requireAdmin(Request $request): void
@@ -172,9 +222,102 @@ class AdminController extends Controller
     {
         $this->requireAdmin($request);
 
-        $stats = $this->dashboardStats();
+        /** @var User $user */
+        $user = Auth::user();
+        $data = $this->dashboardService->build($request, $user);
 
-        return view('admin.dashboard', compact('stats'));
+        return view('admin.dashboard', compact('data'));
+    }
+
+    /** JSON payload for the dashboard's live/range refresh. */
+    public function dashboardData(Request $request)
+    {
+        $this->requireAdmin($request);
+        $this->requirePermission('view_dashboard');
+
+        /** @var User $user */
+        $user = Auth::user();
+        $data = $this->dashboardService->build($request, $user);
+
+        return response()
+            ->json(['success' => true, 'data' => $data])
+            ->header('Cache-Control', 'no-store, no-cache, must-revalidate');
+    }
+
+    /** Download the currently selected dashboard range as CSV. */
+    public function dashboardExport(Request $request)
+    {
+        $this->requireAdmin($request);
+        $this->requirePermission('view_dashboard');
+
+        /** @var User $user */
+        $user = Auth::user();
+        $data = $this->dashboardService->build($request, $user);
+        $filename = 'admin-dashboard-'.$data['range']['key'].'-'.now()->format('Ymd-His').'.csv';
+
+        return response()->streamDownload(function () use ($data) {
+            $out = fopen('php://output', 'w');
+            fwrite($out, "\xEF\xBB\xBF");
+
+            fputcsv($out, ['Admin dashboard export']);
+            fputcsv($out, ['Generated', $data['generated_at']]);
+            fputcsv($out, ['Range', $data['range']['label'], $data['range']['human']]);
+            fputcsv($out, ['Comparison', $data['range']['comparison']]);
+            fputcsv($out, []);
+
+            fputcsv($out, ['KPI', 'Value', 'Period change %']);
+            foreach ($data['kpis'] as $kpi) {
+                fputcsv($out, [$kpi['label'], $kpi['value'], $kpi['delta'] ?? '']);
+            }
+
+            fputcsv($out, []);
+
+            $includeRevenue = (bool) ($data['permissions']['finance'] ?? false);
+            $header = ['Bucket', 'New users', 'New reports', 'New alerts'];
+            if ($includeRevenue) {
+                $header = array_merge($header, [
+                    'Ad revenue (NPR)',
+                    'Booking commission (NPR)',
+                    'Offer commission (NPR)',
+                    'Subscription revenue (NPR)',
+                    'Total revenue (NPR)',
+                ]);
+            }
+            fputcsv($out, $header);
+
+            $activity = $data['charts']['activity'] ?? [];
+            $revenue = $data['charts']['revenue'] ?? [];
+
+            foreach (($activity['labels'] ?? []) as $index => $label) {
+                $row = [
+                    $label,
+                    $activity['users'][$index] ?? 0,
+                    $activity['reports'][$index] ?? 0,
+                    $activity['alerts'][$index] ?? 0,
+                ];
+
+                if ($includeRevenue) {
+                    $ads = (float) ($revenue['ads'][$index] ?? 0);
+                    $bookings = (float) ($revenue['bookings'][$index] ?? 0);
+                    $offers = (float) ($revenue['offers'][$index] ?? 0);
+                    $subscriptions = (float) ($revenue['subscriptions'][$index] ?? 0);
+                    $row = array_merge($row, [
+                        round($ads, 2),
+                        round($bookings, 2),
+                        round($offers, 2),
+                        round($subscriptions, 2),
+                        round($ads + $bookings + $offers + $subscriptions, 2),
+                    ]);
+                }
+
+                fputcsv($out, $row);
+            }
+
+            fclose($out);
+        }, $filename, [
+            'Content-Type' => 'text/csv; charset=UTF-8',
+            'Cache-Control' => 'no-store, no-cache, must-revalidate',
+        ]);
     }
 
     /** Scalar dashboard numbers — reused by dashboard() and the live-feed stats endpoint. */
@@ -443,21 +586,24 @@ class AdminController extends Controller
         return view('admin.audit_logs', compact('logs', 'actions', 'users'));
     }
 
-    public function reports(Request $request)
+    public function reports(Request $request, AdminReportsService $reportsInsights)
     {
         $this->requireAdmin($request);
+
         $query = $this->reportsListQuery($request)->with('user', 'category');
         $status = $request->input('status', 'pending');
         $listParams = $this->reportListParams($request);
 
-        $reports = $query->paginate(15)->withQueryString();
-        $categories = ReportCategorie::all();
-        $queueCounts = [
-            'pending' => ModerationQueue::pending()->byType('report')->count(),
-            'approved' => ModerationQueue::where('status', 'approved')->byType('report')->count(),
-            'rejected' => ModerationQueue::where('status', 'rejected')->byType('report')->count(),
-        ];
-        return view('admin.reports', compact('reports', 'status', 'categories', 'queueCounts', 'listParams'));
+        $perPage = (int) $request->input('per_page', 15);
+        if (!in_array($perPage, [15, 25, 50, 100], true)) {
+            $perPage = 15;
+        }
+
+        $reports = $query->paginate($perPage)->withQueryString();
+        $categories = ReportCategorie::orderBy('name')->get();
+        $insights = $reportsInsights->build();
+
+        return view('admin.reports', compact('reports', 'status', 'categories', 'insights', 'listParams'));
     }
 
     /**
@@ -528,7 +674,7 @@ class AdminController extends Controller
     {
         return array_intersect_key(
             $request->query(),
-            array_flip(['status', 'priority', 'category_id', 'gps', 'date_range', 'search', 'page'])
+            array_flip(['status', 'priority', 'category_id', 'gps', 'date_range', 'search', 'per_page', 'page'])
         );
     }
 
@@ -576,73 +722,354 @@ class AdminController extends Controller
         return [$prev !== null ? (int) $prev : null, $next !== null ? (int) $next : null];
     }
 
-    public function users(Request $request)
+    public function users(Request $request, AdminUsersService $usersInsights)
     {
         $this->requireAdmin($request);
         $this->requirePermission('manage_users');
-        $query = User::with('role');
-        $role = $request->input('role', 'all');
-        if ($role !== 'all') {
-            $roleId = \App\Models\Role::where('name', $role)->value('id');
-            if ($roleId) {
-                $query->where('role_id', $roleId);
-            }
-        }
-        $status = $request->input('status', 'all');
-        if ($status === 'suspicious') {
-            $query->whereHas('fraudProfile', function ($q) {
-                $q->where('is_suspicious', true);
-            });
-        } elseif ($status !== 'all') {
-            $query->where('status', $status);
-        }
-        $search = $request->input('search');
-        if ($search) {
+
+        $filters = $this->userFilters($request);
+        $sort = $this->userSort($request);
+        $perPage = $this->userPerPage($request);
+
+        $query = User::query()
+            ->with(['role.permissions', 'fraudProfile'])
+            ->withCount('reports');
+
+        $this->applyUserRoleFilter($query, $filters['role']);
+        $this->applyUserStatusFilter($query, $filters['status']);
+        $this->applyUserVerificationFilter($query, $filters['verification']);
+        $this->applyUserRiskFilter($query, $filters['risk']);
+
+        if ($filters['search'] !== '') {
+            $search = $filters['search'];
             $query->where(function ($q) use ($search) {
                 $q->where('name', 'like', "%{$search}%")
-                  ->orWhere('email', 'like', "%{$search}%");
+                    ->orWhere('email', 'like', "%{$search}%")
+                    ->orWhere('phone', 'like', "%{$search}%");
+
+                if (ctype_digit($search)) {
+                    $q->orWhere('id', (int) $search);
+                }
             });
         }
-        $users = $query->latest()->paginate(15);
-        $roles = \App\Models\Role::orderBy('name')->get();
-        $moderatorRoleId = \App\Models\Role::where('name', 'moderator')->value('id');
+
+        $this->applyUserSort($query, $sort);
+
+        $users = $query->paginate($perPage)->withQueryString();
+        $roles = Role::query()
+            ->orderByRaw("FIELD(name, 'user', 'business', 'moderator', 'admin', 'super_admin')")
+            ->orderBy('name')
+            ->get();
+        $moderatorRoleId = Role::where('name', 'moderator')->value('id');
         $moderators = $moderatorRoleId
             ? User::where('role_id', $moderatorRoleId)->with('role.permissions')->get()
             : collect();
-        return view('admin.users', compact('users', 'role', 'status', 'roles', 'moderators'));
+
+        $insights = $usersInsights->build();
+        $currentUser = Auth::user();
+        if (!$currentUser->isSuperAdmin()) {
+            $roles = $roles->reject(fn ($role) => $role->name === 'super_admin')->values();
+        }
+        $canManageUsers = $currentUser->hasPermission('manage_users');
+        $canAssignModerator = $currentUser->hasPermission('assign_moderator');
+        $canManageRoles = $currentUser->hasPermission('manage_roles');
+        $sortLabels = self::USER_SORT_LABELS;
+        $verificationLabels = self::USER_VERIFICATION_LABELS;
+        $riskLabels = self::USER_RISK_LABELS;
+        $perPageOptions = self::USER_PER_PAGE_OPTIONS;
+
+        return view('admin.users', compact(
+            'users',
+            'filters',
+            'sort',
+            'sortLabels',
+            'verificationLabels',
+            'riskLabels',
+            'perPageOptions',
+            'roles',
+            'moderators',
+            'insights',
+            'currentUser',
+            'canManageUsers',
+            'canAssignModerator',
+            'canManageRoles',
+        ));
     }
 
-    public function alerts(Request $request)
+    /**
+     * Normalise every Users list filter to a known value so a hand-edited URL
+     * can never produce an empty or misleading view.
+     */
+    private function userFilters(Request $request): array
+    {
+        $role = (string) $request->input('role', 'all');
+        if (!array_key_exists($role, self::USER_ROLE_LABELS)) {
+            $role = 'all';
+        }
+
+        $status = (string) $request->input('status', 'all');
+        if (!array_key_exists($status, self::USER_STATUS_LABELS)) {
+            $status = 'all';
+        }
+
+        $verification = (string) $request->input('verification', '');
+        if (!array_key_exists($verification, self::USER_VERIFICATION_LABELS)) {
+            $verification = '';
+        }
+
+        $risk = (string) $request->input('risk', '');
+        if (!array_key_exists($risk, self::USER_RISK_LABELS)) {
+            $risk = '';
+        }
+
+        return [
+            'search' => trim((string) $request->input('search', '')),
+            'role' => $role,
+            'status' => $status,
+            'verification' => $verification,
+            'risk' => $risk,
+            'per_page' => $this->userPerPage($request),
+        ];
+    }
+
+    private function userSort(Request $request): string
+    {
+        $sort = (string) $request->input('sort', 'newest');
+
+        return array_key_exists($sort, self::USER_SORT_LABELS) ? $sort : 'newest';
+    }
+
+    private function userPerPage(Request $request): int
+    {
+        $perPage = (int) $request->input('per_page', 15);
+
+        return in_array($perPage, self::USER_PER_PAGE_OPTIONS, true) ? $perPage : 15;
+    }
+
+    private function applyUserRoleFilter($query, string $role): void
+    {
+        if ($role === 'all') {
+            return;
+        }
+
+        if ($role === 'admin') {
+            $query->whereHas('role', fn ($q) => $q->whereIn('name', ['admin', 'super_admin']));
+            return;
+        }
+
+        if ($role === 'user') {
+            // Accounts created before role assignment (or without a role row)
+            // are still regular users and belong under the Users tab.
+            $query->where(function ($q) {
+                $q->whereNull('role_id')
+                    ->orWhereHas('role', fn ($roleQuery) => $roleQuery->where('name', 'user'));
+            });
+            return;
+        }
+
+        $query->whereHas('role', fn ($q) => $q->where('name', $role));
+    }
+
+    private function applyUserStatusFilter($query, string $status): void
+    {
+        if ($status === 'all') {
+            return;
+        }
+
+        if ($status === 'suspicious') {
+            $query->whereHas('fraudProfile', fn ($q) => $q->where('is_suspicious', true));
+            return;
+        }
+
+        $query->where('status', $status);
+    }
+
+    private function applyUserVerificationFilter($query, string $verification): void
+    {
+        switch ($verification) {
+            case 'email_verified':
+                $query->whereNotNull('email_verified_at');
+                break;
+            case 'email_unverified':
+                $query->whereNull('email_verified_at');
+                break;
+            case 'phone':
+                $query->whereNotNull('phone');
+                break;
+            case 'profile':
+                $query->where('profile_completed', true);
+                break;
+        }
+    }
+
+    private function applyUserRiskFilter($query, string $risk): void
+    {
+        switch ($risk) {
+            case 'watch':
+                $query->whereHas('fraudProfile', fn ($q) => $q->where('is_suspicious', true));
+                break;
+            case 'high':
+                $query->whereHas('fraudProfile', fn ($q) => $q->where('fraud_score', '>=', 80));
+                break;
+            case 'scored':
+                $query->whereHas('fraudProfile', fn ($q) => $q->where('fraud_score', '>', 0));
+                break;
+            case 'clean':
+                $query->whereDoesntHave('fraudProfile', fn ($q) => $q->where('fraud_score', '>', 0));
+                break;
+        }
+    }
+
+    private function applyUserSort($query, string $sort): void
+    {
+        switch ($sort) {
+            case 'oldest':
+                $query->oldest('created_at')->orderBy('id');
+                break;
+            case 'name':
+                $query->orderBy('name')->orderBy('id');
+                break;
+            case 'xp':
+                $query->orderByDesc('total_xp')->orderByDesc('id');
+                break;
+            case 'reports':
+                $query->orderByDesc('reports_count')->orderByDesc('id');
+                break;
+            case 'risk':
+                $query->orderByDesc(
+                    UserFraudProfile::select('fraud_score')
+                        ->whereColumn('user_fraud_profiles.user_id', 'users.id')
+                        ->limit(1)
+                )->orderByDesc('id');
+                break;
+            default:
+                $query->latest('created_at')->orderByDesc('id');
+                break;
+        }
+    }
+
+    public function alerts(Request $request, AdminAlertsService $alertsInsights)
     {
         $this->requireAdmin($request);
-        $query = Alert::query();
-        $severity = $request->input('severity', 'all');
+
+        $query = Alert::query()->with('creator');
+
+        $status = (string) $request->input('status', 'all');
+        if (!in_array($status, ['all', 'active', 'expired'], true)) {
+            $status = 'all';
+        }
+        if ($status === 'active') {
+            $query->active();
+        } elseif ($status === 'expired') {
+            $query->expired();
+        }
+
+        $severity = (string) $request->input('severity', 'all');
+        if (!in_array($severity, ['all', 'critical', 'high', 'medium', 'low', 'info'], true)) {
+            $severity = 'all';
+        }
         if ($severity !== 'all') {
             $query->where('severity', $severity);
         }
-        $alerts = $query->latest()->paginate(15);
-        return view('admin.alerts', compact('alerts', 'severity'));
+
+        $alertType = (string) $request->input('alert_type', '');
+        if ($alertType !== '') {
+            $query->where('alert_type', $alertType);
+        }
+
+        $dateRange = (string) $request->input('date_range', '');
+        if ($dateRange === 'today') {
+            $query->whereDate('created_at', today());
+        } elseif ($dateRange === '7days') {
+            $query->where('created_at', '>=', now()->subDays(7));
+        } elseif ($dateRange === '30days') {
+            $query->where('created_at', '>=', now()->subDays(30));
+        } else {
+            $dateRange = '';
+        }
+
+        if ($request->filled('search')) {
+            $search = trim((string) $request->input('search'));
+            $query->where(function ($builder) use ($search) {
+                $builder->where('title', 'like', "%{$search}%")
+                    ->orWhere('title_ne', 'like', "%{$search}%")
+                    ->orWhere('description', 'like', "%{$search}%")
+                    ->orWhere('description_ne', 'like', "%{$search}%")
+                    ->orWhere('affected_district', 'like', "%{$search}%")
+                    ->orWhereHas('creator', function ($creatorQuery) use ($search) {
+                        $creatorQuery->where('name', 'like', "%{$search}%");
+                    });
+            });
+        }
+
+        $perPage = (int) $request->input('per_page', 15);
+        if (!in_array($perPage, [15, 25, 50, 100], true)) {
+            $perPage = 15;
+        }
+
+        $alerts = $query->latest()->orderByDesc('id')->paginate($perPage)->withQueryString();
+        $insights = $alertsInsights->build();
+        $types = $insights['type_options'];
+        $canManageAlerts = Auth::user()?->hasPermission('manage_alerts') ?? false;
+
+        return view('admin.alerts', compact(
+            'alerts',
+            'severity',
+            'status',
+            'alertType',
+            'dateRange',
+            'insights',
+            'types',
+            'canManageAlerts',
+        ));
     }
 
-    public function places(Request $request)
+    public function places(Request $request, AdminPlacesService $placesInsights)
     {
         $this->requireAdmin($request);
+
         $query = Place::with('images', 'category');
 
-        // Status filter (pending = not verified and not active)
-        $status = $request->input('status', 'all');
+        // Status filter. These are lenses, not a partition: pending places are
+        // also inactive, and verified places may be active or inactive.
+        $status = (string) $request->input('status', 'all');
+        if (!in_array($status, ['all', 'active', 'pending', 'verified', 'featured', 'inactive'], true)) {
+            $status = 'all';
+        }
         if ($status === 'pending') {
             $query->where('is_verified', false)->where('is_active', false);
         } elseif ($status === 'active') {
             $query->where('is_active', true);
         } elseif ($status === 'inactive') {
             $query->where('is_active', false);
+        } elseif ($status === 'verified') {
+            $query->where('is_verified', true);
+        } elseif ($status === 'featured') {
+            $query->where('is_featured', true);
         }
 
         // Category filter
-        $categoryId = $request->input('category_id', 'all');
+        $categoryId = (string) $request->input('category_id', 'all');
+        if ($categoryId !== 'all' && !ctype_digit($categoryId)) {
+            $categoryId = 'all';
+        }
         if ($categoryId !== 'all') {
-            $query->where('category_id', $categoryId);
+            $query->where('category_id', (int) $categoryId);
+        }
+
+        // Exact district filter (the search box still covers partial names)
+        $district = trim((string) $request->input('district', ''));
+        if ($district !== '') {
+            $query->where('district', $district);
+        }
+
+        // Source filter
+        $source = (string) $request->input('source', 'all');
+        if (!in_array($source, ['all', 'osm', 'seed', 'admin', 'user_submitted'], true)) {
+            $source = 'all';
+        }
+        if ($source !== 'all') {
+            $query->where('source', $source);
         }
 
         // Search
@@ -665,15 +1092,35 @@ class AdminController extends Controller
         $sort = $request->input('sort', 'created_at');
         $direction = $request->input('direction', 'desc');
         $allowedSorts = ['name', 'district', 'average_rating', 'total_reviews', 'is_featured', 'created_at', 'id'];
-        if (!in_array($sort, $allowedSorts)) {
+        if (!in_array($sort, $allowedSorts, true)) {
             $sort = 'created_at';
         }
         $direction = $direction === 'asc' ? 'asc' : 'desc';
         $query->orderBy($sort, $direction);
 
-        $places = $query->paginate(15)->withQueryString();
-        $categories = PlaceCategories::all();
-        return view('admin.places', compact('places', 'categories', 'categoryId', 'search', 'sort', 'direction', 'status'));
+        $perPage = (int) $request->input('per_page', 15);
+        if (!in_array($perPage, [15, 25, 50, 100], true)) {
+            $perPage = 15;
+        }
+
+        $places = $query->paginate($perPage)->withQueryString();
+        $categories = PlaceCategories::orderBy('name')->get();
+        $insights = $placesInsights->build();
+        $canManagePlaces = auth()->user()?->hasPermission('manage_places') ?? false;
+
+        return view('admin.places', compact(
+            'places',
+            'categories',
+            'categoryId',
+            'district',
+            'source',
+            'search',
+            'sort',
+            'direction',
+            'status',
+            'insights',
+            'canManagePlaces',
+        ));
     }
 
     /**
@@ -977,7 +1424,7 @@ class AdminController extends Controller
     public function reportDetails(Request $request, $id)
     {
         $this->requireAdmin($request);
-        $report = Report::with(['user', 'category', 'media'])->findOrFail($id);
+        $report = Report::with(['user', 'category', 'media', 'place', 'verifier'])->findOrFail($id);
         $queueItem = ModerationQueue::where('content_type', 'report')
             ->where('content_id', $report->id)
             ->first();
@@ -1139,6 +1586,10 @@ class AdminController extends Controller
         $role = \App\Models\Role::find($roleId);
         if (!$role) {
             return back()->with('error', 'Invalid role.');
+        }
+
+        if ($role->name === 'super_admin' && !$currentUser->isSuperAdmin()) {
+            return back()->with('error', 'Only a super admin can assign the super admin role.');
         }
 
         $user->role_id = $role->id;
@@ -2560,8 +3011,7 @@ class AdminController extends Controller
             ->limit(500)
             ->get();
 
-        $urlPrefix = url('/admin/places/');
-        $result = $places->map(function ($p) use ($urlPrefix) {
+        $result = $places->map(function ($p) {
             return [
                 'id' => $p->id,
                 'type' => 'place',
@@ -2576,7 +3026,7 @@ class AdminController extends Controller
                 'status' => $p->is_verified ? 'verified' : 'place',
                 'rating' => $p->average_rating ? (float) $p->average_rating : null,
                 'reviews_count' => $p->total_reviews ?? 0,
-                'url' => $urlPrefix . '/' . $p->id,
+                'url' => route('admin.places.view', $p->id),
             ];
         });
 
@@ -2635,13 +3085,13 @@ class AdminController extends Controller
             $placeIds = array_column($filtered, 'id');
             $images = DB::table('place_images')
                 ->whereIn('place_id', $placeIds)
+                ->where('status', PlaceImage::STATUS_APPROVED)
                 ->select('place_id', 'image_url')
                 ->get()
                 ->groupBy('place_id');
         }
 
-        $urlPrefix = url('/admin/places/');
-        $result = array_map(function ($p) use ($images, $urlPrefix) {
+        $result = array_map(function ($p) use ($images) {
             $img = $images->get($p['id'])?->first();
             return [
                 'id' => $p['id'],
@@ -2654,10 +3104,10 @@ class AdminController extends Controller
                 'icon' => $p['icon'],
                 'color' => '#00695C',
                 'status' => ($p['is_verified'] ?? false) ? 'verified' : 'unverified',
-                'image' => $img ? asset('storage/' . $img->image_url) : null,
+                'image' => $img ? PlaceImage::resolveUrl($img->image_url) : null,
                 'rating' => (float) ($p['average_rating'] ?? 0),
                 'reviews_count' => (int) ($p['total_reviews'] ?? 0),
-                'url' => $urlPrefix . $p['id'],
+                'url' => route('admin.places.view', $p['id']),
             ];
         }, $filtered);
 

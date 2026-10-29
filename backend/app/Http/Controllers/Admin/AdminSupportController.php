@@ -6,38 +6,78 @@ use App\Http\Controllers\Controller;
 use App\Models\SupportConversation;
 use App\Models\SupportMessage;
 use App\Models\User;
+use App\Services\AdminSupportService;
 use App\Services\SupportService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
-use Illuminate\Support\Str;
 use Illuminate\View\View;
 
 class AdminSupportController extends Controller
 {
+    private const PER_PAGE_OPTIONS = [15, 20, 25, 50, 100];
+
+    private const SORT_LABELS = [
+        'priority' => 'Priority first',
+        'newest' => 'Newest activity',
+        'oldest' => 'Longest waiting',
+        'created' => 'Newest created',
+        'messages' => 'Most messages',
+    ];
+
     public function __construct(
-        private SupportService $supportService
+        private SupportService $supportService,
+        private AdminSupportService $adminSupportService
     ) {}
 
     /**
-     * Display the support inbox.
+     * Display the support inbox command center.
      */
     public function index(Request $request): View
     {
+        $filters = $this->inboxFilters($request);
+        $perPage = $this->perPage($request);
+        $sort = $this->sort($request);
+
         $conversations = $this->supportService->getAdminInbox(
-            status: $request->get('status'),
-            category: $request->get('category'),
-            priority: $request->get('priority'),
-            assignedTo: $request->get('assigned_to') ? (int) $request->get('assigned_to') : null,
-            search: $request->get('search'),
-            perPage: 25,
+            status: $filters['status'],
+            category: $filters['category'],
+            priority: $filters['priority'],
+            assignedTo: $filters['assigned_to'],
+            search: $filters['search'],
+            perPage: $perPage,
+            sort: $sort,
         );
 
-        $stats = $this->supportService->getInboxStats();
+        $insights = $this->adminSupportService->insights();
+        $stats = $insights['stats'];
         $staff = User::whereHas('role', function ($q) {
             $q->whereIn('name', ['admin', 'super_admin', 'moderator']);
-        })->get();
+        })->orderBy('name')->get();
 
-        return view('admin.support_inbox', compact('conversations', 'stats', 'staff'));
+        $statusTabs = [
+            ['key' => 'active', 'label' => 'Active', 'count' => $stats['active'], 'dot' => 'bg-primary-500'],
+            ['key' => 'all', 'label' => 'All', 'count' => $stats['total'], 'dot' => 'bg-slate-400'],
+            ['key' => 'open', 'label' => 'Open', 'count' => $stats['open'], 'dot' => 'bg-sky-500'],
+            ['key' => 'ai_handling', 'label' => 'AI handling', 'count' => $stats['ai_handling'], 'dot' => 'bg-indigo-500'],
+            ['key' => 'awaiting_human', 'label' => 'Awaiting human', 'count' => $stats['awaiting_human'], 'dot' => 'bg-amber-500'],
+            ['key' => 'in_progress', 'label' => 'In progress', 'count' => $stats['in_progress'], 'dot' => 'bg-primary-600'],
+            ['key' => 'resolved', 'label' => 'Resolved', 'count' => $stats['resolved'], 'dot' => 'bg-emerald-500'],
+            ['key' => 'closed', 'label' => 'Closed', 'count' => $stats['closed'], 'dot' => 'bg-slate-400'],
+        ];
+
+        return view('admin.support_inbox', compact(
+            'conversations',
+            'insights',
+            'stats',
+            'staff',
+            'filters',
+            'perPage',
+            'sort',
+            'statusTabs',
+        ) + [
+            'perPageOptions' => self::PER_PAGE_OPTIONS,
+            'sortLabels' => self::SORT_LABELS,
+        ]);
     }
 
     /**
@@ -250,39 +290,83 @@ class AdminSupportController extends Controller
      */
     public function pollInbox(Request $request): \Illuminate\Http\JsonResponse
     {
+        $filters = $this->inboxFilters($request);
+        $perPage = $this->perPage($request);
+        $sort = $this->sort($request);
+
         $conversations = $this->supportService->getAdminInbox(
-            status: $request->get('status'),
-            category: $request->get('category'),
-            priority: $request->get('priority'),
-            assignedTo: $request->get('assigned_to') ? (int) $request->get('assigned_to') : null,
-            search: $request->get('search'),
-            perPage: 25,
+            status: $filters['status'],
+            category: $filters['category'],
+            priority: $filters['priority'],
+            assignedTo: $filters['assigned_to'],
+            search: $filters['search'],
+            perPage: $perPage,
+            sort: $sort,
         );
 
         $stats = $this->supportService->getInboxStats();
 
-        $rows = $conversations->map(fn($c) => [
-            'id' => $c->id,
-            'subject' => $c->subject,
-            'status' => $c->status,
-            'status_label' => $c->statusLabel(),
-            'category' => $c->category,
-            'category_label' => $c->categoryLabel(),
-            'priority' => $c->priority,
-            'user_name' => $c->user->name ?? 'Deleted',
-            'message_count' => $c->message_count,
-            'last_reply_at' => $c->last_reply_at?->diffForHumans() ?? '—',
-            'assignee_name' => $c->assignee->name ?? null,
-            'ai_handled' => (bool) $c->ai_handled,
-            'latest_message' => $c->latestMessage ? Str::limit($c->latestMessage->content, 60) : null,
-            'url' => route('admin.support.show', $c->id),
-        ]);
-
         return response()->json([
             'success' => true,
             'stats' => $stats,
-            'conversations' => $rows,
+            'rows_html' => view('admin.partials.support_queue_rows', compact('conversations'))->render(),
+            'pagination_html' => (string) $conversations->withQueryString()->links(),
+            'results_total' => $conversations->total(),
+            'generated_at' => now()->format('M j, Y g:i A'),
         ]);
+    }
+
+    /**
+     * @return array{status: ?string, category: ?string, priority: ?string, assigned_to: ?int, search: ?string}
+     */
+    private function inboxFilters(Request $request): array
+    {
+        $status = (string) $request->get('status', '');
+        if ($status !== '' && $status !== 'all' && !array_key_exists($status, SupportConversation::STATUSES)) {
+            $status = '';
+        }
+
+        $category = (string) $request->get('category', '');
+        if ($category !== '' && !array_key_exists($category, SupportConversation::CATEGORIES)) {
+            $category = '';
+        }
+
+        $priority = (string) $request->get('priority', '');
+        if ($priority !== '' && !array_key_exists($priority, SupportConversation::PRIORITIES)) {
+            $priority = '';
+        }
+
+        $assignedRaw = $request->get('assigned_to');
+        $assignedTo = null;
+        if ($assignedRaw === 'unassigned') {
+            $assignedTo = 0;
+        } elseif ($assignedRaw !== null && $assignedRaw !== '' && ctype_digit((string) $assignedRaw)) {
+            $assignedTo = (int) $assignedRaw;
+        }
+
+        $search = trim((string) $request->get('search', ''));
+
+        return [
+            'status' => $status !== '' ? $status : null,
+            'category' => $category !== '' ? $category : null,
+            'priority' => $priority !== '' ? $priority : null,
+            'assigned_to' => $assignedTo,
+            'search' => $search !== '' ? $search : null,
+        ];
+    }
+
+    private function perPage(Request $request): int
+    {
+        $perPage = (int) $request->get('per_page', 20);
+
+        return in_array($perPage, self::PER_PAGE_OPTIONS, true) ? $perPage : 20;
+    }
+
+    private function sort(Request $request): string
+    {
+        $sort = (string) $request->get('sort', 'priority');
+
+        return array_key_exists($sort, self::SORT_LABELS) ? $sort : 'priority';
     }
 
     /**
@@ -344,7 +428,7 @@ class AdminSupportController extends Controller
 
         $hasMore = false;
         if ($beforeMessageId > 0 && $mappedMessages->isNotEmpty()) {
-            $oldestId = $mappedMessages->first()->id;
+            $oldestId = $mappedMessages->first()['id'];
             $hasMore = SupportMessage::where('support_conversation_id', $id)
                 ->where('id', '<', $oldestId)
                 ->exists();

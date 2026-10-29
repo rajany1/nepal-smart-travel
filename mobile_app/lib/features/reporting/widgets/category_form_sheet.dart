@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+﻿import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:image_picker/image_picker.dart';
 import 'dart:io';
@@ -52,7 +52,7 @@ class _CategoryFormSheetState extends State<CategoryFormSheet> {
   String? _district;
   bool _isLoadingLocation = true;
 
-  // Location integrity (mock-location detection) — evidence for the backend,
+  // Location integrity (mock-location detection) â€” evidence for the backend,
   // never blocks the submission. Started early so it is usually settled by
   // the time the user taps submit.
   Future<LocationIntegrityResult>? _integrityFuture;
@@ -67,6 +67,12 @@ class _CategoryFormSheetState extends State<CategoryFormSheet> {
   // State
   bool _isSubmitting = false;
   bool _configReady = false;
+  String? _formError;
+
+  /// Last auto-generated description/field values, so changing the option can
+  /// refresh them without overwriting text the user typed.
+  String? _autoDescription;
+  final Map<String, String> _autoFieldValues = {};
 
   // Category (starts as the widget's category, upgraded to the full form
   // config from the backend when fields/options are missing)
@@ -75,18 +81,24 @@ class _CategoryFormSheetState extends State<CategoryFormSheet> {
   // Selected option (for categories with options)
   rc.ReportCategoryOption? _selectedOption;
 
+  /// The option chips already ask "what happened"; the duplicated
+  /// `subcategory` dropdown is hidden when options exist.
+  List<rc.ReportCategoryField> get _visibleFields => _category.customFields
+      .where((f) => !(_category.options.isNotEmpty && f.name == 'subcategory'))
+      .toList();
+
   @override
   void initState() {
     super.initState();
     _category = widget.category;
-    _initialize();
     if (widget.preselectedOption != null) {
       _selectedOption = widget.preselectedOption;
     }
+    _initialize();
   }
 
   Future<void> _initialize() async {
-    // Kick off mock-location detection in the background — it must never
+    // Kick off mock-location detection in the background â€” it must never
     // delay or block opening the report form.
     unawaited(_startIntegrityCheck());
 
@@ -107,6 +119,10 @@ class _CategoryFormSheetState extends State<CategoryFormSheet> {
       _configReady = true;
     }
 
+    // Pre-fill severity + description for a quick-report option so the user
+    // can review and post without retyping the obvious.
+    _applyOptionDefaults(_selectedOption);
+
     if (mounted) setState(() {});
   }
 
@@ -120,7 +136,7 @@ class _CategoryFormSheetState extends State<CategoryFormSheet> {
         _locationIntegrity = result;
       }
     } catch (_) {
-      // check() never throws in practice — submission has its own fallback.
+      // check() never throws in practice â€” submission has its own fallback.
     }
   }
 
@@ -133,6 +149,7 @@ class _CategoryFormSheetState extends State<CategoryFormSheet> {
         _accuracy = pos.accuracy;
         _locationTimestamp = pos.timestamp;
         _isLoadingLocation = false;
+        _formError = null;
       });
       final address = await _locationService.getAddressFromCoordinates(pos.latitude, pos.longitude);
       if (address != null && mounted) {
@@ -150,6 +167,15 @@ class _CategoryFormSheetState extends State<CategoryFormSheet> {
     }
   }
 
+  Future<void> _retryLocation() async {
+    if (_isLoadingLocation) return;
+    setState(() {
+      _isLoadingLocation = true;
+      _formError = null;
+    });
+    await _getCurrentLocation();
+  }
+
   Future<void> _loadCategoryConfig() async {
     final provider = context.read<ReportProvider>();
     final config = await provider.getCategoryFormConfig(_category.id);
@@ -157,6 +183,64 @@ class _CategoryFormSheetState extends State<CategoryFormSheet> {
       setState(() => _category = config);
     }
     if (mounted) setState(() => _configReady = true);
+  }
+
+  /// Mirror the chosen option into required fields (subcategory, severity,
+  /// impact level, immediate danger) and a short description. Only replaces
+  /// values the form itself generated earlier.
+  void _applyOptionDefaults(rc.ReportCategoryOption? option) {
+    if (option == null) return;
+
+    // Required single-select fields that can be inferred from the option.
+    _setAutoField('subcategory', option.slug);
+    _setAutoField('severity', option.severity);
+    _setAutoField(
+      'impact_level',
+      switch (option.severity) {
+        'low' => 'minor',
+        'medium' => 'moderate',
+        'high' => 'severe',
+        'critical' => 'extreme',
+        _ => null,
+      },
+    );
+    _setAutoField(
+      'immediate_danger',
+      option.severity == 'high' || option.severity == 'critical'
+          ? 'yes'
+          : 'no',
+    );
+
+    final currentDesc = _formValues['description']?.toString() ?? '';
+    if (currentDesc.trim().isEmpty || currentDesc == _autoDescription) {
+      final name = option.getLocalizedNameFromContext(context);
+      final district = _district?.trim();
+      final description = (district != null && district.isNotEmpty)
+          ? '$name reported in $district.'
+          : '$name reported near my location.';
+      _formValues['description'] = description;
+      _autoDescription = description;
+    }
+  }
+
+  /// Set a form value from the option only when the field exists, accepts the
+  /// value, and the current value is empty or was auto-set by an earlier
+  /// option choice.
+  void _setAutoField(String name, String? value) {
+    if (value == null) return;
+    rc.ReportCategoryField? field;
+    for (final candidate in _category.customFields) {
+      if (candidate.name == name) {
+        field = candidate;
+        break;
+      }
+    }
+    if (field == null || !field.options.any((o) => o.value == value)) return;
+    final current = _formValues[name];
+    if (current == null || current == _autoFieldValues[name]) {
+      _formValues[name] = value;
+      _autoFieldValues[name] = value;
+    }
   }
 
   Future<void> _capturePhoto() async {
@@ -169,13 +253,16 @@ class _CategoryFormSheetState extends State<CategoryFormSheet> {
       );
       if (photo != null && mounted) {
         if (await CameraService.isWithinSizeLimit(photo)) {
-          setState(() => _capturedPhoto = photo);
+          setState(() {
+            _capturedPhoto = photo;
+            _formError = null;
+          });
           unawaited(_refreshCaptureLocation());
         } else {
           await CameraService.cleanUp(photo);
           if (mounted) {
             ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(content: Text(context.t('Photo is too large. Max 5MB.')), backgroundColor: AppTheme.errorColor),
+              SnackBar(content: Text(context.tr('Photo is too large. Max 5MB.')), backgroundColor: AppTheme.errorColor),
             );
           }
         }
@@ -183,7 +270,7 @@ class _CategoryFormSheetState extends State<CategoryFormSheet> {
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(context.t('Failed to capture photo.')), backgroundColor: AppTheme.errorColor),
+          SnackBar(content: Text(context.tr('Failed to capture photo.')), backgroundColor: AppTheme.errorColor),
         );
       }
     }
@@ -208,17 +295,21 @@ class _CategoryFormSheetState extends State<CategoryFormSheet> {
   }
 
   /// Systematic list of everything required but still empty. Mirrors the
-  /// form validators plus photo/location requirements — the preview screen
+  /// form validators plus photo/location requirements â€” the preview screen
   /// renders these as the "Missing information" banner and blocks submit.
   List<String> _collectMissingItems() {
     final missing = <String>[];
 
     final baseDesc = _formValues['description']?.toString().trim() ?? '';
     if (baseDesc.length < 10) {
-      missing.add(context.t('Description'));
+      missing.add(context.tr('Description'));
     }
 
-    for (final field in _category.customFields) {
+    if (_category.options.isNotEmpty && _selectedOption == null) {
+      missing.add(context.tr('Type of issue'));
+    }
+
+    for (final field in _visibleFields) {
       if (!field.required) continue;
       final value = _formValues[field.name];
       final isEmpty = value == null ||
@@ -233,24 +324,27 @@ class _CategoryFormSheetState extends State<CategoryFormSheet> {
         _selectedOption?.requiresPhoto == true ||
         _category.fields.any((f) => f.type == 'photo' && f.required);
     if (requiresPhoto && _capturedPhoto == null) {
-      missing.add(context.t('Photo'));
+      missing.add(context.tr('Photo'));
     }
 
     if (_lat == null || _lng == null) {
-      missing.add(context.t('Location'));
+      missing.add(context.tr('Location'));
     }
 
     return missing;
   }
 
   /// Returns an error message when submission failed, null on success.
-  Future<String?> _submitReport() async {
+  ///
+  /// [pops] is 1 when posting straight from the form and 2 when the preview
+  /// sheet is on top (preview + form).
+  Future<String?> _submitReport({int pops = 1}) async {
     final missing = _collectMissingItems();
     if (missing.isNotEmpty) {
-      return context.t('Please complete the missing information above');
+      return context.tr('Please complete the missing information above');
     }
     if (!_formKey.currentState!.validate()) {
-      return context.t('Some fields need attention');
+      return context.tr('Some fields need attention');
     }
 
     setState(() => _isSubmitting = true);
@@ -264,7 +358,7 @@ class _CategoryFormSheetState extends State<CategoryFormSheet> {
 
       // Location integrity: reuse the background result if ready, otherwise
       // give the native detector one last short chance. On any timeout or
-      // failure we submit with an 'cannot_determine' result — integrity
+      // failure we submit with an 'cannot_determine' result â€” integrity
       // issues must never stop a legitimate report from being filed.
       LocationIntegrityResult integrity;
       try {
@@ -303,10 +397,11 @@ class _CategoryFormSheetState extends State<CategoryFormSheet> {
         setState(() => _isSubmitting = false);
         if (success) {
           ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text(context.t('Report submitted!')), backgroundColor: AppTheme.successColor),
+            SnackBar(content: Text(context.tr('Report submitted!')), backgroundColor: AppTheme.successColor),
           );
-          Navigator.pop(context); // Close preview sheet
-          Navigator.pop(context); // Close form sheet
+          for (var i = 0; i < pops; i++) {
+            Navigator.pop(context);
+          }
           // Refresh reports
           unawaited(provider.fetchReports(lat: _lat, lng: _lng, radiusKm: 20.0));
           return null;
@@ -324,14 +419,22 @@ class _CategoryFormSheetState extends State<CategoryFormSheet> {
 
   String _buildDescription() {
     final parts = <String>[];
+    final baseDesc = _formValues['description']?.toString().trim() ?? '';
 
-    // Add selected option
+    // Lead with the user's own words (auto-filled from the chosen option).
+    if (baseDesc.isNotEmpty) parts.add(baseDesc);
+
+    // Add selected option only when the description doesn't already name it.
     if (_selectedOption != null) {
-      parts.add('Type: ${_selectedOption!.getLocalizedName(context.read<LocalizationService>())}');
+      final optionName =
+          _selectedOption!.getLocalizedName(context.read<LocalizationService>());
+      if (!baseDesc.toLowerCase().contains(optionName.toLowerCase())) {
+        parts.add('Type: $optionName');
+      }
     }
 
     // Add custom field values
-    for (final field in _category.customFields) {
+    for (final field in _visibleFields) {
       final value = _formValues[field.name];
       if (value != null && value.toString().isNotEmpty) {
         final label = field.getLocalizedLabel(context.read<LocalizationService>());
@@ -341,12 +444,6 @@ class _CategoryFormSheetState extends State<CategoryFormSheet> {
           parts.add('$label: $value');
         }
       }
-    }
-
-    // Add base description if present
-    final baseDesc = _formValues['description']?.toString() ?? '';
-    if (baseDesc.isNotEmpty) {
-      parts.insert(0, baseDesc);
     }
 
     return parts.join('\n\n');
@@ -370,13 +467,34 @@ class _CategoryFormSheetState extends State<CategoryFormSheet> {
         lng: _lng,
         district: _district,
         onEdit: () => Navigator.pop(ctx),
-        onSubmit: _submitReport,
+        onSubmit: () => _submitReport(pops: 2),
         missingItems: missing,
         descriptionError: baseDesc.length < 10
-            ? context.t('Description must be at least 10 characters')
+            ? context.tr('Description must be at least 10 characters')
             : null,
       ),
     );
+  }
+
+  /// Fast path: skip the preview sheet and post from the form. Validation and
+  /// server errors are shown inline above the buttons â€” a snackbar would be
+  /// hidden behind this modal sheet on phones.
+  Future<void> _submitDirect() async {
+    final missing = _collectMissingItems();
+    if (missing.isNotEmpty) {
+      setState(() => _formError =
+          '${context.tr('Missing')}: ${missing.join(', ')}');
+      return;
+    }
+    if (!(_formKey.currentState?.validate() ?? true)) {
+      setState(() => _formError = context.tr('Some fields need attention'));
+      return;
+    }
+    setState(() => _formError = null);
+    final error = await _submitReport();
+    if (error != null && mounted) {
+      setState(() => _formError = error);
+    }
   }
 
   @override
@@ -477,7 +595,7 @@ class _CategoryFormSheetState extends State<CategoryFormSheet> {
                             ],
 
                             // Custom fields
-                            ..._category.customFields.map((field) => Padding(
+                            ..._visibleFields.map((field) => Padding(
                                   padding: const EdgeInsets.only(bottom: 16),
                                   child: _buildField(field),
                                 )),
@@ -532,7 +650,12 @@ class _CategoryFormSheetState extends State<CategoryFormSheet> {
             final categoryColor = IconMapper.getCategoryColor(_category.icon);
 
             return GestureDetector(
-              onTap: () => setState(() => _selectedOption = isSelected ? null : option),
+              onTap: () => setState(() {
+                final selecting = !isSelected;
+                _selectedOption = selecting ? option : null;
+                _formError = null;
+                if (selecting) _applyOptionDefaults(option);
+              }),
               child: AnimatedContainer(
                 duration: const Duration(milliseconds: 150),
                 padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
@@ -592,7 +715,7 @@ class _CategoryFormSheetState extends State<CategoryFormSheet> {
             _formValues[field.name] = v;
             _fieldErrors.remove(field.name);
           }),
-          validator: field.required ? (v) => v == null || v.isEmpty ? context.t('Required') : null : null,
+          validator: field.required ? (v) => v == null || v.isEmpty ? context.tr('Required') : null : null,
         );
         break;
 
@@ -652,7 +775,7 @@ class _CategoryFormSheetState extends State<CategoryFormSheet> {
             _formValues[field.name] = v;
             _fieldErrors.remove(field.name);
           }),
-          validator: field.required ? (v) => v == null || v.isEmpty ? context.t('Required') : null : null,
+          validator: field.required ? (v) => v == null || v.isEmpty ? context.tr('Required') : null : null,
         );
         break;
 
@@ -665,7 +788,7 @@ class _CategoryFormSheetState extends State<CategoryFormSheet> {
             _formValues[field.name] = v;
             _fieldErrors.remove(field.name);
           }),
-          validator: field.required ? (v) => v == null || v.isEmpty ? context.t('Required') : null : null,
+          validator: field.required ? (v) => v == null || v.isEmpty ? context.tr('Required') : null : null,
         );
         break;
 
@@ -737,7 +860,7 @@ class _CategoryFormSheetState extends State<CategoryFormSheet> {
             _formValues[field.name] = v;
             _fieldErrors.remove(field.name);
           }),
-          validator: field.required ? (v) => v == null || v.isEmpty ? context.t('Required') : null : null,
+          validator: field.required ? (v) => v == null || v.isEmpty ? context.tr('Required') : null : null,
         );
     }
 
@@ -758,6 +881,7 @@ class _CategoryFormSheetState extends State<CategoryFormSheet> {
 
   Widget _buildDescriptionField() {
     return TextFormField(
+      key: ValueKey('description-${_selectedOption?.id ?? 0}'),
       initialValue: _formValues['description'] as String?,
       decoration: _inputDecoration(
         context.t('Description'),
@@ -770,7 +894,7 @@ class _CategoryFormSheetState extends State<CategoryFormSheet> {
         _formValues['description'] = v;
         _fieldErrors.remove('description');
       }),
-      validator: (v) => v == null || v.trim().length < 10 ? context.t('Description must be at least 10 characters') : null,
+      validator: (v) => v == null || v.trim().length < 10 ? context.tr('Description must be at least 10 characters') : null,
     );
   }
 
@@ -837,6 +961,22 @@ class _CategoryFormSheetState extends State<CategoryFormSheet> {
               ),
             ),
           ),
+          if (!_isLoadingLocation && _lat == null)
+            TextButton(
+              onPressed: _retryLocation,
+              style: TextButton.styleFrom(
+                padding: const EdgeInsets.symmetric(horizontal: 8),
+                minimumSize: const Size(0, 32),
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              ),
+              child: Text(
+                context.t('Retry'),
+                style: const TextStyle(
+                  fontSize: AppTheme.textSm,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ),
         ],
       ),
     );
@@ -904,6 +1044,12 @@ Widget _buildPhotoSection() {
                             context.t('Required for this type'),
                             style: TextStyle(fontSize: AppTheme.textXs, color: AppTheme.warningColor, fontWeight: FontWeight.w500),
                           ),
+                        ] else ...[
+                          const SizedBox(height: 4),
+                          Text(
+                            context.t('Live photo required for verification'),
+                            style: const TextStyle(fontSize: AppTheme.textXs, color: AppTheme.textSecondary),
+                          ),
                         ],
                       ],
                     ),
@@ -928,49 +1074,95 @@ Widget _buildPhotoSection() {
   }
 
   Widget _buildActionButtons() {
-    return Row(
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Expanded(
-          child: OutlinedButton(
-            onPressed: _isSubmitting ? null : _showPreview,
-            style: OutlinedButton.styleFrom(
-              padding: const EdgeInsets.symmetric(vertical: 16),
-              side: BorderSide(color: AppTheme.primaryColor.withOpacity(0.5)),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-              foregroundColor: AppTheme.primaryColor,
+        if (_formError != null) ...[
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            decoration: BoxDecoration(
+              color: AppTheme.errorColor.withOpacity(0.08),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: AppTheme.errorColor.withOpacity(0.25)),
             ),
             child: Row(
-              mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                const Icon(Icons.visibility, size: 20),
+                const Icon(Icons.error_outline,
+                    size: 18, color: AppTheme.errorColor),
                 const SizedBox(width: 8),
-                Text(context.t('Preview'), style: const TextStyle(fontSize: AppTheme.textBase, fontWeight: FontWeight.w600)),
+                Expanded(
+                  child: Text(
+                    _formError!,
+                    style: const TextStyle(
+                      fontSize: AppTheme.textSm,
+                      fontWeight: FontWeight.w600,
+                      color: AppTheme.errorColor,
+                    ),
+                  ),
+                ),
               ],
             ),
           ),
-        ),
-        const SizedBox(width: 12),
-        Expanded(
-          child: ElevatedButton(
-            onPressed: _isSubmitting ? null : _showPreview, // Preview first, then submit from preview
-            style: ElevatedButton.styleFrom(
-              padding: const EdgeInsets.symmetric(vertical: 16),
-              backgroundColor: IconMapper.getCategoryColor(_category.icon),
-              foregroundColor: Colors.white,
-              elevation: 0,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+          const SizedBox(height: 10),
+        ],
+        Row(
+          children: [
+            Expanded(
+              child: OutlinedButton(
+                onPressed: _isSubmitting ? null : _showPreview,
+                style: OutlinedButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(vertical: 16),
+                  side: BorderSide(
+                      color: AppTheme.primaryColor.withOpacity(0.5)),
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(14)),
+                  foregroundColor: AppTheme.primaryColor,
+                ),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    const Icon(Icons.visibility, size: 20),
+                    const SizedBox(width: 8),
+                    Text(context.t('Preview'),
+                        style: const TextStyle(
+                            fontSize: AppTheme.textBase,
+                            fontWeight: FontWeight.w600)),
+                  ],
+                ),
+              ),
             ),
-            child: _isSubmitting
-                ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                : Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      const Icon(Icons.send, size: 20),
-                      const SizedBox(width: 8),
-                      Text(context.t('Continue'), style: const TextStyle(fontSize: AppTheme.textBase, fontWeight: FontWeight.w600)),
-                    ],
-                  ),
-          ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: ElevatedButton(
+                onPressed: _isSubmitting ? null : _submitDirect,
+                style: ElevatedButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(vertical: 16),
+                  backgroundColor: IconMapper.getCategoryColor(_category.icon),
+                  foregroundColor: Colors.white,
+                  elevation: 0,
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(14)),
+                ),
+                child: _isSubmitting
+                    ? const SizedBox(
+                        height: 20,
+                        width: 20,
+                        child: CircularProgressIndicator(
+                            strokeWidth: 2, color: Colors.white))
+                    : Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          const Icon(Icons.send_rounded, size: 20),
+                          const SizedBox(width: 8),
+                          Text(context.t('Post now'),
+                              style: const TextStyle(
+                                  fontSize: AppTheme.textBase,
+                                  fontWeight: FontWeight.w600)),
+                        ],
+                      ),
+              ),
+            ),
+          ],
         ),
       ],
     );

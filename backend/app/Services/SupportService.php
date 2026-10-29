@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Models\SupportConversation;
 use App\Models\SupportMessage;
+use App\Models\SupportSatisfaction;
 use App\Models\User;
 use App\Models\AiAgent;
 use App\Models\AiAgentTask;
@@ -360,6 +361,7 @@ class SupportService
             'user',
             'assignee',
             'lastReplier',
+            'satisfaction',
         ])->find($conversationId);
 
         if (!$conversation) {
@@ -400,12 +402,16 @@ class SupportService
         ?string $priority = null,
         ?int $assignedTo = null,
         ?string $search = null,
-        int $perPage = 20
+        int $perPage = 20,
+        string $sort = 'priority'
     ) {
         $query = SupportConversation::with(['user', 'assignee', 'latestMessage.user']);
 
-        // If filtering by specific status, use that; otherwise default to open statuses
-        if ($status) {
+        // An empty status means the active queue (the inbox default). "all" is
+        // an explicit request for resolved/closed conversations too.
+        if ($status === 'all') {
+            // No status constraint.
+        } elseif ($status) {
             $query->where('status', $status);
         } else {
             $query->open();
@@ -417,10 +423,13 @@ class SupportService
         if ($priority) {
             $query->where('priority', $priority);
         }
-        if ($assignedTo) {
+        if ($assignedTo === 0) {
+            $query->whereNull('assigned_to');
+        } elseif ($assignedTo) {
             $query->where('assigned_to', $assignedTo);
         }
         if ($search) {
+            $search = trim($search);
             $query->where(function ($q) use ($search) {
                 $q->where('subject', 'like', "%{$search}%")
                   ->orWhereHas('user', function ($uq) use ($search) {
@@ -430,49 +439,144 @@ class SupportService
             });
         }
 
-        return $query->orderByRaw("CASE priority
-            WHEN 'urgent' THEN 1
-            WHEN 'high' THEN 2
-            WHEN 'normal' THEN 3
-            WHEN 'low' THEN 4
-        END")
-        ->orderBy('last_reply_at', 'desc')
-        ->paginate($perPage);
+        $this->applyInboxSort($query, $sort);
+
+        return $query
+            ->paginate(max(5, min($perPage, 100)))
+            ->withQueryString();
     }
 
     /**
-     * Get inbox statistics for admin dashboard.
+     * Apply the queue's sort order. Priority-first is the operational default;
+     * "oldest" surfaces conversations that have been waiting longest.
+     */
+    private function applyInboxSort($query, string $sort): void
+    {
+        switch ($sort) {
+            case 'newest':
+                $query->orderByDesc('last_reply_at')->orderByDesc('id');
+                break;
+            case 'oldest':
+                $query->orderByRaw('COALESCE(last_reply_at, created_at) asc')->orderBy('id');
+                break;
+            case 'created':
+                $query->orderByDesc('created_at')->orderByDesc('id');
+                break;
+            case 'messages':
+                $query->orderByDesc('message_count')->orderByDesc('last_reply_at');
+                break;
+            default:
+                $query->orderByRaw("CASE priority
+                    WHEN 'urgent' THEN 1
+                    WHEN 'high' THEN 2
+                    WHEN 'normal' THEN 3
+                    WHEN 'low' THEN 4
+                END")
+                ->orderByDesc('last_reply_at')
+                ->orderByDesc('id');
+                break;
+        }
+    }
+
+    /**
+     * Get inbox statistics for the command center and its polling endpoint.
      */
     public function getInboxStats(): array
     {
-        $all = SupportConversation::count();
-        $open = SupportConversation::where('status', SupportConversation::STATUS_OPEN)->count();
-        $aiHandling = SupportConversation::where('status', SupportConversation::STATUS_AI_HANDLING)->count();
-        $awaitingHuman = SupportConversation::where('status', SupportConversation::STATUS_AWAITING_HUMAN)->count();
-        $inProgress = SupportConversation::where('status', SupportConversation::STATUS_IN_PROGRESS)->count();
-        $resolved = SupportConversation::where('status', SupportConversation::STATUS_RESOLVED)->count();
-        $closed = SupportConversation::where('status', SupportConversation::STATUS_CLOSED)->count();
-        $unassigned = SupportConversation::open()->whereNull('assigned_to')->count();
+        $statusCounts = SupportConversation::query()
+            ->selectRaw('status, COUNT(*) as total')
+            ->groupBy('status')
+            ->pluck('total', 'status');
 
-        $reviewedCount = \App\Models\SupportSatisfaction::count();
-        $avgRating = \App\Models\SupportSatisfaction::avg('rating');
-        $ratingDistribution = \App\Models\SupportSatisfaction::selectRaw('rating, count(*) as count')
+        $countFor = fn (string $status): int => (int) ($statusCounts[$status] ?? 0);
+
+        $activeStatuses = [
+            SupportConversation::STATUS_OPEN,
+            SupportConversation::STATUS_AI_HANDLING,
+            SupportConversation::STATUS_AWAITING_HUMAN,
+            SupportConversation::STATUS_IN_PROGRESS,
+        ];
+        $active = 0;
+        foreach ($activeStatuses as $activeStatus) {
+            $active += $countFor($activeStatus);
+        }
+
+        $unassigned = SupportConversation::open()->whereNull('assigned_to')->count();
+        $assignedActive = SupportConversation::open()->whereNotNull('assigned_to')->count();
+
+        $priorityCounts = SupportConversation::open()
+            ->selectRaw('priority, COUNT(*) as total')
+            ->groupBy('priority')
+            ->pluck('total', 'priority');
+
+        $aiHandled = SupportConversation::where('ai_handled', true)->count();
+
+        $messageCounts = SupportMessage::query()
+            ->selectRaw('sender_type, COUNT(*) as total')
+            ->groupBy('sender_type')
+            ->pluck('total', 'sender_type');
+        $messageTotal = (int) $messageCounts->sum();
+        $staffReplies = (int) ($messageCounts[SupportMessage::SENDER_SUPPORT] ?? 0);
+        $aiReplies = (int) ($messageCounts[SupportMessage::SENDER_AI] ?? 0);
+
+        $now = now();
+        $todayStart = $now->copy()->startOfDay();
+        $yesterdayStart = $todayStart->copy()->subDay();
+        $start30 = $now->copy()->subDays(29)->startOfDay();
+        $startPrev30 = $now->copy()->subDays(59)->startOfDay();
+
+        $activity = SupportConversation::query()->selectRaw(
+            'SUM(CASE WHEN created_at >= ? THEN 1 ELSE 0 END) as today,
+             SUM(CASE WHEN created_at >= ? AND created_at < ? THEN 1 ELSE 0 END) as yesterday,
+             SUM(CASE WHEN created_at >= ? THEN 1 ELSE 0 END) as last_30,
+             SUM(CASE WHEN created_at >= ? AND created_at < ? THEN 1 ELSE 0 END) as prev_30',
+            [$todayStart, $yesterdayStart, $todayStart, $start30, $startPrev30, $start30]
+        )->first();
+
+        $latestActivity = SupportConversation::whereNotNull('last_reply_at')->max('last_reply_at');
+        $oldestWaiting = SupportConversation::where('status', SupportConversation::STATUS_AWAITING_HUMAN)
+            ->orderByRaw('COALESCE(last_reply_at, created_at) asc')
+            ->first(['last_reply_at', 'created_at']);
+        $oldestWaitingAt = $oldestWaiting?->last_reply_at ?? $oldestWaiting?->created_at;
+
+        $ratingCounts = SupportSatisfaction::query()
+            ->selectRaw('rating, COUNT(*) as total')
             ->groupBy('rating')
-            ->pluck('count', 'rating')
-            ->toArray();
+            ->pluck('total', 'rating');
+
+        $reviewed = (int) $ratingCounts->sum();
+        $ratingSum = 0;
+        foreach ($ratingCounts as $rating => $count) {
+            $ratingSum += (int) $rating * (int) $count;
+        }
+        $avgRating = $reviewed > 0 ? round($ratingSum / $reviewed, 1) : null;
 
         return [
-            'total' => $all,
-            'open' => $open,
-            'ai_handling' => $aiHandling,
-            'awaiting_human' => $awaitingHuman,
-            'in_progress' => $inProgress,
-            'resolved' => $resolved,
-            'closed' => $closed,
+            'total' => (int) $statusCounts->sum(),
+            'open' => $countFor(SupportConversation::STATUS_OPEN),
+            'ai_handling' => $countFor(SupportConversation::STATUS_AI_HANDLING),
+            'awaiting_human' => $countFor(SupportConversation::STATUS_AWAITING_HUMAN),
+            'in_progress' => $countFor(SupportConversation::STATUS_IN_PROGRESS),
+            'resolved' => $countFor(SupportConversation::STATUS_RESOLVED),
+            'closed' => $countFor(SupportConversation::STATUS_CLOSED),
+            'active' => $active,
             'unassigned' => $unassigned,
-            'reviewed' => $reviewedCount,
-            'avg_rating' => $avgRating ? round($avgRating, 1) : null,
-            'rating_distribution' => $ratingDistribution,
+            'assigned_active' => $assignedActive,
+            'urgent_active' => (int) ($priorityCounts[SupportConversation::PRIORITY_URGENT] ?? 0),
+            'high_active' => (int) ($priorityCounts[SupportConversation::PRIORITY_HIGH] ?? 0),
+            'ai_handled' => $aiHandled,
+            'messages' => $messageTotal,
+            'staff_replies' => $staffReplies,
+            'ai_replies' => $aiReplies,
+            'today' => (int) ($activity->today ?? 0),
+            'yesterday' => (int) ($activity->yesterday ?? 0),
+            'last_30' => (int) ($activity->last_30 ?? 0),
+            'prev_30' => (int) ($activity->prev_30 ?? 0),
+            'latest_activity' => $latestActivity ? \Illuminate\Support\Carbon::parse($latestActivity)->diffForHumans() : null,
+            'oldest_waiting' => $oldestWaitingAt ? $oldestWaitingAt->diffForHumans() : null,
+            'reviewed' => $reviewed,
+            'avg_rating' => $avgRating,
+            'rating_distribution' => $ratingCounts->toArray(),
         ];
     }
 

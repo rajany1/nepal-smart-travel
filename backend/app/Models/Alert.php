@@ -37,6 +37,24 @@ class Alert extends Model
         return $this->belongsTo(User::class, 'target_user_id');
     }
 
+    /**
+     * Alerts currently visible to users: no expiry, or an expiry in the future.
+     */
+    public function scopeActive($query)
+    {
+        return $query->where(function ($builder) {
+            $builder->whereNull('expires_at')->orWhere('expires_at', '>', now());
+        });
+    }
+
+    /**
+     * Alerts whose expiry time has passed.
+     */
+    public function scopeExpired($query)
+    {
+        return $query->whereNotNull('expires_at')->where('expires_at', '<=', now());
+    }
+
     protected function casts(): array
     {
         return [

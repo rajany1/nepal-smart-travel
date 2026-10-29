@@ -1,5 +1,6 @@
 <?php
 
+use App\Support\AutomationSchedule;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
@@ -31,16 +32,9 @@ return Application::configure(basePath: dirname(__DIR__))
         ]);
     })
     ->withSchedule(function (\Illuminate\Console\Scheduling\Schedule $schedule) {
-        $schedule->command('weather:fetch')->everyFifteenMinutes()->withoutOverlapping();
-        $schedule->command('ai:process-tasks')->everyMinute()->withoutOverlapping(60);
-        $schedule->command('ai:process-reports')->everyFifteenMinutes()->withoutOverlapping(120);
-        $schedule->command('ai:auto-work')->everyThirtyMinutes()->withoutOverlapping(300);
-        // Review AI agent: 24/7 content safety sweep (censoring + strike escalation)
-        $schedule->command('ai:safety-sweep')->everyMinute()->withoutOverlapping(120);
-        // Weekly refresh of imported OSM districts (queue-backed, upsert only)
-        $schedule->command('osm:refresh')->weekly()->sundays()->at('03:00')->withoutOverlapping();
-        // Refresh Nepal boundary cache every 3 days (Redis)
-        $schedule->command('map:refresh-cache')->dailyAt('03:00')->withoutOverlapping();
+        // Every scheduled command lives in AutomationRegistry so the admin
+        // panel can show, explain, toggle and manually run it from one list.
+        AutomationSchedule::register($schedule);
     })
     ->withExceptions(function (Exceptions $exceptions): void {
         //

@@ -126,10 +126,11 @@ describe('config(bipad.skip_hazard_types) policy', function () {
         expect($skip)->not->toContain('inundation');
     });
 
-    it('keeps heavy_rainfall, storm, thunderbolt and wind_storm skipped', function () {
+    it('no longer skips heavy_rainfall but keeps storm, thunderbolt and wind_storm skipped', function () {
         $skip = config('bipad.skip_hazard_types');
 
-        foreach (['heavy_rainfall', 'storm', 'thunderbolt', 'wind_storm'] as $type) {
+        expect($skip)->not->toContain('heavy_rainfall');
+        foreach (['storm', 'thunderbolt', 'wind_storm'] as $type) {
             expect($skip)->toContain($type);
         }
     });
@@ -176,11 +177,17 @@ describe('BipadSyncService::transformToReport hazard gating', function () {
         }
     });
 
-    it('still throws for heavy_rainfall (hazard 14)', function () {
-        expect(fn () => bipadHazardTransform(
+    it('transforms a heavy_rainfall incident (hazard 14) instead of skipping it', function () {
+        $data = bipadHazardTransform(
             bipadHazardService(),
             bipadHazardIncident(14, 990014)
-        ))->toThrow(\Exception::class, 'Skipping hazard type: heavy_rainfall');
+        );
+
+        expect($data['report_subcategory'])->toBeNull(); // no explicit subcategory mapping
+        expect($data['status'])->toBe('approved');
+        expect($data['priority'])->toBe('high'); // verified + medium severity
+        expect($data['ai_analysis']['bipad_hazard'])->toBe('heavy_rainfall');
+        expect($data['bipad_hazard_id'])->toBe(14);
     });
 
     it('still throws for storm, thunderbolt and wind_storm', function () {
@@ -218,17 +225,17 @@ describe('BipadSyncService::transformToReport hazard gating', function () {
 });
 
 describe('BipadSyncService::processItem end-to-end', function () {
-    it('skips heavy_rainfall without creating a report or publishing', function () {
+    it('skips storm without creating a report or publishing', function () {
         $publisher = Mockery::mock(AlertPublisherService::class);
         $publisher->shouldReceive('publishFromReport')->never();
 
         $result = bipadHazardProcess(
             bipadHazardService($publisher),
-            bipadHazardIncident(14, 990314)
+            bipadHazardIncident(22, 990322)
         );
 
         expect($result)->toBe('skipped');
-        expect(Report::where('bipad_id', 990314)->exists())->toBeFalse();
+        expect(Report::where('bipad_id', 990322)->exists())->toBeFalse();
     });
 
     it('creates an approved flood report with Safety & Hazards category and publishes it', function () {
@@ -257,6 +264,32 @@ describe('BipadSyncService::processItem end-to-end', function () {
         expect($report->report_subcategory)->toBe('Flood');
         expect($report->priority)->toBe('critical');
         expect($report->bipad_hazard_id)->toBe(11);
+    });
+
+    it('creates an approved heavy_rainfall report and publishes it', function () {
+        bipadHazardSafetyCategory();
+        bipadHazardSystemUser();
+
+        $publisher = Mockery::mock(AlertPublisherService::class);
+        $publisher->shouldReceive('publishFromReport')
+            ->once()
+            ->with(Mockery::type(Report::class))
+            ->andReturnNull();
+
+        $result = bipadHazardProcess(
+            bipadHazardService($publisher),
+            bipadHazardIncident(14, 990414)
+        );
+
+        expect($result)->toBe('created');
+
+        $report = Report::where('bipad_id', 990414)->first();
+        expect($report)->not->toBeNull();
+        expect($report->source)->toBe('bipad');
+        expect($report->status)->toBe('approved');
+        expect($report->report_subcategory)->toBeNull();
+        expect($report->priority)->toBe('high');
+        expect($report->bipad_hazard_id)->toBe(14);
     });
 });
 
@@ -373,8 +406,8 @@ describe('BipadSyncLog status and counters', function () {
         $service = bipadHazardService($publisher);
 
         $log = $service->sync('incident', function ($callback) {
-            $callback(bipadHazardIncident(11, 990711)); // created
-            $callback(bipadHazardIncident(14, 990714)); // heavy_rainfall -> skipped
+            $callback(bipadHazardIncident(11, 990711)); // flood -> created
+            $callback(bipadHazardIncident(22, 990722)); // storm -> skipped
         });
 
         $GLOBALS['bipad_hazard_cleanup']['log_ids'][] = $log->id;

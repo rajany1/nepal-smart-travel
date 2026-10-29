@@ -235,7 +235,7 @@ class OsmImportService
      * Upsert all elements: update existing osm_id rows (OSM fields only),
      * attach legacy rows (same name within ~200m), insert new ones.
      */
-    private function upsertElements(string $district, array $elements): array
+    public function upsertElements(string $district, array $elements): array
     {
         $imported = 0;
         $updated = 0;
@@ -275,6 +275,8 @@ class OsmImportService
                 $tags['addr:city'] ?? null,
             ])) ?: null;
 
+            $imageMetadata = $this->imageMetadata($tags);
+
             $osmFields = [
                 'name' => $name,
                 'description' => $tags['description'] ?? $tags['note'] ?? null,
@@ -292,10 +294,11 @@ class OsmImportService
             $existing = Place::where('osm_id', $osmId)->first();
 
             if ($existing) {
-                // Update OSM-origin fields only — never touch manually managed
+                // Update OSM-origin fields only - never touch manually managed
                 // business fields (is_active, is_verified, is_featured,
-                // ratings, images, created_by).
-                $existing->update($osmFields);
+                // ratings, images, created_by). Image metadata is merged only
+                // when the tag is present, so a tagless refresh keeps valid IDs.
+                $existing->update(array_merge($osmFields, $imageMetadata));
                 $updated++;
                 continue;
             }
@@ -309,18 +312,18 @@ class OsmImportService
                     [$lat, $lng, $lat])
                 ->first();
             if ($legacy) {
-                $legacy->update([
+                $legacy->update(array_merge([
                     'osm_id' => $osmId,
                     'osm_type' => $osmType,
                     'imported_at' => now(),
                     'source' => $legacy->source === 'admin' ? 'osm' : $legacy->source,
-                ]);
+                ], $imageMetadata));
                 $updated++;
                 continue;
             }
 
             try {
-                Place::create(array_merge($osmFields, [
+                Place::create(array_merge($osmFields, $imageMetadata, [
                     'uuid' => (string) Str::uuid(),
                     'is_active' => true,
                     'is_verified' => false,
@@ -336,6 +339,36 @@ class OsmImportService
         }
 
         return compact('imported', 'updated', 'skipped');
+    }
+
+    /**
+     * Wikimedia matching signals from OSM tags.
+     *
+     * Empty values are omitted entirely (not set to null) so refreshing a
+     * district never erases identifiers captured by an earlier import.
+     *
+     * @return array{wikidata_id?:string,wikipedia_title?:string,commons_category?:string}
+     */
+    private function imageMetadata(array $tags): array
+    {
+        $metadata = [];
+
+        $wikidata = trim((string) ($tags['wikidata'] ?? ''));
+        if (preg_match('/^Q\d+$/i', $wikidata) === 1) {
+            $metadata['wikidata_id'] = strtoupper($wikidata);
+        }
+
+        $wikipedia = trim((string) ($tags['wikipedia'] ?? ''));
+        if ($wikipedia !== '') {
+            $metadata['wikipedia_title'] = mb_substr($wikipedia, 0, 255);
+        }
+
+        $commons = trim((string) ($tags['wikimedia_commons'] ?? ''));
+        if ($commons !== '') {
+            $metadata['commons_category'] = mb_substr($commons, 0, 255);
+        }
+
+        return $metadata;
     }
 
     /** Centroid for nodes (lat/lon), ways/relations (center or bounds avg). */

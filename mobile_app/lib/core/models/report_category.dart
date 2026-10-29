@@ -367,11 +367,26 @@ class ReportCategoryField {
       required: json['required'] ?? false,
       sortOrder: json['sort_order'] ?? 0,
       options: optionsList.map((o) => FieldOption.fromJson(o)).toList(),
-      validation: json['validation'] != null ? Map<String, dynamic>.from(json['validation']) : null,
+      validation: _parseValidation(json['validation']),
       helpText: json['help_text'],
       helpTextNe: json['help_text_ne'],
       showInPreview: json['show_in_preview'] ?? true,
     );
+  }
+
+  /// The API sends `validation` as a rule list (`["required"]`), while older
+  /// payloads used a map. Accept both so a single form config can't fail to
+  /// parse (which used to leave the form with no options/fields at all).
+  static Map<String, dynamic>? _parseValidation(dynamic value) {
+    if (value == null) return null;
+    if (value is Map) return Map<String, dynamic>.from(value);
+    if (value is List) {
+      return {
+        for (final rule in value)
+          if (rule != null) rule.toString(): true,
+      };
+    }
+    return null;
   }
 
   Map<String, dynamic> toJson() => {

@@ -105,6 +105,10 @@ class _NearbyMapScreenState extends State<NearbyMapScreen>
   bool _isTracking = true;
   bool _isLoadingPlaces = false;
   bool _isFetchingPlaces = false;
+  // A camera/filter change that arrived while a bbox request was in flight.
+  // The current response describes the old camera, so fetch once more when it
+  // lands instead of dropping the move (the old code just returned).
+  bool _pendingViewportFetch = false;
 
   // True once there is something on the map to look at (restored from the
   // local snapshot, the SQLite cache, or a response). Guards the loading pill
@@ -218,10 +222,9 @@ class _NearbyMapScreenState extends State<NearbyMapScreen>
   List<CuratedRouteModel> _routeOverlays = [];
   bool _isLoadingRouteOverlays = false;
   PlaceFilter? _activeFilter;
-  double? _lastFetchLat;
-  double? _lastFetchLng;
-  double _lastFetchRadius = -1;
-  double? _cachedBoundsNorth, _cachedBoundsSouth, _cachedBoundsEast, _cachedBoundsWest;
+  // Search submitted from the top bar. Kept separate from _activeFilter so a
+  // later pan keeps the server-side search instead of silently dropping it.
+  String? _appliedSearch;
 
   // Weather overlay state
   List<_WeatherGridPoint> _weatherGrid = [];
@@ -412,12 +415,10 @@ class _NearbyMapScreenState extends State<NearbyMapScreen>
     if (!mounted) return;
 
     // ── 1) Datasets load in parallel — never gate the map on them ──────
-    // setNepalCachedPlaces() restores markers from SQLite instantly;
-    // fetchNepalPlaces() only hits the network once the payload is stale
-    // (the server caches /places/all for 10 minutes too).
+    // Nearby only needs categories; places come from the viewport bbox below
+    // (and the restored snapshot/SQLite cache). The 15k Nepal-wide payload is
+    // reserved for Explore Search, not loaded here.
     unawaited(provider.fetchCategories());
-    unawaited(provider.setNepalCachedPlaces());
-    unawaited(provider.fetchNepalPlaces());
 
     if (widget.focusLat != null && widget.focusLng != null) {
       // Focus mode: open centered on a given point (e.g. an SOS location from
@@ -474,6 +475,9 @@ class _NearbyMapScreenState extends State<NearbyMapScreen>
       });
       WidgetsBinding.instance.addPostFrameCallback((_) {
         _recenterMap();
+        // Programmatic moves do not always emit onPositionChanged, so the
+        // default viewport would otherwise stay empty until the user panned.
+        unawaited(_fetchPlacesForViewport());
       });
     }
 
@@ -1166,168 +1170,96 @@ class _NearbyMapScreenState extends State<NearbyMapScreen>
   Future<void> _fetchPlacesForViewport({String? search}) async {
     if (_lat == null || _lng == null) return;
 
-    final provider = context.read<PlaceProvider>();
+    // A request for an older camera/filter is still in flight. Remember that
+    // another fetch is needed and let it finish — the old code just returned
+    // here, so a quick pan or zoom change could leave the map showing pins
+    // for the previous viewport.
+    if (_isFetchingPlaces) {
+      _pendingViewportFetch = true;
+      return;
+    }
 
-    // ── Viewport bbox calculation with 40% prefetch buffer ──────────────
-    // Request a larger area than the visible viewport so panning within
-    // the buffered region is instant (no API call needed).
+    final provider = context.read<PlaceProvider>();
+    final effectiveSearch = search ?? _appliedSearch;
+
+    // ── Viewport bbox with a 25% prefetch buffer ────────────────────────
+    // A larger box than the screen is still worth fetching (panning inside it
+    // needs no request), but 40% at a fixed 500-row limit mostly returned
+    // pins the screen could never show.
     final vp = _getViewportBounds();
     final latSpan = vp.maxLat - vp.minLat;
     final lngSpan = vp.maxLng - vp.minLng;
-    final bufLat = latSpan * 0.4;
-    final bufLng = lngSpan * 0.4;
-    final bboxMinLat = vp.minLat - bufLat;
-    final bboxMaxLat = vp.maxLat + bufLat;
-    final bboxMinLng = vp.minLng - bufLng;
-    final bboxMaxLng = vp.maxLng + bufLng;
+    final bboxMinLat = vp.minLat - latSpan * 0.25;
+    final bboxMaxLat = vp.maxLat + latSpan * 0.25;
+    final bboxMinLng = vp.minLng - lngSpan * 0.25;
+    final bboxMaxLng = vp.maxLng + lngSpan * 0.25;
 
-    // ── Smart skip: if previous bbox covers current viewport, no API call ──
-    if (search == null &&
-        _cachedBoundsNorth != null &&
-        _cachedBoundsSouth != null &&
-        _cachedBoundsEast != null &&
-        _cachedBoundsWest != null &&
-        vp.minLat >= _cachedBoundsSouth! &&
-        vp.maxLat <= _cachedBoundsNorth! &&
-        vp.minLng >= _cachedBoundsWest! &&
-        vp.maxLng <= _cachedBoundsEast!) {
-      return; // Viewport is inside previously loaded area
-    }
-
-    // ── Fast path: bbox API (primary data source) ───────────────────────
-    if (search == null && _currentZoom >= 8) {
-      if (_isFetchingPlaces) return;
-      _isFetchingPlaces = true;
-      // Cold start with nothing on disk: show the pill for this first request.
-      // Warm opens already have restored pins, so they stay spinner-free.
-      final announceColdStart = !_hasPlacesToDraw;
-      if (announceColdStart && mounted) setState(() => _isLoadingPlaces = true);
-
-      // The bbox API filters by category *name*, which only exists once the
-      // category list has loaded. Waiting for it here is what stops a filter
-      // from being silently dropped from the request (and therefore showing
-      // every category while the sheet says otherwise).
-      String? categoryName;
-      if (_activeFilter?.categoryId != null) {
-        categoryName = _getCategoryName(_activeFilter!.categoryId!);
-        if (categoryName == null) {
-          await provider.fetchCategories();
-          categoryName = _getCategoryName(_activeFilter!.categoryId!);
-        }
-      }
-
-      try {
-        final raw = await provider.fetchViewportPlaces(
-          minLat: bboxMinLat,
-          maxLat: bboxMaxLat,
-          minLng: bboxMinLng,
-          maxLng: bboxMaxLng,
-          zoom: _currentZoom.round(),
-          category: categoryName,
-        );
-
-        // Update cached bounds for smart skip
-        _cachedBoundsNorth = bboxMaxLat;
-        _cachedBoundsSouth = bboxMinLat;
-        _cachedBoundsEast = bboxMaxLng;
-        _cachedBoundsWest = bboxMinLng;
-
-        if (raw.isNotEmpty) {
-          _hasPlacesToDraw = true;
-          // Remember the last good payload so the next open paints these
-          // pins before the network answers. A failed fetch never gets here,
-          // so an empty response cannot wipe a usable snapshot. Only the
-          // unfiltered view is worth keeping — active filters are not
-          // restored, so a filtered payload would render as a sparse map
-          // until the refresh landed.
-          if (categoryName == null) {
-            await NearbyMapCache.instance.savePlaces(
-              raw,
-              minLat: bboxMinLat,
-              maxLat: bboxMaxLat,
-              minLng: bboxMinLng,
-              maxLng: bboxMaxLng,
-            );
-          }
-        }
-
-        _checkOsmSubmissionStatuses();
-      } catch (e) {
-        debugPrint('bbox API failed, falling back to nepalPlaces: $e');
-      }
-
-      _isFetchingPlaces = false;
-      if (announceColdStart && mounted && _isLoadingPlaces) {
-        setState(() => _isLoadingPlaces = false);
-      }
-      return;
-    }
-
-    // ── Fallback: client-side from nepalPlaces (offline / search / cold start) ──
-    if (provider.nepalPlaces.isNotEmpty) {
-      final filtered = _applyPlaceFilters(provider.nepalPlaces);
-      final center = LatLng(_lat!, _lng!);
-      final distance = const Distance();
-      final sorted = filtered
-          .map((p) => p.copyWith(
-                distanceKm: distance.as(
-                  LengthUnit.Kilometer,
-                  center,
-                  LatLng(p.latitude, p.longitude),
-                ),
-              ))
-          .toList()
-        ..sort((a, b) => (a.distanceKm ?? 0).compareTo(b.distanceKm ?? 0));
-      provider.setViewportPlacesDirect(sorted.take(200).toList());
-      if (filtered.isNotEmpty) _hasPlacesToDraw = true;
-      _checkOsmSubmissionStatuses();
-      return;
-    }
-
-    // ── Legacy cold start: nearby-combined API ──────────────────────────
-    if (_currentZoom < 10) return;
-    if (_isFetchingPlaces) return;
-
-    final radius = _zoomToRadius(_currentZoom);
     _isFetchingPlaces = true;
-    // Only announce "loading" when the map is actually empty. A background
-    // refresh while pins are already on screen must not swap them for a pill.
-    if (!_hasPlacesToDraw && mounted) setState(() => _isLoadingPlaces = true);
+    // Cold start with nothing on disk: show the pill for this first request.
+    // Warm opens already have restored pins, so they stay spinner-free.
+    final announceColdStart = !_hasPlacesToDraw;
+    if (announceColdStart && mounted) setState(() => _isLoadingPlaces = true);
 
-    try {
-      final fetchRadius = radius * 2;
-      await provider.fetchNearbyPlaces(
-        lat: _lat!,
-        lng: _lng!,
-        radiusKm: fetchRadius,
-        categoryId: _activeFilter?.categoryId,
-        search: search ?? _activeFilter?.search,
-      );
-
-      _lastFetchLat = _lat;
-      _lastFetchLng = _lng;
-      _lastFetchRadius = radius;
-
-      final latKm = 111.32;
-      final lngKm = 111.32 * math.cos(_lat! * math.pi / 180);
-      _cachedBoundsNorth = _lat! + (fetchRadius / latKm);
-      _cachedBoundsSouth = _lat! - (fetchRadius / latKm);
-      _cachedBoundsEast = _lng! + (fetchRadius / lngKm);
-      _cachedBoundsWest = _lng! - (fetchRadius / lngKm);
-    } catch (e) {
-      debugPrint('Legacy viewport fetch failed: $e');
+    // The bbox API filters by category *name*, which only exists once the
+    // category list has loaded. Waiting for it here is what stops a filter
+    // from being silently dropped from the request.
+    String? categoryName;
+    if (_activeFilter?.categoryId != null) {
+      categoryName = _getCategoryName(_activeFilter!.categoryId!);
+      if (categoryName == null) {
+        await provider.fetchCategories();
+        categoryName = _getCategoryName(_activeFilter!.categoryId!);
+      }
     }
 
-    _isFetchingPlaces = false;
-    if (mounted && _isLoadingPlaces) setState(() => _isLoadingPlaces = false);
-  }
+    List<Map<String, dynamic>>? raw;
+    try {
+      raw = await provider.fetchViewportPlaces(
+        minLat: bboxMinLat,
+        maxLat: bboxMaxLat,
+        minLng: bboxMinLng,
+        maxLng: bboxMaxLng,
+        zoom: _currentZoom.round(),
+        category: categoryName,
+        search: effectiveSearch,
+      );
+    } catch (e) {
+      debugPrint('bbox API failed: $e');
+    } finally {
+      _isFetchingPlaces = false;
+    }
 
-  double _zoomToRadius(double zoom) {
-    if (zoom >= 16) return 1.0;
-    if (zoom >= 14) return 3.0;
-    if (zoom >= 12) return 8.0;
-    if (zoom >= 10) return 20.0;
-    return 50.0;
+    // null means the request was skipped (fresh data in memory) or failed.
+    // Only a real response is allowed to count as a successful area load.
+    if (raw != null) {
+      if (raw.isNotEmpty) {
+        _hasPlacesToDraw = true;
+        // Remember the last good unfiltered payload so the next open paints
+        // these pins before the network answers. Filtered results are not
+        // restored, so only cache the plain view.
+        if (categoryName == null && effectiveSearch == null) {
+          await NearbyMapCache.instance.savePlaces(
+            raw,
+            minLat: bboxMinLat,
+            maxLat: bboxMaxLat,
+            minLng: bboxMinLng,
+            maxLng: bboxMaxLng,
+          );
+        }
+      }
+      _checkOsmSubmissionStatuses();
+    }
+
+    if (announceColdStart && mounted && _isLoadingPlaces) {
+      setState(() => _isLoadingPlaces = false);
+    }
+
+    // The camera moved while this response was in flight. Fetch the viewport
+    // the user is actually looking at now.
+    if (_pendingViewportFetch && mounted) {
+      _pendingViewportFetch = false;
+      unawaited(_fetchPlacesForViewport());
+    }
   }
 
   double _distanceFromUser(PlaceModel place) {
@@ -2231,7 +2163,7 @@ class _NearbyMapScreenState extends State<NearbyMapScreen>
         if (placesVisible)
           Consumer<PlaceProvider>(
             builder: (context, provider, _) {
-              final viewportPlaces = _markerPlacesForViewport(provider);
+              final viewportPlaces = _visiblePlacesForViewport(provider);
               final mapMarkers = _buildMarkers(viewportPlaces);
               return MarkerLayer(
                 markers: mapMarkers,
@@ -2563,7 +2495,7 @@ class _NearbyMapScreenState extends State<NearbyMapScreen>
   String? _deriveAreaLabel(PlaceProvider provider, double lat, double lng) {
     final places = provider.viewportPlaces.isNotEmpty
         ? provider.viewportPlaces
-        : provider.displayablePlaces;
+        : provider.mapPlaces;
     PlaceModel? nearest;
     var bestKm = double.infinity;
     final mPerDegLat = 111.0;
@@ -2821,13 +2753,6 @@ class _NearbyMapScreenState extends State<NearbyMapScreen>
     setState(() => _isTracking = true);
     _startPositionTracking();
 
-    _lastFetchLat = null;
-    _lastFetchLng = null;
-    _lastFetchRadius = -1;
-    _cachedBoundsNorth = null;
-    _cachedBoundsSouth = null;
-    _cachedBoundsEast = null;
-    _cachedBoundsWest = null;
     await _loadCachedPlaces();
     if (!mounted) return;
     _centerOn(loc, zoom: 15.0);
@@ -2863,12 +2788,6 @@ class _NearbyMapScreenState extends State<NearbyMapScreen>
         onApply: (filters) {
           setState(() => _activeFilter = filters);
           _debounceTimer?.cancel();
-          _lastFetchLat = null; // Force re-fetch with the new filter
-          _lastFetchLng = null;
-          _cachedBoundsNorth = null; // Invalidate bbox cache so the filter is applied
-          _cachedBoundsSouth = null;
-          _cachedBoundsEast = null;
-          _cachedBoundsWest = null;
           _fetchPlacesForViewport();
         },
       ),
@@ -2973,7 +2892,7 @@ class _NearbyMapScreenState extends State<NearbyMapScreen>
                           _searchController.clear();
                           _searchTextNotifier.value = '';
                           _debounceTimer?.cancel();
-                          _lastFetchLat = null;
+                          _appliedSearch = null;
                           _fetchPlacesForViewport();
                         },
                       )
@@ -3003,9 +2922,8 @@ class _NearbyMapScreenState extends State<NearbyMapScreen>
         },
         onSubmitted: (value) {
           _debounceTimer?.cancel();
-          _lastFetchLat = null; // Force re-fetch for search
-          _lastFetchLng = null;
-          _fetchPlacesForViewport(search: value.isNotEmpty ? value : null);
+          _appliedSearch = value.trim().isEmpty ? null : value.trim();
+          _fetchPlacesForViewport(search: _appliedSearch);
           FocusScope.of(context).unfocus();
         },
       ),
@@ -3053,11 +2971,14 @@ class _NearbyMapScreenState extends State<NearbyMapScreen>
             .toList();
       }
     }
-    final q = f?.search;
+    final q = f?.search ?? _appliedSearch;
     if (q != null && q.isNotEmpty) {
       final query = q.toLowerCase();
       result = result
-          .where((p) => p.name.toLowerCase().contains(query))
+          .where((p) =>
+              p.name.toLowerCase().contains(query) ||
+              (p.address ?? '').toLowerCase().contains(query) ||
+              (p.district ?? '').toLowerCase().contains(query))
           .toList();
     }
     return result;
@@ -3132,10 +3053,15 @@ class _NearbyMapScreenState extends State<NearbyMapScreen>
   }
 
   Widget _buildBottomSheetContent(PlaceProvider provider) {
-    // Canonical collection: every source merged, deduped and already stripped
-    // of `category == "All"` — the same collection the markers are built from.
-    final displayPlaces =
-        _sortedPlaces(_applyPlaceFilters(provider.displayablePlaces));
+    // Same viewport-scoped, density-capped collection the markers use. The
+    // list is then sorted by the selected chip and truncated for the sheet —
+    // rendering every server row in a draggable sheet was needless work.
+    final visiblePlaces = _visiblePlacesForViewport(provider);
+    final sortedPlaces = _sortedPlaces(visiblePlaces);
+    final totalVisible = sortedPlaces.length;
+    final displayPlaces = totalVisible > 80
+        ? sortedPlaces.sublist(0, 80)
+        : sortedPlaces;
     return DraggableScrollableSheet(
       controller: _sheetController,
       initialChildSize: 0.22,
@@ -3199,9 +3125,9 @@ class _NearbyMapScreenState extends State<NearbyMapScreen>
                             ),
                             Row(
                               children: [
-                                if (displayPlaces.isNotEmpty)
+                                if (totalVisible > 0)
                                   Text(
-                                    '${displayPlaces.length} ${context.t('found')}',
+                                    '$totalVisible ${context.t('found')}',
                                     style: TextStyle(
                                         fontSize: 13, color: Colors.grey.shade500),
                                   ),
@@ -3227,7 +3153,8 @@ class _NearbyMapScreenState extends State<NearbyMapScreen>
                     ],
                   ),
                 ),
-                if (provider.isLoading)
+                if ((provider.isLoadingViewport || _isLoadingPlaces) &&
+                    displayPlaces.isEmpty)
                   const SliverFillRemaining(
                     child: Center(child: CircularProgressIndicator()),
                   )
@@ -3945,57 +3872,90 @@ class _NearbyMapScreenState extends State<NearbyMapScreen>
     );
   }
 
-  /// Canonical displayable collection (nearby-combined + bbox + Nepal-wide,
-  /// merged, deduped, `category != "All"`) culled to the current viewport so
-  /// marker/label work stays proportional to what's on screen. Only the cull
-  /// runs per camera tick — the merge itself is memoized in the provider and
-  /// rebuilds when source data changes.
-  List<PlaceModel> _markerPlacesForViewport(PlaceProvider provider) {
-    final vp = _getViewportBounds();
-
-    // User filters (category/featured/verified/search) still apply on top of
-    // the canonical collection.
-    final filtered = _applyPlaceFilters(provider.displayablePlaces);
+  /// Places currently on screen, after user filters and a zoom-aware density
+  /// cap. Both the marker layer and the bottom sheet read this, so the list
+  /// and the pins always describe the same set.
+  List<PlaceModel> _visiblePlacesForViewport(PlaceProvider provider) {
+    // Map-only collection: Nearby + the current bbox payload. The 15k
+    // Nepal-wide search dataset is deliberately not part of this.
+    final filtered = _applyPlaceFilters(provider.mapPlaces);
     if (filtered.isEmpty) return filtered;
 
-    // Only trust the bbox result while it still covers what is on screen —
-    // right after a pan it can be from the previous area, and using it would
-    // make markers vanish until the debounced fetch lands.
-    final useViewportPlaces = provider.viewportPlaces.isNotEmpty &&
-        provider.viewportCovers(
-          minLat: vp.minLat,
-          maxLat: vp.maxLat,
-          minLng: vp.minLng,
-          maxLng: vp.maxLng,
+    final vp = _cameraVisibleBounds();
+    // Padding proportional to the viewport: a fixed 0.15° cushion at street
+    // zoom was ~15 km of off-screen markers, which is why high zoom still
+    // built hundreds of pins for a handful of visible places.
+    final latPad = math.max((vp.maxLat - vp.minLat) * 0.08, 0.0005);
+    final lngPad = math.max((vp.maxLng - vp.minLng) * 0.08, 0.0005);
+
+    final culled = <PlaceModel>[
+      for (final place in filtered)
+        if (place.latitude >= vp.minLat - latPad &&
+            place.latitude <= vp.maxLat + latPad &&
+            place.longitude >= vp.minLng - lngPad &&
+            place.longitude <= vp.maxLng + lngPad)
+          place,
+    ];
+
+    return _capPlacesForZoom(culled);
+  }
+
+  /// Actual camera bounds when the map is live; the estimated span is only a
+  /// fallback for the first frame.
+  _ViewportBounds _cameraVisibleBounds() {
+    if (_mapReady) {
+      try {
+        final b = _mapController.camera.visibleBounds;
+        return _ViewportBounds(
+          minLat: b.south,
+          maxLat: b.north,
+          minLng: b.west,
+          maxLng: b.east,
         );
-
-    if (useViewportPlaces) {
-      // Rows the server already scoped to the viewport (plus its prefetch
-      // buffer) pass untouched; the rest of the canonical collection is
-      // culled so markers stay viewport-proportional.
-      final bboxScoped = provider.viewportPlaceKeys;
-      return [
-        for (final place in filtered)
-          if (bboxScoped.contains(placeIdentityKey(place)) ||
-              isWithinViewport(
-                place,
-                minLat: vp.minLat,
-                maxLat: vp.maxLat,
-                minLng: vp.minLng,
-                maxLng: vp.maxLng,
-              ))
-            place,
-      ];
+      } catch (e) {
+        debugPrint('visibleBounds failed: $e');
+      }
     }
+    return _getViewportBounds();
+  }
 
-    // Cold start / offline: client-side viewport filter for the merged set.
-    return placesWithinViewport(
-      filtered,
-      minLat: vp.minLat,
-      maxLat: vp.maxLat,
-      minLng: vp.minLng,
-      maxLng: vp.maxLng,
-    );
+  /// Marker/list density per zoom. The server also caps at these tiers; this
+  /// client cap keeps restored or stale payloads (and the short window while
+  /// zooming out) from rendering far more pins than the screen can show.
+  int _placeBudgetForZoom(double zoom) {
+    if (zoom >= 16) return 380;
+    if (zoom >= 15) return 300;
+    if (zoom >= 14) return 230;
+    if (zoom >= 13) return 180;
+    if (zoom >= 12) return 140;
+    if (zoom >= 11) return 110;
+    if (zoom >= 10) return 90;
+    if (zoom >= 9) return 70;
+    return 50;
+  }
+
+  List<PlaceModel> _capPlacesForZoom(List<PlaceModel> places) {
+    final budget = _placeBudgetForZoom(_currentZoom);
+    if (places.length <= budget) return places;
+
+    // Keep the selected place visible even when it sits at the tail of the
+    // ranking. Everything else keeps the provider's quality order.
+    final selected = _selectedPlace?.id.toString();
+    final capped = <PlaceModel>[];
+    if (selected != null) {
+      for (final place in places) {
+        if (place.id.toString() == selected) {
+          capped.add(place);
+          break;
+        }
+      }
+    }
+    for (final place in places) {
+      if (capped.length >= budget) break;
+      if (place.id.toString() == selected) continue;
+      capped.add(place);
+    }
+    return capped;
   }
 
   Widget _buildClusterBadge(int count) {

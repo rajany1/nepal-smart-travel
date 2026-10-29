@@ -5,6 +5,7 @@ use App\Http\Controllers\Admin\AdCampaignController;
 use App\Http\Controllers\Admin\AdminSupportController;
 use App\Http\Controllers\Admin\AiAgentController;
 use App\Http\Controllers\Admin\AiAgentTaskController;
+use App\Http\Controllers\Admin\AutomationController;
 use App\Http\Controllers\Admin\CuratedRouteController;
 use App\Http\Controllers\Admin\LiveFeedController;
 use App\Http\Controllers\Admin\PermissionController;
@@ -139,6 +140,18 @@ Route::prefix($adminPrefix)->name('admin.')->middleware(['auth', 'status', 'role
     // Dashboard
     Route::get('/', [AdminController::class, 'dashboard'])->name('dashboard');
     Route::get('/dashboard', [AdminController::class, 'dashboard'])->name('dashboard');
+    Route::get('/dashboard/data', [AdminController::class, 'dashboardData'])->name('dashboard.data');
+    Route::get('/dashboard/export', [AdminController::class, 'dashboardExport'])->name('dashboard.export');
+
+    // Automation & queues
+    Route::get('/automation', [AutomationController::class, 'index'])->name('automation');
+    Route::get('/automation/data', [AutomationController::class, 'data'])->name('automation.data');
+    Route::post('/automation/tasks/{key}/toggle', [AutomationController::class, 'toggle'])->name('automation.tasks.toggle')->where('key', '[a-z0-9.\-]+');
+    Route::post('/automation/tasks/{key}/run', [AutomationController::class, 'run'])->name('automation.tasks.run')->where('key', '[a-z0-9.\-]+');
+    Route::post('/automation/queue/retry', [AutomationController::class, 'retryFailed'])->name('automation.queue.retry');
+    Route::post('/automation/queue/forget', [AutomationController::class, 'forgetFailed'])->name('automation.queue.forget');
+    Route::post('/automation/queue/restart', [AutomationController::class, 'restartWorkers'])->name('automation.queue.restart');
+    Route::post('/automation/queue/ping', [AutomationController::class, 'pingWorker'])->name('automation.queue.ping');
 
     // Reports
     Route::get('/reports', [AdminController::class, 'reports'])->name('reports');
@@ -317,6 +330,9 @@ Route::prefix($adminPrefix)->name('admin.')->middleware(['auth', 'status', 'role
 
     // Content Safety (Review AI agent reports)
     Route::get('/moderation', [SafetyController::class, 'index'])->name('moderation');
+    Route::post('/moderation/words', [SafetyController::class, 'storeWord'])->name('moderation.words.store');
+    Route::put('/moderation/words/{badWord}', [SafetyController::class, 'updateWord'])->name('moderation.words.update');
+    Route::delete('/moderation/words/{badWord}', [SafetyController::class, 'destroyWord'])->name('moderation.words.destroy');
     Route::get('/moderation/users/{user}', [SafetyController::class, 'showUser'])->name('moderation.users');
     Route::post('/moderation/strike/{user}', [SafetyController::class, 'strike'])->name('moderation.strike');
     Route::post('/moderation/activate/{user}', [SafetyController::class, 'activate'])->name('moderation.activate');

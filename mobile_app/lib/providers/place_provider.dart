@@ -123,7 +123,8 @@ class PlaceModel {
 //
 //   merge → dedupe by placeIdentityKey() → drop category == "All"
 //                        ↓
-//                 displayablePlaces
+//                 displayablePlaces   (search/Explore: includes Nepal)
+//                 mapPlaces           (Nearby: nearby + viewport only)
 //                   ↙         ↘
 //               Nearby        Map → viewport cull → markers
 //
@@ -354,6 +355,7 @@ class PlaceProvider extends ChangeNotifier {
   // _places / _viewportPlaces / _nepalPlaces calls before notifyListeners().
   // Camera movement and rebuilds read the memo — they never re-merge.
   List<PlaceModel>? _displayablePlaces;
+  List<PlaceModel>? _mapPlaces;
   Set<String>? _viewportPlaceKeys;
 
   /// The one collection the UI reads: every raw source merged, deduped and
@@ -367,6 +369,16 @@ class PlaceProvider extends ChangeNotifier {
         nepalPlaces: _nepalPlaces,
       );
 
+  /// Map-only collection: nearby-combined + the current viewport payload.
+  /// Deliberately excludes the Nepal-wide search dataset — merging 15k rows
+  /// into every marker build is what made Nearby feel hung.
+  List<PlaceModel> get mapPlaces =>
+      _mapPlaces ??= buildDisplayablePlaces(
+        nearbyPlaces: _places,
+        viewportPlaces: _viewportPlaces,
+        nepalPlaces: const [],
+      );
+
   /// Normalized identities of the current bbox payload. The marker builder
   /// uses them to keep the rows the server already scoped to the viewport
   /// (viewport + prefetch buffer) without re-testing each coordinate.
@@ -375,6 +387,7 @@ class PlaceProvider extends ChangeNotifier {
 
   void _invalidateDisplayable() {
     _displayablePlaces = null;
+    _mapPlaces = null;
     _viewportPlaceKeys = null;
   }
 
@@ -543,21 +556,29 @@ class PlaceProvider extends ChangeNotifier {
   /// This is the primary data source for the map — returns only places
   /// inside the requested bbox, with zoom-aware density limiting.
   ///
+  /// [search] is pushed to the server so a search only scans the visible
+  /// area instead of pulling the 15k Nepal dataset. [limit] is usually left
+  /// null so the server's zoom budget applies.
+  ///
   /// Repeated requests for the same (grid-normalised) area — e.g. reopening
   /// the Nearby screen without moving the map — are served from memory for
   /// [viewportStaleness] instead of hitting the API again.
   ///
-  /// Returns the raw payload (so the caller can persist it for the next open)
-  /// or an empty list when nothing new was fetched.
-  Future<List<Map<String, dynamic>>> fetchViewportPlaces({
+  /// Returns null when the request was skipped (fresh data already in memory)
+  /// or failed, and a list — possibly empty — when the server answered. The
+  /// caller uses that distinction to avoid recording coverage for a failed
+  /// fetch.
+  Future<List<Map<String, dynamic>>?> fetchViewportPlaces({
     required double minLat,
     required double maxLat,
     required double minLng,
     required double maxLng,
     int? zoom,
     String? category,
+    String? search,
+    int? limit,
   }) async {
-    if (_isLoadingViewport) return const [];
+    if (_isLoadingViewport) return null;
 
     // Same 0.05° grid the server rounds its cache key to, so a request that
     // the backend would answer from Redis is also skipped on the client.
@@ -569,18 +590,20 @@ class PlaceProvider extends ChangeNotifier {
       signatureOf(maxLng),
       zoom ?? '',
       category ?? '',
+      search ?? '',
+      limit ?? '',
     ].join(':');
     final fetchedAt = _viewportFetchedAt;
     if (fetchedAt != null &&
         _viewportSignature == signature &&
         DateTime.now().difference(fetchedAt) < viewportStaleness) {
-      return const [];
+      return null;
     }
 
     _isLoadingViewport = true;
     notifyListeners();
 
-    var raw = const <Map<String, dynamic>>[];
+    List<Map<String, dynamic>>? raw;
     try {
       final response = await _api.getPlacesInBBox(
         minLat: minLat,
@@ -589,26 +612,27 @@ class PlaceProvider extends ChangeNotifier {
         maxLng: maxLng,
         zoom: zoom,
         category: category,
-        limit: 500,
+        search: search,
+        limit: limit,
       );
       final data = (response.data['data'] as List?) ?? [];
       raw = data.map((j) => Map<String, dynamic>.from(j)).toList();
       final places = raw.map((j) => PlaceModel.fromJson(j)).toList();
-      if (places.isNotEmpty) {
-        _viewportPlaces = places;
-        _viewportMinLat = minLat;
-        _viewportMaxLat = maxLat;
-        _viewportMinLng = minLng;
-        _viewportMaxLng = maxLng;
-        _viewportSignature = signature;
-        _viewportFetchedAt = DateTime.now();
-        _invalidateDisplayable();
-        notifyListeners();
-      }
+
+      // A successful empty response is meaningful: the area (or the active
+      // search/category) really has no places. Keeping the previous area's
+      // rows would leave stale pins and a sheet that disagrees with the map.
+      _viewportPlaces = places;
+      _viewportMinLat = minLat;
+      _viewportMaxLat = maxLat;
+      _viewportMinLng = minLng;
+      _viewportMaxLng = maxLng;
+      _viewportSignature = signature;
+      _viewportFetchedAt = DateTime.now();
+      _invalidateDisplayable();
     } catch (e) {
-      // Viewport fetch failed — nepalPlaces remains as fallback
+      // Viewport fetch failed — restored/offline data remains on screen.
       debugPrint('fetchViewportPlaces failed: $e');
-      raw = const [];
     }
 
     _isLoadingViewport = false;

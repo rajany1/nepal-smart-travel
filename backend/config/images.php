@@ -87,11 +87,23 @@ return [
     | wikidata id beats any text search.
     */
     'strategies' => [
+        'commons_tag',
         'wikidata_id',
-        'commons_category',
-        'wikidata_link',
-        'geosearch',
+        'wikipedia',
         'text_search',
+        'geosearch',
+    ],
+
+    // Generic names match thousands of Commons files ("Hotel", "Cafe"...).
+    // They are only discovered through an explicit Commons/Wikidata link.
+    'generic_names' => [
+        'hotel', 'restaurant', 'cafe', 'coffee shop', 'guest house', 'guesthouse',
+        'lodge', 'bar', 'pub', 'bank', 'atm', 'shop', 'store', 'school',
+        'college', 'university', 'hospital', 'clinic', 'pharmacy', 'police',
+        'police station', 'parking', 'fuel station', 'petrol station',
+        'bus station', 'taxi', 'market', 'temple', 'church', 'mosque',
+        'monastery', 'gumba', 'viewpoint', 'view point', 'park', 'museum',
+        'place', 'attraction',
     ],
 
     // Geosearch radius per strategy step (km).
@@ -160,6 +172,25 @@ return [
     // Minimum share of the place's significant name tokens a candidate title
     // must contain before it counts as a name match.
     'name_match_ratio' => 0.5,
+
+    // Geosearch returns every geotagged photo around a point, including
+    // unrelated shops and streets. Require at least one name token before a
+    // coordinate-only candidate is trusted.
+    'geosearch_min_name_ratio' => 0.34,
+
+    /*
+    |--------------------------------------------------------------------
+    | Local mirror
+    |--------------------------------------------------------------------
+    | Accepted Commons files are downloaded to the public disk, never kept
+    | as external hotlinks. The original URL is still stored for provenance
+    | and re-checking; the local path is what the API serves.
+    */
+    'download' => [
+        'disk' => env('PLACE_IMAGES_DISK', 'public'),
+        'path' => env('PLACE_IMAGES_PATH', 'places'),
+        'max_bytes' => (int) env('PLACE_IMAGES_MAX_BYTES', 12 * 1024 * 1024),
+    ],
 
     /*
     |--------------------------------------------------------------------

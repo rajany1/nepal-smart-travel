@@ -24,6 +24,7 @@ class PlaceImageMatcher
 {
     /** Per-strategy confidence before any content is inspected. */
     private const STRATEGY_WEIGHT = [
+        'commons_tag' => 0.9,
         'wikidata_id' => 1.0,
         'commons_category' => 0.9,
         'wikidata_link' => 0.85,
@@ -33,7 +34,7 @@ class PlaceImageMatcher
     ];
 
     /** Strategies where an empty name match is not suspicious by itself. */
-    private const ENTITY_LINKED = ['wikidata_id', 'commons_category', 'wikidata_link', 'wikipedia'];
+    private const ENTITY_LINKED = ['commons_tag', 'wikidata_id', 'commons_category', 'wikidata_link', 'wikipedia'];
 
     private const ALLOWED_MIME = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp', 'image/tiff', 'image/tif'];
 
@@ -44,15 +45,15 @@ class PlaceImageMatcher
     ];
 
     /**
-     * @param array $candidate normalised candidate (see PlaceImageDiscoveryService)
+     * @param  array  $candidate  normalised candidate (see PlaceImageDiscoveryService)
      * @return array{accepted: bool, score: float, reasons: array<string>}
      */
     public function evaluate(Place $place, array $candidate): array
     {
         $reasons = [];
 
-        if (!$this->licenseAllowed($candidate['license'] ?? null)) {
-            return $this->reject('licence-not-allowed: ' . ($candidate['license'] ?? 'unknown'));
+        if (! $this->licenseAllowed($candidate['license'] ?? null)) {
+            return $this->reject('licence-not-allowed: '.($candidate['license'] ?? 'unknown'));
         }
 
         $width = (int) ($candidate['width'] ?? 0);
@@ -62,7 +63,7 @@ class PlaceImageMatcher
         }
 
         $mime = strtolower((string) ($candidate['mime'] ?? 'image/jpeg'));
-        if (!in_array($mime, self::ALLOWED_MIME, true)) {
+        if (! in_array($mime, self::ALLOWED_MIME, true)) {
             return $this->reject("mime-not-allowed: {$mime}");
         }
 
@@ -86,15 +87,36 @@ class PlaceImageMatcher
 
         // --- strategy-specific must-holds ----------------------------------
         if ($via === 'text_search' && $nameScore < (float) config('images.name_match_ratio', 0.5)) {
-            return $this->reject('name-mismatch-on-text-search: ' . round($nameScore, 2));
+            return $this->reject('name-mismatch-on-text-search: '.round($nameScore, 2));
+        }
+
+        // Searches and geosearch both match descriptions/categories, so a
+        // mushroom photographed in Chitwan is not a photo of Chitwan itself.
+        // Require the place's own name in the file title for these strategies
+        // (geosearch only needs one significant token; text search is stricter).
+        if (in_array($via, ['text_search', 'geosearch'], true)) {
+            $titleScore = $this->titleNameScore($place->name, $candidate);
+            $minTitleScore = $via === 'geosearch'
+                ? 0.01
+                : (float) config('images.name_match_ratio', 0.5);
+
+            if ($titleScore < $minTitleScore) {
+                return $this->reject('name-mismatch-in-title: '.round($titleScore, 2));
+            }
+        }
+
+        // A nearby geotagged photo is not automatically a photo of THIS place.
+        // At least one significant name token must appear in the file page.
+        if ($via === 'geosearch' && $nameScore < (float) config('images.geosearch_min_name_ratio', 0.34)) {
+            return $this->reject('name-mismatch-on-geosearch: '.round($nameScore, 2));
         }
 
         if ($distanceKm !== null && $distanceKm > $this->maxPhotoDistance($place)) {
-            return $this->reject('photo-too-far: ' . round($distanceKm, 1) . 'km');
+            return $this->reject('photo-too-far: '.round($distanceKm, 1).'km');
         }
 
         $signalPresent = $nameScore > 0.0 || $distanceKm !== null || in_array($via, self::ENTITY_LINKED, true);
-        if (!$signalPresent) {
+        if (! $signalPresent) {
             return $this->reject('no-name-no-gps-no-entity-link');
         }
 
@@ -107,7 +129,7 @@ class PlaceImageMatcher
 
         $min = (float) config('images.min_score', 0.45);
         if ($score < $min) {
-            return $this->reject('low-score: ' . round($score, 3) . " < {$min}");
+            return $this->reject('low-score: '.round($score, 3)." < {$min}");
         }
 
         return $this->accept($score, 'ok');
@@ -174,6 +196,48 @@ class PlaceImageMatcher
         }
 
         return $found / count($tokens);
+    }
+
+    /**
+     * Stricter variant used for text-search results: the place name must be
+     * present in the file title, tolerating a one-letter spelling difference
+     * ("Ilam" vs "Illam"). Descriptions and categories are deliberately
+     * ignored here because they are what make area-wide searches noisy.
+     */
+    private function titleNameScore(?string $placeName, array $candidate): float
+    {
+        $tokens = $this->significantTokens($placeName);
+        if ($tokens === []) {
+            return 0.0;
+        }
+
+        $title = mb_strtolower($this->stripHtml(implode(' ', [
+            $candidate['title'] ?? '',
+            $candidate['object_name'] ?? '',
+        ])));
+        $words = preg_split('/[^\p{L}\p{N}]+/u', $title, -1, PREG_SPLIT_NO_EMPTY) ?: [];
+
+        $found = 0;
+        foreach ($tokens as $token) {
+            if (mb_strpos($title, $token) !== false || $this->hasNearMatch($token, $words)) {
+                $found++;
+            }
+        }
+
+        return $found / count($tokens);
+    }
+
+    /** @param string[] $words */
+    private function hasNearMatch(string $token, array $words): bool
+    {
+        foreach ($words as $word) {
+            if (abs(mb_strlen($word) - mb_strlen($token)) <= 1
+                && levenshtein($token, $word) <= 1) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /** @return string[] lowercased, de-punctuated, stopword-free tokens */

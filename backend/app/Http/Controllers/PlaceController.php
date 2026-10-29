@@ -7,6 +7,7 @@ use App\Models\Place;
 use App\Models\PlaceReview;
 use App\Models\PlaceCategories;
 use App\Helpers\GeoHelper;
+use App\Jobs\DiscoverPlaceImagesJob;
 use App\Jobs\TranslateContent;
 use App\Models\GameSetting;
 use App\Services\AchievementService;
@@ -170,6 +171,7 @@ class PlaceController extends Controller
             'max_lng' => 'required|numeric|between:-180,180',
             'zoom'    => 'nullable|numeric|min:1|max:20',
             'category' => 'nullable|string|max:100',
+            'search'  => 'nullable|string|max:100',
             'limit'   => 'nullable|integer|min:1|max:1000',
         ]);
 
@@ -197,20 +199,101 @@ class PlaceController extends Controller
         };
         $limit = min((int) ($request->limit ?? $defaultLimit), 1000);
 
-        // Redis cache — grid-normalized key so nearby pans share cache
-        $cacheKey = \App\Services\PlacesCache::bboxKey($minLat, $maxLat, $minLng, $maxLng, $zoom);
-        $ttl      = \App\Services\PlacesCache::BBOX_TTL;
+        // Category/search filters change the payload, so they belong in the
+        // cache key. "All" is the synthetic no-filter category.
+        $category = $request->filled('category') ? trim((string) $request->category) : null;
+        if ($category !== null && mb_strtolower($category) === 'all') {
+            $category = null;
+        }
+        $search = $request->filled('search') ? trim((string) $request->search) : null;
 
-        $data = Cache::remember($cacheKey, $ttl, function () use ($minLat, $maxLat, $minLng, $maxLng) {
-            $raw = Place::with(['category', 'images'])->active()
+        // The show-on-map privacy filter depends on the viewer, so the cache
+        // is viewer-scoped as well.
+        $viewerId = $request->user()?->id;
+        $hiddenAuthorIds = \App\Services\PlacesCache::hiddenAuthors();
+
+        // Redis cache — grid-normalized key so nearby pans share cache.
+        $cacheKey = \App\Services\PlacesCache::bboxKey(
+            $minLat,
+            $maxLat,
+            $minLng,
+            $maxLng,
+            $zoom,
+            $limit,
+            $category,
+            $search,
+            $viewerId
+        );
+        $ttl = \App\Services\PlacesCache::BBOX_TTL;
+
+        // Limit in SQL, not after loading the whole bbox. At low zoom a
+        // Nepal-wide box holds ~70k rows; loading them all (with relations)
+        // before array_slice was the reason the map took seconds to open.
+        $cached = Cache::remember($cacheKey, $ttl, function () use (
+            $minLat, $maxLat, $minLng, $maxLng, $limit, $category, $search, $viewerId, $hiddenAuthorIds
+        ) {
+            $query = Place::query()->active()
                 ->whereBetween('latitude', [$minLat, $maxLat])
                 ->whereBetween('longitude', [$minLng, $maxLng])
-                ->orderBy('is_featured', 'desc')
-                ->orderBy('average_rating', 'desc')
-                ->orderBy('total_reviews', 'desc')
+                ->whereNotNull('name')
+                ->where('name', '<>', '');
+
+            // Privacy filter in SQL so hidden rows cannot consume density
+            // slots that a post-limit PHP filter would leave empty.
+            $query->where(function ($q) use ($viewerId, $hiddenAuthorIds) {
+                $q->whereNull('created_by');
+                if ($viewerId !== null) {
+                    $q->orWhere('created_by', $viewerId);
+                }
+                if (!empty($hiddenAuthorIds)) {
+                    $q->where(function ($q2) use ($hiddenAuthorIds, $viewerId) {
+                        $q2->whereNull('created_by')
+                            ->orWhereNotIn('created_by', $hiddenAuthorIds);
+                        if ($viewerId !== null) {
+                            $q2->orWhere('created_by', $viewerId);
+                        }
+                    });
+                }
+            });
+
+            // Exact, case-insensitive category match (the client sends the
+            // full place_categories.name, never a substring).
+            if ($category !== null) {
+                $needle = mb_strtolower($category);
+                $query->whereHas('category', function ($q) use ($needle) {
+                    $q->whereRaw('LOWER(TRIM(name)) = ?', [$needle]);
+                });
+            }
+
+            if ($search !== null) {
+                $escaped = str_replace(['\\', '%', '_'], ['\\\\', '\\%', '\\_'], $search);
+                $like = '%' . $escaped . '%';
+                $query->where(function ($q) use ($like) {
+                    $q->where('name', 'like', $like)
+                        ->orWhere('address', 'like', $like)
+                        ->orWhere('district', 'like', $like);
+                });
+            }
+
+            $total = (clone $query)->count();
+
+            $rows = $query
+                // List payloads only need the cover image; eager-loading the
+                // full gallery multiplies the row count for no benefit.
+                ->with(['category:id,name', 'primaryImage'])
+                ->orderByDesc('is_featured')
+                ->orderByDesc('is_verified')
+                ->orderByRaw("CASE source WHEN 'admin' THEN 0 WHEN 'user_submitted' THEN 1 WHEN 'seed' THEN 2 WHEN 'osm' THEN 3 ELSE 4 END")
+                ->orderByDesc('average_rating')
+                ->orderByDesc('total_reviews')
                 ->orderBy('name')
-                ->get()
-                ->map(fn($place) => [
+                ->limit($limit)
+                ->get();
+
+            $data = $rows->map(function ($place) {
+                $image = $place->primaryImage;
+
+                return [
                     'id'             => $place->id,
                     'uuid'           => $place->uuid,
                     'created_by'     => $place->created_by !== null ? (int) $place->created_by : null,
@@ -228,40 +311,19 @@ class PlaceController extends Controller
                     'total_reviews'  => $place->total_reviews,
                     'is_verified'    => $place->is_verified,
                     'is_featured'    => $place->is_featured,
-                    'image'          => $this->placeImageUrls($place->images)[0] ?? null,
-                ])
-                ->values()
-                ->toArray();
-
-            // Strip null/empty fields (same as all())
-            return array_map(fn($place) => array_filter(
+                    'image'          => $image ? $image->displayUrl() : null,
+                ];
+            })->map(fn($place) => array_filter(
                 $place,
                 fn($v, $k) => $k === 'created_by' || ($v !== null && $v !== ''),
                 ARRAY_FILTER_USE_BOTH
-            ), $raw);
+            ))->values()->toArray();
+
+            return ['data' => $data, 'total' => $total];
         });
 
-        // Per-request privacy filter (not cached — depends on viewer)
-        $viewerId = $request->user()?->id;
-        $hiddenAuthorIds = \App\Services\PlacesCache::hiddenAuthors();
-        $filtered = array_values(array_filter($data, function ($place) use ($hiddenAuthorIds, $viewerId) {
-            if ($place['created_by'] === null) return true;
-            if ($viewerId !== null && (int) $place['created_by'] === (int) $viewerId) return true;
-            return !in_array((int) $place['created_by'], $hiddenAuthorIds, true);
-        }));
-
-        // Category filter — exact, case-insensitive. The client always sends a
-        // full category name (from place_categories.name, which is also what
-        // the payload's `category` field holds), so a substring match only
-        // introduced false positives: 'Bank' swallowing 'Blood Bank', or 'All'
-        // swallowing 'Mall'.
-        if ($request->filled('category')) {
-            $needle = mb_strtolower(trim($request->category));
-            $filtered = array_values(array_filter($filtered, fn($place) => $place['category'] !== null
-                && mb_strtolower(trim($place['category'])) === $needle));
-        }
-
-        $result = array_slice($filtered, 0, $limit);
+        $result = $cached['data'];
+        $total = (int) $cached['total'];
 
         $result = TranslationService::attachToPlaces($result);
         foreach ($result as &$item) {
@@ -276,7 +338,7 @@ class PlaceController extends Controller
             'success' => true,
             'data'    => $result,
             'meta'    => [
-                'total_in_bbox' => count($filtered),
+                'total_in_bbox' => $total,
                 'returned'      => count($result),
                 'zoom'          => $zoom,
             ],
@@ -1278,28 +1340,49 @@ class PlaceController extends Controller
     }
 
     /**
-     * Return absolute storage URLs for place images (relative paths would 404 in the app).
+     * Resolve approved images into client-loadable URLs.
+     *
+     * PlaceImage::resolveUrl() handles both local-disk uploads and external
+     * legacy URLs, and returns null for files that disappeared from disk.
      */
     private function placeImageUrls($images): array
     {
         return $images
-            ->map(fn($img) => asset('storage/' . $img->image_url))
+            ->filter(fn ($img) => ($img->status ?? PlaceImage::STATUS_APPROVED) === PlaceImage::STATUS_APPROVED)
+            ->map(fn ($img) => $img->displayUrl())
+            ->filter()
+            ->unique()
+            ->values()
             ->toArray();
     }
 
     public function show($id)
     {
+        $relations = ['category', 'approvedReviews', 'galleryImages'];
+
         if (str_starts_with($id, 'osm_')) {
             $osmId = substr($id, 4);
-            $place = Place::with(['category', 'approvedReviews', 'images'])->where('osm_id', $osmId)->first();
+            $place = Place::with($relations)->where('osm_id', $osmId)->first();
             if (!$place) {
                 // IN-09: unreviewed OSM POI — no 404; client renders its cached OSM data as "be the first to review"
                 return response()->json(['success' => true, 'data' => null]);
             }
         } else {
-            $place = Place::with(['category', 'approvedReviews', 'images'])->findOrFail($this->resolveDbId($id));
+            $place = Place::with($relations)->findOrFail($this->resolveDbId($id));
         }
+
+        // Queue discovery when this place has no usable gallery yet. This is a
+        // local-state check; no Wikimedia request runs inside the response.
+        if ($place->needsImageDiscovery()) {
+            DiscoverPlaceImagesJob::dispatch($place->id);
+        }
+
         $data = TranslationService::attachToModel($place, 'place');
+        unset($data['gallery_images']);
+
+        $data['images'] = $this->placeImageUrls($place->galleryImages);
+        $data['image_gallery'] = $place->imageGallery();
+
         return response()->json([
             'success' => true,
             'data' => $data,

@@ -17,12 +17,14 @@ import '../../providers/report_provider.dart';
 import '../../providers/travel_context_provider.dart';
 import '../../core/models/report.dart';
 import '../../core/models/report_comment.dart';
+import '../../core/models/report_category.dart' as rc;
 import '../../core/models/ad_campaign.dart';
 import '../../core/services/location_service.dart';
 import '../../core/services/offline_tile_provider.dart';
 import '../../core/services/camera_service.dart';
 import '../../core/services/auth_guard.dart';
 import '../../core/services/exif_embedder_service.dart';
+import '../../core/utils/icon_mapper.dart';
 import '../../core/widgets/dynamic_form_field.dart';
 import '../../widgets/image_carousel_widget.dart';
 import '../../widgets/ad_inline_banner.dart';
@@ -102,7 +104,11 @@ class _ReportsListScreenState extends State<ReportsListScreen>
     // Instant first paint: fetch immediately — don't block on GPS/permission.
     // With no location yet this is the backend's no-location mode (latest
     // nationwide) — honest "latest" data, never a guessed Kathmandu pin.
-    unawaited(provider.refreshAll());
+    unawaited(provider.refreshAll().then((_) {
+      // Warm the form configs for the quick-report chips as soon as the
+      // featured options are known, so tapping one opens a ready form.
+      unawaited(provider.prefetchFeaturedFormConfigs());
+    }));
     // Location resolves in the background; RE-FETCH the nearby feed as soon
     // as a trustworthy fix is ready (or clear coordinates + show the
     // unavailable banner when there is none).
@@ -212,83 +218,224 @@ class _ReportsListScreenState extends State<ReportsListScreen>
         statusBarBrightness: Brightness.light,
       ),
       child: Scaffold(
+        backgroundColor: AppTheme.backgroundColor,
+        floatingActionButton: _buildReportFab(context),
+        floatingActionButtonLocation: FloatingActionButtonLocation.endFloat,
         body: SafeArea(
-        child: Column(
-          children: [
-            Container(
-              color: AppTheme.backgroundColor,
-              padding: const EdgeInsets.fromLTRB(16, 12, 16, 10),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Container(
-                        padding: const EdgeInsets.all(8),
-                        decoration: BoxDecoration(
-                          color: AppTheme.errorColor.withOpacity(0.1),
-                          borderRadius: BorderRadius.circular(10),
-                        ),
-                        child: Icon(Icons.warning, color: AppTheme.errorColor, size: 22),
-                      ),
-                      const SizedBox(width: 12),
-                      Text(context.t('Reports'),
-                          style: const TextStyle(
-                              fontSize: AppTheme.text2xl,
-                              fontWeight: FontWeight.bold,
-                              color: AppTheme.textPrimary)),
-                      const Spacer(),
-                      _buildLiveBadge(),
-                    ],
-                  ),
-                  const SizedBox(height: 12),
-                  Container(
-                    height: 44,
-                    padding: const EdgeInsets.all(4),
-                    decoration: BoxDecoration(
-                      color: AppTheme.dividerColor.withOpacity(0.35),
-                      borderRadius: BorderRadius.circular(22),
+          child: Column(
+            children: [
+              _buildHeader(context),
+              _SearchFilterBar(onFilterChanged: _onFilterChanged),
+              Expanded(
+                child: TabBarView(
+                  controller: _tabController,
+                  children: [
+                    _RecentReportsTab(
+                      userLat: _userLat,
+                      userLng: _userLng,
+                      location: _locationResult,
+                      onStatusTap: () => _showSubmitReportSheet(context),
+                      onQuickReport: _openQuickReport,
+                      onRefresh: _pullRefreshReports,
+                      onEnableLocation: _handleEnableLocation,
                     ),
-                    child: Row(
-                      children: [
-                        _buildTabSegment(0, Icons.history,
-                            context.t('Recent'), AppTheme.primaryColor),
-                        const SizedBox(width: 4),
-                        _buildTabSegment(1, Icons.route,
-                            context.t('My Route'), AppTheme.infoColor),
-                      ],
+                    _RouteReportsTab(
+                      userLat: _userLat,
+                      userLng: _userLng,
+                      searchQuery: _searchQuery,
+                      categoryId: categoryId,
+                      onStatusTap: () => _showSubmitReportSheet(context),
+                      onQuickReport: _openQuickReport,
+                      onRefreshIntel: _refreshRouteIntel,
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
-            ),
-            _SearchFilterBar(onFilterChanged: _onFilterChanged),
-            Expanded(
-              child: TabBarView(
-                controller: _tabController,
-                children: [
-                  _RecentReportsTab(
-                    userLat: _userLat,
-                    userLng: _userLng,
-                    location: _locationResult,
-                    onStatusTap: () => _showSubmitReportSheet(context),
-                    onRefresh: _pullRefreshReports,
-                    onEnableLocation: _handleEnableLocation,
-                  ),
-                  _RouteReportsTab(
-                    userLat: _userLat,
-                    userLng: _userLng,
-                    searchQuery: _searchQuery,
-                    categoryId: categoryId,
-                    onStatusTap: () => _showSubmitReportSheet(context),
-                    onRefreshIntel: _refreshRouteIntel,
-                  ),
-],
-              ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
+    );
+  }
+
+  Widget _buildHeader(BuildContext context) {
+    final hasLocation = _locationResult?.hasCoordinates ?? false;
+    return Container(
+      color: AppTheme.backgroundColor,
+      padding: const EdgeInsets.fromLTRB(18, 10, 18, 8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 44,
+                height: 44,
+                decoration: BoxDecoration(
+                  gradient: const LinearGradient(
+                    colors: [AppTheme.errorColor, AppTheme.secondaryColor],
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                  ),
+                  borderRadius: BorderRadius.circular(14),
+                  boxShadow: [
+                    BoxShadow(
+                      color: AppTheme.errorColor.withOpacity(0.22),
+                      blurRadius: 12,
+                      offset: const Offset(0, 4),
+                    ),
+                  ],
+                ),
+                child: const Icon(Icons.campaign_rounded,
+                    color: Colors.white, size: 25),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      context.t('LIVE COMMUNITY'),
+                      style: const TextStyle(
+                        fontSize: 9.5,
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: 1.3,
+                        color: AppTheme.errorColor,
+                      ),
+                    ),
+                    const SizedBox(height: 1),
+                    Text(
+                      context.t('Reports'),
+                      style: const TextStyle(
+                        fontSize: 25,
+                        fontWeight: FontWeight.w800,
+                        color: AppTheme.textPrimary,
+                        letterSpacing: -0.6,
+                        height: 1.1,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              _buildLiveBadge(),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                decoration: BoxDecoration(
+                  color: AppTheme.primaryColor.withOpacity(0.08),
+                  borderRadius: BorderRadius.circular(20),
+                  border:
+                      Border.all(color: AppTheme.primaryColor.withOpacity(0.15)),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      hasLocation ? Icons.near_me_rounded : Icons.public_rounded,
+                      size: 13,
+                      color: AppTheme.primaryColor,
+                    ),
+                    const SizedBox(width: 5),
+                    Text(
+                      hasLocation
+                          ? context.t('Near you · 20 km')
+                          : context.t('Nepal-wide'),
+                      style: const TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w700,
+                        color: AppTheme.primaryColor,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  context.t('Real-time updates from the community'),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    fontSize: 11,
+                    color: AppTheme.textSecondary,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Container(
+            height: 44,
+            padding: const EdgeInsets.all(4),
+            decoration: BoxDecoration(
+              color: AppTheme.dividerColor.withOpacity(0.35),
+              borderRadius: BorderRadius.circular(22),
+            ),
+            child: Row(
+              children: [
+                _buildTabSegment(
+                    0, Icons.history, context.t('Recent'), AppTheme.primaryColor),
+                const SizedBox(width: 4),
+                _buildTabSegment(
+                    1, Icons.route, context.t('My Route'), AppTheme.infoColor),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildReportFab(BuildContext context) {
+    return Container(
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(22),
+        boxShadow: [
+          BoxShadow(
+            color: AppTheme.errorColor.withOpacity(0.28),
+            blurRadius: 16,
+            offset: const Offset(0, 6),
+          ),
+        ],
+      ),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(22),
+          onTap: () => _showSubmitReportSheet(context),
+          child: Ink(
+            padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 13),
+            decoration: BoxDecoration(
+              gradient: const LinearGradient(
+                colors: [AppTheme.errorColor, AppTheme.secondaryColor],
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+              ),
+              borderRadius: BorderRadius.circular(22),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(Icons.add_a_photo_rounded,
+                    color: Colors.white, size: 19),
+                const SizedBox(width: 8),
+                Text(
+                  context.t('Report'),
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 14,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
       ),
     );
   }
@@ -388,12 +535,16 @@ class _ReportsListScreenState extends State<ReportsListScreen>
     });
   }
 
-  Future<void> _showSubmitReportSheet(BuildContext context) async {
+  Future<void> _showSubmitReportSheet(BuildContext context,
+      {rc.ReportCategoryOption? option}) async {
     // Guest mode: creating a report is an action → requires login.
     if (!await requireLogin(context)) return;
     if (!context.mounted) return;
 
-    final reportProvider = context.read<ReportProvider>();
+    if (option != null) {
+      _openReportForm(context, option);
+      return;
+    }
 
     // Show category selection sheet first
     showModalBottomSheet(
@@ -403,86 +554,320 @@ class _ReportsListScreenState extends State<ReportsListScreen>
       builder: (ctx) => CategorySelectionSheet(
         onCategorySelected: (category, option) {
           // Category selection sheet closes itself; open the report form.
-          showModalBottomSheet(
-            context: context,
-            isScrollControlled: true,
-            backgroundColor: Colors.transparent,
-            builder: (formCtx) => CategoryFormSheet(
-              category: category,
-              preselectedOption: option,
-              initialLat: _userLat,
-              initialLng: _userLng,
-              initialDistrict: null,
-            ),
-          );
+          _openReportForm(context, option, category: category);
         },
+      ),
+    );
+  }
+
+  /// One tap from a quick-report chip: skip the category picker entirely and
+  /// open the form with the option already selected.
+  void _openQuickReport(rc.ReportCategoryOption option) {
+    unawaited(_showSubmitReportSheet(context, option: option));
+  }
+
+  void _openReportForm(
+    BuildContext context,
+    rc.ReportCategoryOption? option, {
+    rc.ReportCategory? category,
+  }) {
+    final resolved = category ??
+        option?.parentCategory ??
+        (option != null
+            ? rc.ReportCategory(
+                id: option.categoryId,
+                name: option.name,
+                slug: option.slug,
+              )
+            : null);
+    if (resolved == null) return;
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (formCtx) => CategoryFormSheet(
+        category: resolved,
+        preselectedOption: option,
+        initialLat: _userLat,
+        initialLng: _userLng,
+        initialDistrict: null,
       ),
     );
   }
 
 }
 
-// ============ STATUS CARD (Facebook-style) ============
+// ============ COMPOSER (unique community status card) ============
 class _StatusCard extends StatelessWidget {
   final VoidCallback onTap;
-  const _StatusCard({required this.onTap});
+  final ValueChanged<rc.ReportCategoryOption> onQuickReport;
+  const _StatusCard({required this.onTap, required this.onQuickReport});
 
   @override
   Widget build(BuildContext context) {
     final authUser = context.watch<AuthProvider>().user;
-    final hasAvatar = authUser?.avatarUrl != null && authUser!.avatarUrl!.isNotEmpty;
+    final hasAvatar =
+        authUser?.avatarUrl != null && authUser!.avatarUrl!.isNotEmpty;
     final userName = authUser?.name ?? '';
+    // Quick chips: one per affected category first (weather, safety, …), then
+    // fill up so a single tap covers the most common reports without opening
+    // the full category picker.
+    final allQuick =
+        context.select<ReportProvider, List<rc.ReportCategoryOption>>(
+            (p) => p.featuredOptions);
+    final quickOptions = <rc.ReportCategoryOption>[];
+    final seenCategories = <int>{};
+    for (final option in allQuick) {
+      if (seenCategories.add(option.categoryId)) quickOptions.add(option);
+    }
+    for (final option in allQuick) {
+      if (quickOptions.length >= 6) break;
+      if (!quickOptions.contains(option)) quickOptions.add(option);
+    }
+
     return Padding(
       padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
-      child: Card(
-        margin: EdgeInsets.zero,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        elevation: 0,
-        child: InkWell(
-          borderRadius: BorderRadius.circular(16),
-          onTap: onTap,
-          child: Container(
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: AppTheme.dividerColor.withOpacity(0.5)),
+      child: Container(
+        padding: const EdgeInsets.fromLTRB(14, 14, 14, 12),
+        decoration: BoxDecoration(
+          gradient: const LinearGradient(
+            colors: [Color(0xFFFFF7F2), Color(0xFFFFFCF3)],
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+          ),
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(color: AppTheme.errorColor.withOpacity(0.14)),
+          boxShadow: [
+            BoxShadow(
+              color: AppTheme.primaryColor.withOpacity(0.05),
+              blurRadius: 18,
+              offset: const Offset(0, 8),
             ),
-            child: Column(
+          ],
+        ),
+        child: Column(
+          children: [
+            LayoutBuilder(
+              builder: (context, constraints) {
+                final compact = constraints.maxWidth < 330;
+                return Row(
               children: [
-                Row(
-                  children: [
-                    CircleAvatar(
-                      radius: 22,
-                      backgroundColor: AppTheme.primaryLight.withOpacity(0.3),
-                      backgroundImage: hasAvatar ? NetworkImage(authUser!.avatarUrl!) : null,
-                      child: !hasAvatar
-                          ? Text(userName.isNotEmpty ? userName[0].toUpperCase() : '?', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold))
-                          : null,
+                Container(
+                  padding: const EdgeInsets.all(2.5),
+                  decoration: const BoxDecoration(
+                    shape: BoxShape.circle,
+                    gradient: LinearGradient(
+                      colors: [AppTheme.errorColor, AppTheme.secondaryColor],
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
                     ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                        decoration: BoxDecoration(
-                          color: AppTheme.dividerColor.withOpacity(0.2),
-                          borderRadius: BorderRadius.circular(24),
-                        ),
-                        child: Text(context.t('What\'s on your mind?'), style: const TextStyle(color: AppTheme.textSecondary, fontSize: AppTheme.textBase + 1)),
+                  ),
+                  child: CircleAvatar(
+                    radius: 21,
+                    backgroundColor: AppTheme.surfaceColor,
+                    backgroundImage:
+                        hasAvatar ? NetworkImage(authUser.avatarUrl!) : null,
+                    child: !hasAvatar
+                        ? Text(
+                            userName.isNotEmpty
+                                ? userName[0].toUpperCase()
+                                : '?',
+                            style: const TextStyle(
+                              color: AppTheme.primaryColor,
+                              fontWeight: FontWeight.w800,
+                            ),
+                          )
+                        : null,
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: InkWell(
+                    borderRadius: BorderRadius.circular(10),
+                    onTap: onTap,
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 3),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                              Flexible(
+                                child: Text(
+                                  context.t('Share a live update'),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(
+                                    fontSize: 15,
+                                    fontWeight: FontWeight.w700,
+                                    color: AppTheme.textPrimary,
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(width: 6),
+                              Container(
+                                width: 7,
+                                height: 7,
+                                decoration: BoxDecoration(
+                                  color: AppTheme.successColor,
+                                  shape: BoxShape.circle,
+                                  boxShadow: [
+                                    BoxShadow(
+                                      color: AppTheme.successColor
+                                          .withOpacity(0.55),
+                                      blurRadius: 5,
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 3),
+                          Text(
+                            context.t('Photo + location are added for you'),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              fontSize: 11,
+                              color: AppTheme.textSecondary,
+                            ),
+                          ),
+                        ],
                       ),
                     ),
-                  ],
+                  ),
                 ),
-                const SizedBox(height: 10),
-                const Divider(height: 1),
-                const SizedBox(height: 8),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                  children: [
-                    _actionButton(Icons.photo_camera, context.t('Photo'), AppTheme.successColor, onTap),
-                    _actionButton(Icons.location_on, context.t('Location'), AppTheme.errorColor, onTap),
-                    _actionButton(Icons.priority_high, context.t('Emergency'), AppTheme.warningColor, onTap),
-                  ],
+                const SizedBox(width: 8),
+                _reportCta(context, compact: compact),
+              ],
+            );
+              },
+            ),
+            const SizedBox(height: 12),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 3),
+              decoration: BoxDecoration(
+                color: Colors.white.withOpacity(0.72),
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(color: Colors.white),
+              ),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: _quickAction(Icons.camera_alt_rounded,
+                        context.t('Photo'), AppTheme.successColor, onTap),
+                  ),
+                  _actionDivider(),
+                  Expanded(
+                    child: _quickAction(Icons.place_rounded,
+                        context.t('Location'), AppTheme.infoColor, onTap),
+                  ),
+                  _actionDivider(),
+                  Expanded(
+                    child: _quickAction(Icons.bolt_rounded,
+                        context.t('Emergency'), AppTheme.errorColor, onTap),
+                  ),
+                ],
+              ),
+            ),
+            if (quickOptions.isNotEmpty) ...[
+              const SizedBox(height: 10),
+              SizedBox(
+                height: 30,
+                child: ListView.separated(
+                  scrollDirection: Axis.horizontal,
+                  itemCount: quickOptions.length,
+                  separatorBuilder: (_, __) => const SizedBox(width: 6),
+                  itemBuilder: (context, index) {
+                    final option = quickOptions[index];
+                    final color = option.severityColor;
+                    return GestureDetector(
+                      onTap: () => onQuickReport(option),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 10, vertical: 6),
+                        decoration: BoxDecoration(
+                          color: color.withOpacity(0.08),
+                          borderRadius: BorderRadius.circular(14),
+                          border: Border.all(color: color.withOpacity(0.25)),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(
+                              IconMapper.getIconData(option.icon ?? 'bolt'),
+                              size: 13,
+                              color: color,
+                            ),
+                            const SizedBox(width: 5),
+                            Text(
+                              option.getLocalizedNameFromContext(context),
+                              style: TextStyle(
+                                fontSize: 10.5,
+                                fontWeight: FontWeight.w600,
+                                color: color,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    );
+                  },
                 ),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _reportCta(BuildContext context, {bool compact = false}) {
+    return Container(
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(20),
+        boxShadow: [
+          BoxShadow(
+            color: AppTheme.errorColor.withOpacity(0.22),
+            blurRadius: 10,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(20),
+          onTap: onTap,
+          child: Ink(
+            padding: EdgeInsets.symmetric(
+              horizontal: compact ? 10 : 12,
+              vertical: compact ? 10 : 9,
+            ),
+            decoration: BoxDecoration(
+              gradient: const LinearGradient(
+                colors: [AppTheme.errorColor, AppTheme.secondaryColor],
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+              ),
+              borderRadius: BorderRadius.circular(20),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(Icons.add_rounded, color: Colors.white, size: 17),
+                if (!compact) ...[
+                  const SizedBox(width: 3),
+                  Text(
+                    context.t('Report'),
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ],
               ],
             ),
           ),
@@ -491,16 +876,46 @@ class _StatusCard extends StatelessWidget {
     );
   }
 
-  Widget _actionButton(IconData icon, String label, Color color, VoidCallback onTap) {
-    return GestureDetector(
+  Widget _actionDivider() => Container(
+        width: 1,
+        height: 18,
+        color: AppTheme.dividerColor.withOpacity(0.8),
+      );
+
+  Widget _quickAction(
+      IconData icon, String label, Color color, VoidCallback onTap) {
+    return InkWell(
+      borderRadius: BorderRadius.circular(12),
       onTap: onTap,
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(icon, size: 18, color: color),
-          const SizedBox(width: 4),
-          Text(label, style: TextStyle(fontSize: AppTheme.textSm + 1, color: color.withOpacity(0.8), fontWeight: FontWeight.w500)),
-        ],
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 7, horizontal: 4),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Container(
+              width: 25,
+              height: 25,
+              decoration: BoxDecoration(
+                color: color.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Icon(icon, size: 15, color: color),
+            ),
+            const SizedBox(width: 5),
+            Flexible(
+              child: Text(
+                label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w600,
+                  color: color.withOpacity(0.9),
+                ),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -670,6 +1085,7 @@ class _RecentReportsTab extends StatefulWidget {
   final double? userLat;
   final double? userLng;
   final VoidCallback onStatusTap;
+  final ValueChanged<rc.ReportCategoryOption> onQuickReport;
 
   /// Device-location provenance for this feed (null until first resolve).
   /// Drives the "near you" label and the location-unavailable banner.
@@ -686,6 +1102,7 @@ class _RecentReportsTab extends StatefulWidget {
       {this.userLat,
       this.userLng,
       required this.onStatusTap,
+      required this.onQuickReport,
       this.location,
       this.onRefresh,
       this.onEnableLocation});
@@ -798,12 +1215,24 @@ class _RecentReportsTabState extends State<_RecentReportsTab> {
         final filtered = provider.filteredReports;
         if (filtered.isEmpty) {
           final empty = _emptyState(context, icon: Icons.assignment, message: context.t('No reports yet'), subtitle: context.t('Be the first to submit a report'), onTap: widget.onStatusTap);
-          if (showBanner) {
-            return ListView(
-                padding: const EdgeInsets.all(12),
-                children: [_locationBanner(context), empty]);
-          }
-          return empty;
+          return RefreshIndicator(
+            onRefresh: widget.onRefresh ??
+                () => provider.fetchReports(lat: widget.userLat, lng: widget.userLng, radiusKm: 20.0),
+            child: ListView(
+              padding: const EdgeInsets.fromLTRB(12, 12, 12, 96),
+              children: [
+                _StatusCard(onTap: widget.onStatusTap, onQuickReport: widget.onQuickReport),
+                if (showBanner) ...[
+                  const SizedBox(height: 8),
+                  _locationBanner(context),
+                ],
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 32),
+                  child: empty,
+                ),
+              ],
+            ),
+          );
         }
         final feed = _buildFeed(filtered, ads);
         final bannerSlots = showBanner ? 1 : 0;
@@ -816,11 +1245,44 @@ class _RecentReportsTabState extends State<_RecentReportsTab> {
               return false;
             },
             child: ListView.builder(
-              padding: const EdgeInsets.all(12),
+              padding: const EdgeInsets.fromLTRB(12, 12, 12, 96),
               itemCount: feed.length + 2 + bannerSlots + (provider.isLoadingMore ? 1 : 0),
               itemBuilder: (context, index) {
-                if (index == 0) return _StatusCard(onTap: widget.onStatusTap);
-                if (index == 1) return Padding(key: const ValueKey('recent-count'), padding: const EdgeInsets.only(bottom: 8, left: 4, top: 8), child: Text(_countLabel(context, filtered.length), style: const TextStyle(color: AppTheme.textSecondary)));
+                if (index == 0) return _StatusCard(onTap: widget.onStatusTap, onQuickReport: widget.onQuickReport);
+                if (index == 1)
+                  return Align(
+                    key: const ValueKey('recent-count'),
+                    alignment: Alignment.centerLeft,
+                    child: Container(
+                      margin: const EdgeInsets.only(bottom: 8, top: 8),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 10, vertical: 6),
+                      decoration: BoxDecoration(
+                        color: AppTheme.surfaceColor,
+                        borderRadius: BorderRadius.circular(14),
+                        border: Border.all(
+                            color: AppTheme.dividerColor.withOpacity(0.7)),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const Icon(Icons.bolt_rounded,
+                              size: 14, color: AppTheme.secondaryColor),
+                          const SizedBox(width: 4),
+                          Flexible(
+                            child: Text(
+                              _countLabel(context, filtered.length),
+                              style: const TextStyle(
+                                color: AppTheme.textSecondary,
+                                fontSize: AppTheme.textSm,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  );
                 if (showBanner && index == 2) return _locationBanner(context);
                 if (index > feed.length + 1 + bannerSlots) return const Padding(key: ValueKey('recent-loading-more'), padding: EdgeInsets.all(16), child: Center(child: CircularProgressIndicator(strokeWidth: 2)));
                 final item = feed[index - 2 - bannerSlots];
@@ -854,7 +1316,7 @@ class _RecentReportsShimmer extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return ListView.builder(
-      padding: const EdgeInsets.all(12),
+      padding: const EdgeInsets.fromLTRB(12, 12, 12, 96),
       itemCount: 4,
       itemBuilder: (_, __) => const Padding(
         padding: EdgeInsets.only(bottom: 4),
@@ -871,6 +1333,7 @@ class _RouteReportsTab extends StatefulWidget {
   final String searchQuery;
   final int? categoryId;
   final VoidCallback onStatusTap;
+  final ValueChanged<rc.ReportCategoryOption> onQuickReport;
   final Future<void> Function({double? lat, double? lng}) onRefreshIntel;
 
   const _RouteReportsTab({
@@ -879,6 +1342,7 @@ class _RouteReportsTab extends StatefulWidget {
     this.searchQuery = '',
     this.categoryId,
     required this.onStatusTap,
+    required this.onQuickReport,
     required this.onRefreshIntel,
   });
 
@@ -1078,7 +1542,7 @@ class _RouteReportsTabState extends State<_RouteReportsTab> {
         return RefreshIndicator(
           onRefresh: () => widget.onRefreshIntel(lat: widget.userLat, lng: widget.userLng),
           child: ListView.builder(
-            padding: const EdgeInsets.all(12),
+            padding: const EdgeInsets.fromLTRB(12, 12, 12, 96),
             itemCount: feed.length + 2 + (showSaveBanner ? 1 : 0),
             itemBuilder: (context, index) {
               if (showSaveBanner) {
@@ -1087,7 +1551,7 @@ class _RouteReportsTabState extends State<_RouteReportsTab> {
                       key: ValueKey('guest-save-route'));
                 index -= 1;
               }
-              if (index == 0) return _StatusCard(onTap: widget.onStatusTap);
+              if (index == 0) return _StatusCard(onTap: widget.onStatusTap, onQuickReport: widget.onQuickReport);
               if (index == 1) {
                 return Padding(
                   key: const ValueKey('route-count'),

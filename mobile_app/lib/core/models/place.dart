@@ -51,6 +51,7 @@ class Place {
 
   factory Place.fromJson(Map<String, dynamic> json) {
     final location = json['location'] ?? {};
+    final rawHours = json['opening_hours'] ?? json['operating_hours'];
     return Place(
       id: json['place_id'] ?? json['id'] ?? '',
       name: json['name'] ?? '',
@@ -63,7 +64,9 @@ class Place {
       phone: json['phone'],
       email: json['email'],
       website: json['website'],
-      operatingHours: json['operating_hours'],
+      operatingHours: rawHours is Map
+          ? Map<String, dynamic>.from(rawHours)
+          : null,
       averageRating: double.tryParse((json['average_rating'] ?? 0).toString()) ?? 0.0,
       totalReviews: int.tryParse(json['total_reviews']?.toString() ?? '') ?? 0,
       images: List<String>.from(json['images'] ?? []),

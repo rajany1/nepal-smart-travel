@@ -203,7 +203,7 @@ it('Test 1: authorized admin can bulk delete selected reports only', function ()
         ->assertSee('id="selectAllReports"', false)
         ->assertSee('id="reportsBulkForm"', false)
         ->assertSee('report-checkbox', false)
-        ->assertSee('Delete Selected', false);
+        ->assertSee('Delete selected', false);
 
     $response = $this->actingAs($admin)
         ->from(route('admin.reports'))

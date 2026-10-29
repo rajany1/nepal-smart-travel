@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:dio/dio.dart';
 import '../../core/api/api_client.dart';
 import '../profile/legal_document_screen.dart';
 
@@ -56,7 +57,7 @@ class _LegalReAcceptanceScreenState extends State<LegalReAcceptanceScreen> {
       }
     } catch (e) {
       setState(() {
-        _errorMessage = 'Network error. Please try again.';
+        _errorMessage = _errorText(e);
         _isLoading = false;
       });
     }
@@ -64,6 +65,18 @@ class _LegalReAcceptanceScreenState extends State<LegalReAcceptanceScreen> {
 
   bool get _allAccepted =>
       _accepted.isNotEmpty && _accepted.values.every((v) => v);
+
+  String _errorText(Object error) {
+    if (error is DioException) {
+      final data = error.response?.data;
+      final message = data is Map ? data['message'] : null;
+      if (message is String && message.isNotEmpty) {
+        return message;
+      }
+      return 'Network error. Please check your connection and try again.';
+    }
+    return 'Network error. Please try again.';
+  }
 
   Future<void> _submitAcceptance() async {
     if (!_allAccepted || _isSubmitting) return;
@@ -88,7 +101,7 @@ class _LegalReAcceptanceScreenState extends State<LegalReAcceptanceScreen> {
       }
     } catch (e) {
       setState(() {
-        _errorMessage = 'Network error. Please try again.';
+        _errorMessage = _errorText(e);
         _isSubmitting = false;
       });
     }

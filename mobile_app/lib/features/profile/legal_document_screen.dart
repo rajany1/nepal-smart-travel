@@ -13,7 +13,6 @@ class LegalDocumentScreen extends StatefulWidget {
 }
 
 class _LegalDocumentScreenState extends State<LegalDocumentScreen> {
-  String? _content;
   String? _title;
   bool _isLoading = true;
   bool _hasError = false;
@@ -63,13 +62,18 @@ class _LegalDocumentScreenState extends State<LegalDocumentScreen> {
       final apiClient = ApiClient.instance;
       final response = await apiClient.dio.get('/legal/${widget.type}');
       
-      if (response.statusCode == 200 && response.data['success'] == true) {
+      final data = response.data['data'];
+      final content = data is Map ? data['content'] as String? : null;
+
+      if (response.statusCode == 200 &&
+          response.data['success'] == true &&
+          content != null &&
+          content.trim().isNotEmpty) {
         setState(() {
-          _content = response.data['data']['content'];
-          _title = response.data['data']['title'];
+          _title = data['title'];
           _isLoading = false;
         });
-        _loadHtml(_content ?? '');
+        _loadHtml(content);
       } else {
         _loadFallbackContent();
       }

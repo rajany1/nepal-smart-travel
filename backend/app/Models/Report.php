@@ -92,6 +92,11 @@ class Report extends Model
         return $this->belongsTo(User::class);
     }
 
+    public function verifier(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'verified_by');
+    }
+
     public function category(): BelongsTo
     {
         return $this->belongsTo(ReportCategorie::class, 'category_id');

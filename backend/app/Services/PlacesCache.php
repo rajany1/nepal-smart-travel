@@ -49,17 +49,43 @@ class PlacesCache
      * Cache key for a viewport bbox query.
      *
      * Rounds bounds to 0.05° grid (~5.5 km cells) so nearby pan gestures
-     * share the same cache entry. Includes zoom bucket for density variants.
+     * share the same cache entry. The density bucket, limit, filters and
+     * viewer all change the payload, so each of them is part of the key;
+     * omitting them used to serve a 1000-row response to a 40-row request.
      */
-    public static function bboxKey(float $minLat, float $maxLat, float $minLng, float $maxLng, int $zoom): string
-    {
+    public static function bboxKey(
+        float $minLat,
+        float $maxLat,
+        float $minLng,
+        float $maxLng,
+        int $zoom,
+        int $limit = 0,
+        ?string $category = null,
+        ?string $search = null,
+        ?int $viewerId = null
+    ): string {
         $grid = 0.05; // 0.05° grid ≈ 5.5 km
         $gMinLat = round($minLat / $grid) * $grid;
         $gMaxLat = round($maxLat / $grid) * $grid;
         $gMinLng = round($minLng / $grid) * $grid;
         $gMaxLng = round($maxLng / $grid) * $grid;
-        $zoomBucket = (int) $zoom;
-        return "places:bbox:v" . self::version() . ":{$gMinLat},{$gMaxLat},{$gMinLng},{$gMaxLng}:z{$zoomBucket}";
+
+        // Only the density tier matters for the default limit; bucketing here
+        // keeps z7–z9 requests from fragmenting the cache on every zoom tick.
+        $density = match (true) {
+            $zoom >= 16 => 16,
+            $zoom >= 14 => 14,
+            $zoom >= 12 => 12,
+            $zoom >= 10 => 10,
+            default     => 7,
+        };
+
+        $filters = substr(sha1(($category ?? '-') . '|' . ($search ?? '-')), 0, 12);
+        $viewer = $viewerId ?? 0;
+
+        return "places:bbox:v" . self::version()
+            . ":{$gMinLat},{$gMaxLat},{$gMinLng},{$gMaxLng}"
+            . ":z{$density}:l{$limit}:f{$filters}:u{$viewer}";
     }
 
     /**

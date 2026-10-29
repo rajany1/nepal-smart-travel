@@ -5,6 +5,7 @@ namespace App\Jobs;
 use App\Services\BipadSyncService;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
+use Illuminate\Queue\Middleware\WithoutOverlapping;
 use Illuminate\Support\Facades\Log;
 
 class SyncBipadData implements ShouldQueue
@@ -21,6 +22,13 @@ class SyncBipadData implements ShouldQueue
     {
         $this->endpoint = $endpoint;
         $this->onQueue('bipad-sync');
+    }
+
+    public function middleware(): array
+    {
+        // Scheduler dispatches every minute; drop the new dispatch if the
+        // previous sync is still running so the queue can't pile up.
+        return [(new WithoutOverlapping('bipad-sync', 60, 300))->dontRelease()];
     }
 
     public function handle(BipadSyncService $syncService): void

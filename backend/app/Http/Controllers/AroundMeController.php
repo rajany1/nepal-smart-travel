@@ -192,7 +192,7 @@ class AroundMeController extends Controller
             'total_reviews' => $place->total_reviews,
             'is_verified' => $place->is_verified,
             'phone' => $place->phone,
-            'image_url' => $place->images->first()->image_url ?? null,
+            'image_url' => $place->galleryImages->first()?->displayUrl(),
         ];
     }
 

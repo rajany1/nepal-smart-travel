@@ -170,4 +170,35 @@ class Place extends Model
             ->values()
             ->all();
     }
+
+    /**
+     * Whether a detail view should queue background Wikimedia discovery.
+     *
+     * This only reads local state - it never performs an HTTP request.
+     */
+    public function needsImageDiscovery(): bool
+    {
+        if (!in_array((string) $this->source, (array) config('images.eligible_sources', []), true)) {
+            return false;
+        }
+
+        if ($this->image_discovery_status === self::IMAGE_STATUS_RUNNING) {
+            return false;
+        }
+
+        $min = (int) config('images.min_per_place', 3);
+        $approved = $this->relationLoaded('galleryImages')
+            ? $this->galleryImages->count()
+            : $this->galleryImages()->count();
+
+        if ($approved >= $min) {
+            return false;
+        }
+
+        if ($this->image_next_retry_at !== null && $this->image_next_retry_at->isFuture()) {
+            return false;
+        }
+
+        return true;
+    }
 }

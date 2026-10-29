@@ -22,6 +22,12 @@ class ReportProvider extends ChangeNotifier {
   List<rc.ReportCategoryOption> _featuredOptions = [];
   bool _isLoadingFeaturedOptions = false;
   ReportFormConfig? _formConfig;
+
+  /// In-memory form-config cache. The category picker and the quick-report
+  /// chips both open the same config, so repeat opens are instant instead of
+  /// showing another spinner for an endpoint we just fetched.
+  final Map<int, rc.ReportCategory> _formConfigCache = {};
+
   bool _isLoading = false;
   bool _isLoadingMore = false;
   bool _isLoadingMoreEmergency = false;
@@ -215,15 +221,30 @@ class ReportProvider extends ChangeNotifier {
   }
 
   /// Get category form configuration for dynamic form rendering
-  Future<rc.ReportCategory?> getCategoryFormConfig(int categoryId) async {
+  Future<rc.ReportCategory?> getCategoryFormConfig(int categoryId,
+      {bool forceRefresh = false}) async {
+    if (!forceRefresh) {
+      final cached = _formConfigCache[categoryId];
+      if (cached != null) return cached;
+    }
     try {
       final response = await _api.dio.get('/reports/categories/$categoryId/form-config');
       final data = response.data['data'] as Map<String, dynamic>? ?? {};
-      return rc.ReportCategory.fromJson(data);
+      final category = rc.ReportCategory.fromJson(data);
+      _formConfigCache[categoryId] = category;
+      return category;
     } catch (e) {
       print('⚠️ Failed to fetch category form config: $e');
       return null;
     }
+  }
+
+  /// Warm the form config for the featured options so the first tap on a
+  /// quick-report chip opens the form without another loading state.
+  Future<void> prefetchFeaturedFormConfigs() async {
+    final ids = _featuredOptions.map((o) => o.categoryId).toSet();
+    if (ids.isEmpty) return;
+    await Future.wait(ids.map((id) => getCategoryFormConfig(id)));
   }
 
   /// Increment category usage count (call when user selects a category)

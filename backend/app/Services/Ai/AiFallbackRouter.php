@@ -160,8 +160,8 @@ class AiFallbackRouter implements AiProviderInterface
             switch ($name) {
                 case 'groq':
                     $attempts[] = [
-                        'label' => 'groq:' . config('services.ai.model', 'qwen/qwen3.6-27b'),
-                        'provider' => new GroqService(config('services.ai.model', 'qwen/qwen3.6-27b')),
+                        'label' => 'groq:' . config('services.ai.model', 'qwen/qwen3.8-27b'),
+                        'provider' => new GroqService(config('services.ai.model', 'qwen/qwen3.8-27b')),
                     ];
                     break;
 

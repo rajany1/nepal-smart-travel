@@ -7,18 +7,24 @@ class PlaceDetailsProvider extends ChangeNotifier {
   final ApiClient _api = ApiClient.instance;
 
   Place? _currentPlace;
+  String? _currentPlaceId;
   List<Review> _reviews = [];
+  String? _reviewsPlaceId;
   bool _isLoading = false;
   bool _isLoadingReviews = false;
   String? _errorMessage;
   
-  Place? get currentPlace => _currentPlace;
+  Place? get currentPlace =>
+      _currentPlace != null && _currentPlace!.id == _currentPlaceId
+          ? _currentPlace
+          : null;
   List<Review> get reviews => _reviews;
   bool get isLoading => _isLoading;
   bool get isLoadingReviews => _isLoadingReviews;
   String? get errorMessage => _errorMessage;
 
   Future<void> fetchPlaceDetails(String placeId) async {
+    _currentPlaceId = placeId;
     _isLoading = true;
     _errorMessage = null;
     notifyListeners();
@@ -29,9 +35,12 @@ class PlaceDetailsProvider extends ChangeNotifier {
       
       if (data != null) {
         _currentPlace = Place.fromJson(data);
+      } else {
+        _currentPlace = null;
       }
     } catch (e) {
       print('❌ Failed to fetch place details: $e');
+      _currentPlace = null;
       _errorMessage = 'Failed to load place details';
     }
 
@@ -40,6 +49,12 @@ class PlaceDetailsProvider extends ChangeNotifier {
   }
 
   Future<void> fetchPlaceReviews(String placeId) async {
+    // Drop the previous place's reviews immediately; otherwise opening a new
+    // place shows the old reviews until the request lands.
+    if (_reviewsPlaceId != placeId) {
+      _reviews = [];
+      _reviewsPlaceId = placeId;
+    }
     _isLoadingReviews = true;
     notifyListeners();
 
@@ -91,7 +106,9 @@ class PlaceDetailsProvider extends ChangeNotifier {
 
   void clearDetails() {
     _currentPlace = null;
+    _currentPlaceId = null;
     _reviews = [];
+    _reviewsPlaceId = null;
     _errorMessage = null;
     notifyListeners();
   }

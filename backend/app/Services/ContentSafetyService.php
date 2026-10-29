@@ -343,13 +343,16 @@ class ContentSafetyService
             $account = 'active';
             $warning = 'Your content was flagged. Continue using clean language or you will be suspended.';
         } elseif ($level === 2) {
-            $days = (int) GameSetting::getValue('safety_suspend_days', 1);
-            $until = Carbon::now()->addDays($days);
-            $user->update(['status' => 'suspended', 'suspended_until' => $until]);
+            // The admin settings page exposes suspension length in hours.
+            $hours = max(1, (int) GameSetting::getValue('safety_suspend_hours', 24));
+            $until = Carbon::now()->addHours($hours);
+            // status is intentionally not mass-assignable on User, so an
+            // update() here would be silently ignored.
+            $user->forceFill(['status' => 'suspended', 'suspended_until' => $until])->save();
             $account = 'suspended';
             $warning = 'You have been temporarily suspended for repeated policy violations.';
         } elseif ($level === 3) {
-            $user->update(['status' => 'banned', 'suspended_until' => null]);
+            $user->forceFill(['status' => 'banned', 'suspended_until' => null])->save();
             $account = 'banned';
             $warning = 'Your account has been permanently banned.';
         }
@@ -375,7 +378,12 @@ class ContentSafetyService
 
     private function banAtStrikes(): int
     {
-        return (int) GameSetting::getValue('safety_ban_at_strikes', 3);
+        // The seeded/legacy key is safety_block_at_strikes; accept the newer
+        // safety_ban_at_strikes key first so either setting works.
+        return (int) GameSetting::getValue(
+            'safety_ban_at_strikes',
+            GameSetting::getValue('safety_block_at_strikes', 3)
+        );
     }
 
     private function censorKeep(): int
@@ -462,6 +470,25 @@ class ContentSafetyService
         ]);
         $result = $this->applyStrikePolicy($user);
 
+        // An explicit admin action must do what the button says: a "Block" on
+        // a clean account is only the first strike, but it still has to ban.
+        // Suspensions never downgrade a ban already applied by the ladder.
+        if ($level === 'suspend' && $result['account'] === 'active') {
+            $hours = max(1, (int) GameSetting::getValue('safety_suspend_hours', 24));
+            $until = Carbon::now()->addHours($hours);
+            $user->forceFill(['status' => 'suspended', 'suspended_until' => $until])->save();
+            $result['account'] = 'suspended';
+            $result['level'] = max(2, (int) $result['level']);
+            $result['until'] = $until->toDateTimeString();
+            $result['warning'] ??= 'You have been temporarily suspended for repeated policy violations.';
+        } elseif ($level === 'block' && $result['account'] !== 'banned') {
+            $user->forceFill(['status' => 'banned', 'suspended_until' => null])->save();
+            $result['account'] = 'banned';
+            $result['level'] = 3;
+            $result['until'] = null;
+            $result['warning'] = 'Your account has been permanently banned.';
+        }
+
         // System-generated account notice to the punished user.
         $title = match ($level) {
             'block' => 'Account Banned - Nepal Smart Travel',
@@ -478,7 +505,7 @@ class ContentSafetyService
      */
     public function activate(User $user): void
     {
-        $user->update(['status' => 'active', 'suspended_until' => null]);
+        $user->forceFill(['status' => 'active', 'suspended_until' => null])->save();
     }
 
     /**

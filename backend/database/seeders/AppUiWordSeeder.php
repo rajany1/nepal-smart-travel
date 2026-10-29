@@ -222,6 +222,20 @@ class AppUiWordSeeder extends Seeder
             'Yearly' => 'वार्षिक',
             'Thanks' => 'धन्यवाद',
 
+            // leaderboard
+            'Earnings' => 'कमाइ',
+            'Coins' => 'सिक्का',
+            'XP' => 'XP',
+            'pts' => 'अंक',
+            'Top 10' => 'शीर्ष १०',
+            'Map Contribution' => 'नक्सा योगदान',
+            'Top Contributors' => 'शीर्ष योगदानकर्ताहरू',
+            'Your Rank' => 'तपाईंको क्रम',
+            'Your position among all contributors' => 'सबै योगदानकर्ताहरूमाझ तपाईंको स्थान',
+            'Only the top 10 are listed' => 'शीर्ष १० मात्र सूचीबद्ध छन्',
+            'You' => 'तपाईं',
+            'No rankings available yet' => 'अहिलेसम्म कुनै क्रम उपलब्ध छैन',
+
             // misc
             'Chat' => 'च्याट',
             'Type a message...' => 'सन्देश लेख्नुहोस्...',
